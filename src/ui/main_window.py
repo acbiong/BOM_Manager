@@ -82,8 +82,7 @@ class BomWindow(QMainWindow):
  def manage_alternates(self):
   it=self.tree.currentItem(); d=it.data(0,Qt.UserRole) if it else None
   if not d or not d.get('id'): QMessageBox.information(self,'提示','请先选择BOM物料'); return
-  rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'增加替代料','物料',items,0,False)
-  if ok: self.svc.add_alternate(d['id'],rows[items.index(x)]['id']); QMessageBox.information(self,'完成','替代料已增加')
+  dlg=AlternateDialog(self.svc,d['id'],self); dlg.exec_()
  def import_bom(self):
   p=QFileDialog.getOpenFileName(self,'导入BOM','','Excel (*.xlsx)')[0]
   if p:
@@ -133,3 +132,19 @@ class ProjectDialog(QDialog):
    w=QLineEdit(str((row or {}).get(k,''))); self.e[k]=w; f.addRow(l,w)
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self): return {k:w.text().strip() for k,w in self.e.items()}
+
+class AlternateDialog(QDialog):
+ def __init__(self,svc,item_id,parent=None):
+  super().__init__(parent); self.svc=svc; self.item_id=item_id; self.setWindowTitle('替代料管理'); self.resize(700,350); v=QVBoxLayout(self); self.t=QTableWidget(); self.t.setColumnCount(6); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','描述','制造商','MPN']); v.addWidget(self.t); h=QHBoxLayout(); add=QPushButton('增加替代料'); add.clicked.connect(self.add); dele=QPushButton('删除选中'); dele.clicked.connect(self.remove); close=QPushButton('关闭'); close.clicked.connect(self.accept); h.addWidget(add); h.addWidget(dele); h.addWidget(close); v.addLayout(h); self.refresh()
+ def refresh(self):
+  rs=self.svc.alternates(self.item_id); self.t.setRowCount(len(rs))
+  for i,r in enumerate(rs):
+   for j,k in enumerate(['base_code','version','name','description','manufacturer','mpn']): self.t.setItem(i,j,QTableWidgetItem(str(r[k] or '')))
+ def add(self):
+  rs=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rs]; x,ok=QInputDialog.getItem(self,'增加替代料','选择物料',items,0,False)
+  if ok:self.svc.add_alternate(self.item_id,rs[items.index(x)]['id']); self.refresh()
+ def remove(self):
+  row=self.t.currentRow()
+  if row<0:return
+  aid=self.svc.alternates(self.item_id)[row]['id']
+  if QMessageBox.question(self,'确认','删除替代料？')==QMessageBox.Yes:self.svc.remove_alternate(aid); self.refresh()

@@ -8,5 +8,8 @@ from services.services import Services
 from ui.main_window import MainWindow
 VERSION='0.0.1'
 def main():
- base=Path(__file__).resolve().parents[1]; cfg=ConfigService(base).load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema(); app=QApplication(sys.argv); w=MainWindow(Services(db),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
+ base=Path(__file__).resolve().parents[1]; cfg=ConfigService(base).load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema(); app=QApplication(sys.argv);
+ if not valid:
+  QMessageBox.warning(None,'数据库结构异常','缺少数据表：'+','.join(missing)+'，将自动修复。'); db.recreate_schema()
+ w=MainWindow(Services(db),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
 if __name__=='__main__':sys.exit(main())
