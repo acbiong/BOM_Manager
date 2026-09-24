@@ -1,5 +1,5 @@
 """程序入口：初始化SQLite和PyQt主窗口，冻结模式下将配置写入可执行文件目录。编辑时间：2026-09-24。"""
-import sys, traceback
+import sys, os, traceback
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from config.config_service import ConfigService
@@ -9,7 +9,11 @@ from ui.main_window import MainWindow
 from version import get_version
 VERSION=get_version()
 def app_base():
- return Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]
+ if getattr(sys,'frozen',False):
+  # AppImage挂载目录只读，APPIMAGE指向用户实际启动的AppImage文件
+  image_path=os.environ.get('APPIMAGE')
+  return Path(image_path).resolve().parent if image_path else Path(sys.executable).resolve().parent
+ return Path(__file__).resolve().parents[1]
 def main():
  app=QApplication(sys.argv); base=app_base()
  try:
