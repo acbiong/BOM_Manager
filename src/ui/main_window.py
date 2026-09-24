@@ -22,7 +22,9 @@ class MainWindow(QMainWindow):
   self.statusBar().showMessage(f'共计{len(rows)}个SKU | 版本 {self.version}')
  def select_database(self):
   p=QFileDialog.getSaveFileName(self,'选择SQLite数据库','bom.db','SQLite (*.db)')[0]
-  if p: QMessageBox.information(self,'配置已保存','数据库路径已选择，请重启软件后生效：'+p)
+  if p:
+   from config.config_service import ConfigService
+   c=ConfigService().load(); c['database']['path']=p; ConfigService().save(c); QMessageBox.information(self,'配置已保存','数据库路径已选择，请重启软件后生效：'+p)
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库','资料库.xlsx','Excel (*.xlsx)')[0]
   if p:self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
