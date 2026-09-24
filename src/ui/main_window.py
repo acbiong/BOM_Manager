@@ -149,7 +149,14 @@ class BomWindow(QMainWindow):
 class MaterialWindow(QMainWindow):
  def __init__(self,svc,parent=None):
   super().__init__(parent); self.svc=svc; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
-  menu=self.menuBar().addMenu('物料库'); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('刷新'); a.triggered.connect(self.refresh); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['序号','基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','呆滞物料']); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.refresh()
+  menu=self.menuBar().addMenu('物料库'); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('刷新'); a.triggered.connect(self.refresh); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['序号','基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','呆滞物料']); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current); self.refresh()
+ def edit_current(self,row,column):
+  rs=self.svc.materials();
+  if row<0 or row>=len(rs): return
+  r=rs[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
+  if dlg.exec_():
+   try:self.svc.update_material(r['id'],dlg.data()); self.refresh()
+   except Exception as e: QMessageBox.warning(self,'保存失败',str(e))
  def menu(self,pos):
   row=self.t.rowAt(pos.y())
   if row<0:return
