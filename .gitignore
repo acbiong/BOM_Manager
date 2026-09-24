@@ -21,3 +21,4 @@ package/BOM管理系统_*
 package/*.tar.gz
 package/*.sha256
 release/
+AppDir/
