@@ -31,6 +31,33 @@ class Services:
    self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
    for n,x in enumerate(items): self.db.conn.execute('INSERT INTO bom_items(bom_root_id,parent_item_id,material_id,quantity,unit,position,level_no,remark,sort_no) VALUES(?,?,?,?,?,?,?,?,?)',(root,x.get('parent_item_id'),x['material_id'],x['quantity'],x['unit'],x.get('position',''),x.get('level_no',1),x.get('remark',''),n))
    self.db.conn.execute('UPDATE materials SET has_bom=1 WHERE id=?',(root,)); self.log('bom',root,'update',f'{len(items)}行')
+ def import_bom(self,path,root=None):
+  required=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
+  wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; hs=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]; miss=[x for x in required if x not in hs]
+  if miss: raise ValueError('缺少表头：'+ '、'.join(miss))
+  ix={h:i for i,h in enumerate(hs)}; rows=[]
+  for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
+   d={k:str(row[i] or '').strip() for k,i in ix.items()}; p=self.db.conn.execute('SELECT id FROM materials WHERE base_code=? AND version=?',(d['父项物料编码'],d['父项版本号'])).fetchone(); m=self.db.conn.execute('SELECT id,unit FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
+   if not p or not m: raise ValueError(f'第{no}行父项或物料不存在')
+   try:q=float(d['物料数量'])
+   except: raise ValueError(f'第{no}行数量不合法')
+   rows.append({'parent_item_id':None,'material_id':m['id'],'quantity':q,'unit':m['unit'],'position':d['位置'],'level_no':1})
+  if root is None and rows: root=p['id']
+  if root and rows:self.save_bom(root,rows)
+  return len(rows)
+ def update_project(self,d):
+  with self.db.transaction(): self.db.conn.execute('UPDATE project SET project_name=?,project_code=?,product_name=?,product_model=? WHERE id=1',(d.get('project_name',''),d.get('project_code',''),d.get('product_name',''),d.get('product_model',''))); self.log('project',1,'update',d.get('project_name',''))
+ def project(self): return self.db.conn.execute('SELECT * FROM project WHERE id=1').fetchone()
+ def change_material_version(self,i,new_version):
+  if not new_version: raise ValueError('版本号不能为空')
+  old=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
+  if self.db.conn.execute('SELECT 1 FROM materials WHERE base_code=? AND version=?',(old['base_code'],new_version)).fetchone(): raise ValueError('目标版本已存在')
+  with self.db.transaction(): self.db.conn.execute('UPDATE materials SET version=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(new_version,i)); self.log('material',i,'version',f'{old["version"]}->{new_version}')
+ def add_alternate(self,bom_item_id,material_id):
+  with self.db.transaction(): self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,COALESCE((SELECT MAX(sort_no)+1 FROM alternates WHERE bom_item_id=?),0))',(bom_item_id,material_id,bom_item_id))
+ def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
+ def remove_alternate(self,aid):
+  with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
  def import_materials(self,path):
   required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']
   wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; headers=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]

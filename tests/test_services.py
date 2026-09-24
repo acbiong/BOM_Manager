@@ -17,4 +17,7 @@ class TestServices(unittest.TestCase):
  def test_delete_reference_blocked(self):
   a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); self.s.save_bom(a,[{'material_id':b,'quantity':1,'unit':'pcs'}])
   with self.assertRaises(ValueError): self.s.delete_material(b)
+ def test_bom_import_and_project(self):
+     from openpyxl import Workbook
+     p=self.f.name+'-bom.xlsx'; a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); w=Workbook(); w.active.append(['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']); w.active.append(['A','1','B','1','3','P1']); w.save(p); self.assertEqual(self.s.import_bom(p,a),1); self.assertEqual(self.s.bom(a)[0]['quantity'],3); self.s.update_project({'project_name':'项目'}); self.assertEqual(self.s.project()['project_name'],'项目'); os.unlink(p)
 if __name__=='__main__': unittest.main()
