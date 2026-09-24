@@ -83,7 +83,18 @@ class BomWindow(QMainWindow):
 
 class MaterialWindow(QMainWindow):
  def __init__(self,svc,parent=None):
-  super().__init__(parent); self.svc=svc; self.setWindowTitle('物料库'); self.resize(1000,600); self.t=QTableWidget(); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['序号','基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','呆滞物料']); self.setCentralWidget(self.t); self.refresh()
+  super().__init__(parent); self.svc=svc; self.setWindowTitle('物料库'); self.resize(1000,600); self.t=QTableWidget(); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['序号','基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','呆滞物料']); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.refresh()
+ def menu(self,pos):
+  row=self.t.rowAt(pos.y())
+  if row<0:return
+  m=QMenu(self); e=m.addAction('编辑物料'); d=m.addAction('删除物料'); a=m.exec_(self.t.viewport().mapToGlobal(pos))
+  rid=self.svc.materials()[row]['id']
+  if a==e:
+   r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn']}); dlg.e['base_code'].setReadOnly(True); dlg.e['version'].setReadOnly(True)
+   if dlg.exec_(): self.svc.update_material(rid,dlg.data()); self.refresh()
+  elif a==d and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
+   try:self.svc.delete_material(rid); self.refresh()
+   except Exception as ex: QMessageBox.warning(self,'无法删除',str(ex))
  def refresh(self):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):

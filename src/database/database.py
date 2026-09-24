@@ -1,4 +1,4 @@
-"""数据库访问层：默认SQLite离线运行，支持通过配置扩展MySQL；输入SQL参数，输出查询结果。编辑时间：2026-09-24。"""
+"""数据库访问层：SQLite本地数据库，支持同目录文件配置；输入SQL参数，输出查询结果。编辑时间：2026-09-24。"""
 import sqlite3
 from contextlib import contextmanager
 class Database:
@@ -9,12 +9,4 @@ class Database:
  def transaction(self):
   try: yield self.conn; self.conn.commit()
   except: self.conn.rollback(); raise
- def close(self): self.conn.close()
-
-class MySQLDatabase:
- """MySQL连接适配器。需要PyMySQL；接口与Database兼容，用于Deepin部署。"""
- def __init__(self,host,port,user,password,name):
-  try: import pymysql
-  except ImportError as e: raise RuntimeError('MySQL模式需要安装PyMySQL') from e
-  self.conn=pymysql.connect(host=host,port=int(port),user=user,password=password,database=name,autocommit=False,cursorclass=pymysql.cursors.DictCursor)
  def close(self): self.conn.close()
