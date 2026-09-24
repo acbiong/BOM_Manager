@@ -59,12 +59,26 @@ class MainWindow(QMainWindow):
   if p:
    from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.save(p)
 class BomWindow(QMainWindow):
- def __init__(self,svc,root,parent=None): super().__init__(parent); self.svc=svc; self.root=root; self.setWindowTitle('BOM管理'); self.resize(900,600); self.dirty=False; self.tree=QTreeWidget(); self.tree.setHeaderLabels(['物料','数量','单位','位置']); self.info=QTextEdit(); self.info.setReadOnly(True); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(self.info); self.setCentralWidget(spl); tb=self.addToolBar('BOM'); save=QAction('保存',self); save.triggered.connect(self.save); tb.addAction(save); add=QAction('新增物料',self); add.triggered.connect(self.add); tb.addAction(add); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); self.load()
+ def __init__(self,svc,root,parent=None): super().__init__(parent); self.svc=svc; self.root=root; self.setWindowTitle('BOM管理'); self.resize(900,600); self.dirty=False; self.tree=QTreeWidget(); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料','数量','单位','位置']); self.info=QTextEdit(); self.info.setReadOnly(True); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(self.info); self.setCentralWidget(spl); tb=self.addToolBar('BOM'); save=QAction('保存',self); save.triggered.connect(self.save); tb.addAction(save); add=QAction('新增物料',self); add.triggered.connect(self.add); tb.addAction(add); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); alt=QAction('替代料',self); alt.triggered.connect(self.manage_alternates); tb.addAction(alt); self.load()
+ def context_menu(self,pos):
+  it=self.tree.itemAt(pos)
+  if not it:return
+  m=QMenu(self); edit=m.addAction('编辑数量/位置'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos)); d=it.data(0,Qt.UserRole) or {}
+  if act==edit:
+   q,ok=QInputDialog.getDouble(self,'编辑数量','数量',float(it.text(1)),0.0001,1e12,4)
+   if ok: it.setText(1,str(q)); self.dirty=True
+  elif act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
+   self.svc.delete_bom_item(d.get('id')); self.load()
  def load(self):
   self.tree.clear(); rows=self.svc.bom(self.root); by={};
   for r in rows:
    parent=by.get(r['parent_item_id']); item=QTreeWidgetItem(parent or self.tree,[f"{r['base_code']}-{r['version']} {r['name']}",str(r['quantity']),r['unit'],r['position']]); item.setData(0,Qt.UserRole,dict(r)); by[r['id']]=item
   self.tree.itemClicked.connect(lambda i,c:self.info.setPlainText(str(i.data(0,Qt.UserRole))))
+ def manage_alternates(self):
+  it=self.tree.currentItem(); d=it.data(0,Qt.UserRole) if it else None
+  if not d or not d.get('id'): QMessageBox.information(self,'提示','请先选择BOM物料'); return
+  rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'增加替代料','物料',items,0,False)
+  if ok: self.svc.add_alternate(d['id'],rows[items.index(x)]['id']); QMessageBox.information(self,'完成','替代料已增加')
  def import_bom(self):
   p=QFileDialog.getOpenFileName(self,'导入BOM','','Excel (*.xlsx)')[0]
   if p:
@@ -79,7 +93,14 @@ class BomWindow(QMainWindow):
   rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'增加物料','物料',items,0,False)
   if ok:
    self.svc.save_bom(self.root,[*[(dict(r)) for r in self.svc.bom(self.root)],{'material_id':rows[items.index(x)]['id'],'quantity':1,'unit':rows[items.index(x)]['unit'],'level_no':1}]); self.load()
- def save(self): QMessageBox.information(self,'保存','BOM已保存')
+ def save(self):
+  rows=[]
+  for i in range(self.tree.topLevelItemCount()):
+   def walk(it):
+    d=it.data(0,Qt.UserRole) or {}; d['quantity']=float(it.text(1)); d['position']=it.text(3); rows.append(d)
+    for j in range(it.childCount()): walk(it.child(j))
+   walk(self.tree.topLevelItem(i))
+  self.svc.save_bom(self.root,rows); self.dirty=False; QMessageBox.information(self,'保存','BOM已保存')
 
 class MaterialWindow(QMainWindow):
  def __init__(self,svc,parent=None):

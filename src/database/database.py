@@ -9,4 +9,10 @@ class Database:
  def transaction(self):
   try: yield self.conn; self.conn.commit()
   except: self.conn.rollback(); raise
+ def validate_schema(self):
+  required={'materials','skus','bom_items','alternates','change_logs','project'}
+  got={r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+  return required.issubset(got), sorted(required-got)
+ def recreate_schema(self):
+  self.create_schema(); return self.validate_schema()[0]
  def close(self): self.conn.close()
