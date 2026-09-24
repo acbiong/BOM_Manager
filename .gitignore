@@ -11,3 +11,13 @@ dist/
 *.db
 config.ini
 *.pyc
+
+# 编译与打包生成物
+.pyinstaller/
+*.toc
+*.manifest
+*.map
+package/BOM管理系统_*
+package/*.tar.gz
+package/*.sha256
+release/
