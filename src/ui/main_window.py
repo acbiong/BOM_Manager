@@ -123,7 +123,7 @@ class BomWindow(QMainWindow):
   if act in (same,child): self.add_relative(d, act==child); return
   if act==edit:
    q,ok=QInputDialog.getDouble(self,'编辑数量','数量',float(it.text(1)),0.0001,1e12,4)
-   if ok: it.setText(1,str(q)); self.dirty=True
+   if ok: it.setText(1,str(q)); d['quantity']=q; it.setData(0,Qt.UserRole,d); self.dirty=True; self.tree.setCurrentItem(it); self.show_item_info(it)
   elif act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    parent=it.parent(); it.parent().removeChild(it) if parent else self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(it)); self.current_item=None; self.dirty=True; self.root_item.setSelected(True); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
  def load(self):
@@ -147,12 +147,15 @@ class BomWindow(QMainWindow):
     for j,k in enumerate(['base_code','version','name','description','manufacturer','mpn']): self.alt_table.setItem(row,j,QTableWidgetItem(str(r[k] or '')))
  def update_tree_field(self,key,value):
   if self._loading_fields or self.current_item is None or self.current_item is getattr(self,'root_item',None): return
-  col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); self.dirty=True
+  col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); d=self.current_item.data(0,Qt.UserRole) or {}; d[key]=float(value) if key=='quantity' and value else value; self.current_item.setData(0,Qt.UserRole,d); self.dirty=True
  def add_relative(self,parent,child):
-  rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
+  target=self.by.get(parent.get('id'),self.root_item) if child else (self.by.get(parent.get('parent_item_id'),self.root_item) or self.root_item)
+  used={target.child(i).data(0,Qt.UserRole).get('material_id') for i in range(target.childCount()) if target.child(i).data(0,Qt.UserRole)}
+  rows=[r for r in self.svc.materials() if r['id'] not in used]; items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]
+  if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
+  x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
   r=rows[items.index(x)]; data={'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}
-  target=self.by.get(parent.get('id'),self.root_item) if child else (self.by.get(parent.get('parent_item_id'),self.root_item) or self.root_item)
   item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1',r['unit'],'','']); item.setData(0,Qt.UserRole,data); self.by[0]=item; target.setExpanded(True); self.dirty=True; self.tree.setCurrentItem(item); self.show_item_info(item)
  def manage_alternates(self):
   it=self.tree.currentItem(); d=it.data(0,Qt.UserRole) if it else None
