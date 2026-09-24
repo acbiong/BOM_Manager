@@ -107,8 +107,14 @@ class BomWindow(QMainWindow):
  def context_menu(self,pos):
   it=self.tree.itemAt(pos)
   if not it:return
-  if it is getattr(self,'root_item',None): return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); edit=m.addAction('编辑数量/位置'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos)); d=it.data(0,Qt.UserRole) or {}
+  d=it.data(0,Qt.UserRole) or {}
+  if it is getattr(self,'root_item',None):
+   m=QMenu(self); delete_sku=m.addAction('删除SKU'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+   if act==delete_sku and QMessageBox.question(self,'确认','删除当前SKU及对应BOM？')==QMessageBox.Yes:
+    row=self.svc.db.conn.execute('SELECT id FROM skus WHERE material_id=?',(self.root,)).fetchone()
+    if row:self.svc.delete_sku(row['id']); self.close()
+   return
+  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); edit=m.addAction('编辑数量/位置'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
   if act in (same,child): self.add_relative(d, act==child); return
   if act==edit:
    q,ok=QInputDialog.getDouble(self,'编辑数量','数量',float(it.text(1)),0.0001,1e12,4)
@@ -123,6 +129,8 @@ class BomWindow(QMainWindow):
   self.tree.itemClicked.connect(self.show_item_info)
  def show_item_info(self,item,column=0):
   d=item.data(0,Qt.UserRole) or {}
+  if d.get('root'):
+   r=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone(); d=dict(r) if r else d
   for k in self.fields: self.fields[k].setText(str(d.get(k,'') or ''))
   self.alt_table.setRowCount(0)
   if d.get('id'):
