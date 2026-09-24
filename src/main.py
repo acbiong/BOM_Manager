@@ -3,10 +3,10 @@ import sys
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication,QMessageBox
 from config.config_service import ConfigService
-from database.database import Database
+from database.database import Database,MySQLDatabase
 from services.services import Services
 from ui.main_window import MainWindow
 VERSION='0.0.1'
 def main():
- base=Path(__file__).resolve().parents[1]; cfg=ConfigService(base).load(); db=Database(cfg['database']['path']); app=QApplication(sys.argv); w=MainWindow(Services(db),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
+ base=Path(__file__).resolve().parents[1]; cfg=ConfigService(base).load(); db=Database(cfg['database']['path']) if cfg['database'].get('driver','sqlite')!='mysql' else MySQLDatabase(cfg['database']['host'],cfg['database']['port'],cfg['database'].get('user','root'),cfg['database'].get('password',''),cfg['database']['name']); app=QApplication(sys.argv); w=MainWindow(Services(db),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
 if __name__=='__main__':sys.exit(main())

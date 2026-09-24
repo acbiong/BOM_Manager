@@ -20,4 +20,7 @@ class TestServices(unittest.TestCase):
  def test_bom_import_and_project(self):
      from openpyxl import Workbook
      p=self.f.name+'-bom.xlsx'; a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); w=Workbook(); w.active.append(['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']); w.active.append(['A','1','B','1','3','P1']); w.save(p); self.assertEqual(self.s.import_bom(p,a),1); self.assertEqual(self.s.bom(a)[0]['quantity'],3); self.s.update_project({'project_name':'项目'}); self.assertEqual(self.s.project()['project_name'],'项目'); os.unlink(p)
+ def test_bom_consistency_and_sku_version(self):
+  from openpyxl import Workbook
+  a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); self.s.save_bom(a,[{'material_id':b,'quantity':2,'unit':'pcs','position':'P'}]); same,detail=self.s.validate_bom_rows(a,[{'material_id':b,'quantity':2,'unit':'pcs','position':'P'}]); self.assertTrue(same); sid=self.s.create_sku(a); self.s.change_sku_version(sid,'2'); self.assertEqual(self.s.skus()[0]['version'],'2')
 if __name__=='__main__': unittest.main()

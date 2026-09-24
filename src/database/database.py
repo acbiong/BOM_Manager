@@ -10,3 +10,11 @@ class Database:
   try: yield self.conn; self.conn.commit()
   except: self.conn.rollback(); raise
  def close(self): self.conn.close()
+
+class MySQLDatabase:
+ """MySQL连接适配器。需要PyMySQL；接口与Database兼容，用于Deepin部署。"""
+ def __init__(self,host,port,user,password,name):
+  try: import pymysql
+  except ImportError as e: raise RuntimeError('MySQL模式需要安装PyMySQL') from e
+  self.conn=pymysql.connect(host=host,port=int(port),user=user,password=password,database=name,autocommit=False,cursorclass=pymysql.cursors.DictCursor)
+ def close(self): self.conn.close()

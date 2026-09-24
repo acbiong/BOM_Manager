@@ -31,6 +31,20 @@ class Services:
    self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
    for n,x in enumerate(items): self.db.conn.execute('INSERT INTO bom_items(bom_root_id,parent_item_id,material_id,quantity,unit,position,level_no,remark,sort_no) VALUES(?,?,?,?,?,?,?,?,?)',(root,x.get('parent_item_id'),x['material_id'],x['quantity'],x['unit'],x.get('position',''),x.get('level_no',1),x.get('remark',''),n))
    self.db.conn.execute('UPDATE materials SET has_bom=1 WHERE id=?',(root,)); self.log('bom',root,'update',f'{len(items)}行')
+ def validate_bom_rows(self,root,rows):
+  """校验导入BOM与现有结构的子项、数量、位置一致性。"""
+  old={(x['material_id'],str(x['position'])):float(x['quantity']) for x in self.bom(root)}; new={(x['material_id'],str(x.get('position',''))):float(x['quantity']) for x in rows}
+  return old==new, {'missing':list(set(old)-set(new)),'extra':list(set(new)-set(old))}
+ def change_sku_version(self,sid,new_version):
+  r=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
+  if not r: raise ValueError('SKU不存在')
+  self.change_material_version(r['material_id'],new_version)
+  self.log('sku',sid,'version',new_version)
+ def delete_bom_item(self,bom_item_id):
+  r=self.db.conn.execute('SELECT bom_root_id,material_id FROM bom_items WHERE id=?',(bom_item_id,)).fetchone()
+  if not r:return
+  with self.db.transaction():
+   self.db.conn.execute('DELETE FROM bom_items WHERE id=?',(bom_item_id,)); self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(bom_item_id,)); self.log('bom',r['bom_root_id'],'delete',f'删除行{bom_item_id}')
  def import_bom(self,path,root=None):
   required=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
   wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; hs=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]; miss=[x for x in required if x not in hs]
