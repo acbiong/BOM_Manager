@@ -24,6 +24,12 @@ Icon=bom管理系统
 Type=Application
 Categories=Office;
 EOF
+if [ ! -f AppDir/bom管理系统.png ] && command -v python3 >/dev/null 2>&1; then
+ python3 - <<'PYICON'
+from PIL import Image,ImageDraw
+im=Image.new('RGBA',(256,256),(35,104,180,255)); ImageDraw.Draw(im).text((64,100),'BOM',fill='white'); im.save('AppDir/bom管理系统.png')
+PYICON
+fi
 cat > AppDir/usr/share/applications/bom管理系统.desktop <<EOF
 [Desktop Entry]
 Name=BOM管理系统
@@ -33,7 +39,7 @@ Type=Application
 Categories=Office;
 EOF
 if command -v appimagetool >/dev/null 2>&1; then
- appimagetool AppDir "package/${name}.AppImage"
+ APPIMAGE_EXTRACT_AND_RUN=1 appimagetool --runtime-file "${APPIMAGE_RUNTIME:-$HOME/.local/bin/runtime-x86_64}" AppDir "package/${name}.AppImage"
  sha256sum "package/${name}.AppImage" > "package/${name}.AppImage.sha256"
  echo "AppImage: package/${name}.AppImage"
 else
