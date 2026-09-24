@@ -63,7 +63,8 @@ class BomWindow(QMainWindow):
  def context_menu(self,pos):
   it=self.tree.itemAt(pos)
   if not it:return
-  m=QMenu(self); edit=m.addAction('编辑数量/位置'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos)); d=it.data(0,Qt.UserRole) or {}
+  m=QMenu(self); same=m.addAction('新建同级物料'); child=m.addAction('新建下级物料'); edit=m.addAction('编辑数量/位置'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos)); d=it.data(0,Qt.UserRole) or {}
+  if act in (same,child): self.add_relative(d, act==child); return
   if act==edit:
    q,ok=QInputDialog.getDouble(self,'编辑数量','数量',float(it.text(1)),0.0001,1e12,4)
    if ok: it.setText(1,str(q)); self.dirty=True
@@ -74,6 +75,10 @@ class BomWindow(QMainWindow):
   for r in rows:
    parent=by.get(r['parent_item_id']); item=QTreeWidgetItem(parent or self.tree,[f"{r['base_code']}-{r['version']} {r['name']}",str(r['quantity']),r['unit'],r['position']]); item.setData(0,Qt.UserRole,dict(r)); by[r['id']]=item
   self.tree.itemClicked.connect(lambda i,c:self.info.setPlainText(str(i.data(0,Qt.UserRole))))
+ def add_relative(self,parent,child):
+  rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
+  if not ok:return
+  r=rows[items.index(x)]; existing=[dict(z) for z in self.svc.bom(self.root)]; existing.append({'material_id':r['id'],'quantity':1,'unit':r['unit'],'position':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}); self.svc.save_bom(self.root,existing); self.load()
  def manage_alternates(self):
   it=self.tree.currentItem(); d=it.data(0,Qt.UserRole) if it else None
   if not d or not d.get('id'): QMessageBox.information(self,'提示','请先选择BOM物料'); return

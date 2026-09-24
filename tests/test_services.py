@@ -25,4 +25,6 @@ class TestServices(unittest.TestCase):
   a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); self.s.save_bom(a,[{'material_id':b,'quantity':2,'unit':'pcs','position':'P'}]); same,detail=self.s.validate_bom_rows(a,[{'material_id':b,'quantity':2,'unit':'pcs','position':'P'}]); self.assertTrue(same); sid=self.s.create_sku(a); self.s.change_sku_version(sid,'2'); self.assertEqual(self.s.skus()[0]['version'],'2')
  def test_sqlite_schema_validation(self):
   ok,missing=self.s.db.validate_schema(); self.assertTrue(ok); self.assertEqual(missing,[])
+ def test_alternate_crud(self):
+  a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); c=self.s.create_material({'base_code':'C','version':'1','name':'C','unit':'pcs'}); self.s.save_bom(a,[{'material_id':b,'quantity':1,'unit':'pcs'}]); bid=self.s.bom(a)[0]['id']; self.s.add_alternate(bid,c); self.assertEqual(len(self.s.alternates(bid)),1); self.s.remove_alternate(self.s.alternates(bid)[0]['id']); self.assertEqual(len(self.s.alternates(bid)),0)
 if __name__=='__main__': unittest.main()
