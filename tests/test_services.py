@@ -30,4 +30,7 @@ class TestServices(unittest.TestCase):
  def test_recursive_delete_and_event_bus(self):
   from infrastructure.events import WindowRefreshBus
   a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); c=self.s.create_material({'base_code':'C','version':'1','name':'C','unit':'pcs'}); events=[]; WindowRefreshBus.subscribe(events.append); self.s.save_bom(a,[{'material_id':b,'quantity':1,'unit':'pcs','level_no':1},{'material_id':c,'quantity':1,'unit':'pcs','level_no':2,'parent_item_id':1}]); self.assertTrue(events); first=self.s.bom(a)[0]['id']; self.s.delete_bom_item(first); self.assertEqual(len(self.s.bom(a)),0); WindowRefreshBus.unsubscribe(events.append)
+ def test_material_change_event(self):
+  from infrastructure.events import WindowRefreshBus
+  events=[]; WindowRefreshBus.subscribe(events.append); self.s.create_material({'base_code':'E','version':'1','name':'事件','unit':'pcs'}); self.assertTrue(any(e.get('type')=='material_changed' for e in events)); WindowRefreshBus.unsubscribe(events.append)
 if __name__=='__main__': unittest.main()

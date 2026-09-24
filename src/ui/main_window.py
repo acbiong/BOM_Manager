@@ -37,12 +37,16 @@ class MainWindow(QMainWindow):
   p=QFileDialog.getOpenFileName(self,'导入物料清单','','Excel (*.xlsx)')[0]
   if p:
    try:
-    ok,fail=self.svc.import_materials(p); self.refresh(); QMessageBox.information(self,'导入结果',f'成功{len(ok)}条，失败{len(fail)}条')
+    ok,fail=self.svc.import_materials(p); self.refresh();
+    if hasattr(self,'_materials') and self._materials.isVisible(): self._materials.refresh()
+    QMessageBox.information(self,'导入结果',f'成功{len(ok)}条，失败{len(fail)}条')
    except Exception as e: QMessageBox.warning(self,'导入失败',str(e))
  def new_material(self):
   d=MaterialDialog(self)
   if d.exec_():
-   try:self.svc.create_material(d.data()); self.refresh()
+   try:
+    self.svc.create_material(d.data()); self.refresh();
+    if hasattr(self,'_materials') and self._materials.isVisible(): self._materials.refresh()
    except Exception as e: QMessageBox.warning(self,'校验失败',str(e))
  def new_sku(self):
   rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'新建SKU','选择物料',items,0,False)
@@ -126,7 +130,7 @@ class BomWindow(QMainWindow):
 
 class MaterialWindow(QMainWindow):
  def __init__(self,svc,parent=None):
-  super().__init__(parent); self.svc=svc; self.setWindowTitle('物料库'); self.resize(1000,600); self.t=QTableWidget(); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['序号','基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','呆滞物料']); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.refresh()
+  super().__init__(parent); self.svc=svc; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库'); self.resize(1000,600); self.t=QTableWidget(); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['序号','基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','呆滞物料']); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.refresh()
  def menu(self,pos):
   row=self.t.rowAt(pos.y())
   if row<0:return
@@ -138,6 +142,10 @@ class MaterialWindow(QMainWindow):
   elif a==d and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
    try:self.svc.delete_material(rid); self.refresh()
    except Exception as ex: QMessageBox.warning(self,'无法删除',str(ex))
+ def on_event(self,event):
+  if event.get('type')=='material_changed': self.refresh()
+ def closeEvent(self,event):
+  WindowRefreshBus.unsubscribe(self.on_event); event.accept()
  def refresh(self):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
