@@ -16,6 +16,14 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 exec "$HERE/usr/bin/BOM管理系统" "$@"
 EOF
 chmod +x AppDir/AppRun
+cat > AppDir/bom管理系统.desktop <<EOF
+[Desktop Entry]
+Name=BOM管理系统
+Exec=BOM管理系统
+Icon=bom管理系统
+Type=Application
+Categories=Office;
+EOF
 cat > AppDir/usr/share/applications/bom管理系统.desktop <<EOF
 [Desktop Entry]
 Name=BOM管理系统
