@@ -33,4 +33,7 @@ class TestServices(unittest.TestCase):
  def test_material_change_event(self):
   from infrastructure.events import WindowRefreshBus
   events=[]; WindowRefreshBus.subscribe(events.append); self.s.create_material({'base_code':'E','version':'1','name':'事件','unit':'pcs'}); self.assertTrue(any(e.get('type')=='material_changed' for e in events)); WindowRefreshBus.unsubscribe(events.append)
+ def test_duplicate_import_overwrite_or_skip(self):
+  from openpyxl import Workbook
+  p=self.f.name+'-dup.xlsx'; self.s.create_material({'base_code':'D','version':'1','name':'旧','unit':'pcs'}); w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.active.append(['D','1','新','','pcs','厂商','M']); w.save(p); ok,fail=self.s.import_materials(p,lambda d,o:'overwrite'); self.assertEqual(ok,['D']); self.assertEqual(self.s.materials()[0]['name'],'新')
 if __name__=='__main__': unittest.main()

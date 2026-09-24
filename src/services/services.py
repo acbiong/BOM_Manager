@@ -87,7 +87,7 @@ class Services:
  def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
  def remove_alternate(self,aid):
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
- def import_materials(self,path):
+ def import_materials(self,path,conflict_resolver=None):
   required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']
   wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; headers=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]
   missing=[x for x in required if x not in headers]
@@ -98,7 +98,12 @@ class Services:
    if not d['物料基础编码'] or not d['物料版本号'] or not d['物料名称'] or not d['单位'] or not d['物料制造商']: fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失')); continue
    if d['单位'] not in self.UNITS: fail.append((no,d['物料基础编码'],d['物料名称'],'单位不合规')); continue
    old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
-   if old: fail.append((no,d['物料基础编码'],d['物料名称'],'物料已存在')); continue
+   if old:
+    choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
+    if choice=='cancel': return ok,fail+[(no,d['物料基础编码'],d['物料名称'],'用户取消')]
+    if choice=='overwrite':
+     self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
+    fail.append((no,d['物料基础编码'],d['物料名称'],'跳过重复物料')); continue
    try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
    except Exception as e: fail.append((no,d['物料基础编码'],d['物料名称'],str(e)))
   return ok,fail
