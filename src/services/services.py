@@ -19,7 +19,7 @@ class Services:
   r=self.db.conn.execute('SELECT COUNT(*) n FROM bom_items WHERE material_id=?',(i,)).fetchone();
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
   with self.db.transaction(): self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料')
- def skus(self): return self.db.conn.execute('SELECT s.id,m.* FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+ def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,m.updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
  def create_sku(self,mid):
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone(): raise ValueError('已是SKU')
   with self.db.transaction(): c=self.db.conn.execute('INSERT INTO skus(material_id) VALUES(?)',(mid,)); self.log('sku',c.lastrowid,'create','创建SKU'); return c.lastrowid
