@@ -178,7 +178,9 @@ class ProjectDialog(QDialog):
  def __init__(self,parent=None,row=None):
   super().__init__(parent); self.setWindowTitle('修改项目信息'); f=QFormLayout(self); self.e={}
   for k,l in [('project_name','项目名称'),('project_code','项目代码'),('product_name','产品名称'),('product_model','产品型号')]:
-   w=QLineEdit(str((row or {}).get(k,''))); self.e[k]=w; f.addRow(l,w)
+   try: value=row[k] if row is not None else ''
+   except (KeyError,IndexError,TypeError): value=''
+   w=QLineEdit(str(value or '')); self.e[k]=w; f.addRow(l,w)
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self): return {k:w.text().strip() for k,w in self.e.items()}
 
