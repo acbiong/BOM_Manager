@@ -97,6 +97,7 @@ class BomWindow(QMainWindow):
  def context_menu(self,pos):
   it=self.tree.itemAt(pos)
   if not it:return
+  if it is getattr(self,'root_item',None): return
   m=QMenu(self); same=m.addAction('新建同级物料'); child=m.addAction('新建下级物料'); edit=m.addAction('编辑数量/位置'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos)); d=it.data(0,Qt.UserRole) or {}
   if act in (same,child): self.add_relative(d, act==child); return
   if act==edit:
@@ -105,9 +106,10 @@ class BomWindow(QMainWindow):
   elif act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    self.svc.delete_bom_item(d.get('id')); self.load()
  def load(self):
-  self.tree.clear(); rows=self.svc.bom(self.root); by={};
-  for r in rows:
-   parent=by.get(r['parent_item_id']); item=QTreeWidgetItem(parent or self.tree,[f"{r['base_code']}-{r['version']} {r['name']}",str(r['quantity']),r['unit'],r['position']]); item.setData(0,Qt.UserRole,dict(r)); by[r['id']]=item
+  self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
+  self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}-{root['version']} {root['name']}",'','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
+  for r in self.svc.bom(self.root):
+   parent=self.by.get(r['parent_item_id'],self.root_item); item=QTreeWidgetItem(parent,[f"{r['base_code']}-{r['version']} {r['name']}",str(r['quantity']),r['unit'],r['position']]); item.setData(0,Qt.UserRole,dict(r)); self.by[r['id']]=item
   self.tree.itemClicked.connect(lambda i,c:self.info.setPlainText(str(i.data(0,Qt.UserRole))))
  def add_relative(self,parent,child):
   rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
@@ -137,7 +139,8 @@ class BomWindow(QMainWindow):
    def walk(it):
     d=it.data(0,Qt.UserRole) or {}; d['quantity']=float(it.text(1)); d['position']=it.text(3); rows.append(d)
     for j in range(it.childCount()): walk(it.child(j))
-   walk(self.tree.topLevelItem(i))
+   top=self.tree.topLevelItem(i)
+   for j in range(top.childCount()): walk(top.child(j))
   self.svc.save_bom(self.root,rows); self.dirty=False; QMessageBox.information(self,'保存','BOM已保存')
 
 class MaterialWindow(QMainWindow):
@@ -147,9 +150,14 @@ class MaterialWindow(QMainWindow):
  def menu(self,pos):
   row=self.t.rowAt(pos.y())
   if row<0:return
-  m=QMenu(self); e=m.addAction('编辑物料'); d=m.addAction('删除物料'); a=m.exec_(self.t.viewport().mapToGlobal(pos))
+  m=QMenu(self); e=m.addAction('编辑物料'); v=m.addAction('物料版本变更'); d=m.addAction('删除物料'); a=m.exec_(self.t.viewport().mapToGlobal(pos))
   rid=self.svc.materials()[row]['id']
-  if a==e:
+  if a==v:
+   r=self.svc.materials()[row]; nv,ok=QInputDialog.getText(self,'物料版本变更','新版本号',text=r['version'])
+   if ok:
+    try:self.svc.change_material_version(r['id'],nv.strip()); self.refresh()
+    except Exception as ex: QMessageBox.warning(self,'版本变更失败',str(ex))
+  elif a==e:
    r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
    if dlg.exec_(): self.svc.update_material(rid,dlg.data()); self.refresh()
   elif a==d and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
