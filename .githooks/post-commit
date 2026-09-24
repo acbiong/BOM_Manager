@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
+case "$changed" in
+ *src/*|VERSION|requirements.txt|package/build_appimage.sh)
+  echo '[auto-package] 检测到源代码/依赖变更，开始生成最新 AppImage'
+  if [ -x "$HOME/.local/bin/appimagetool" ] && [ -f "$HOME/.local/bin/runtime-x86_64" ]; then
+   APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE_RUNTIME="$HOME/.local/bin/runtime-x86_64" PATH="$HOME/.local/bin:$PATH" package/build_appimage.sh
+  else
+   echo '[auto-package] 未找到 appimagetool/runtime，跳过AppImage生成' >&2
+  fi
+  ;;
+esac
