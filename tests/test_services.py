@@ -36,4 +36,7 @@ class TestServices(unittest.TestCase):
  def test_duplicate_import_overwrite_or_skip(self):
   from openpyxl import Workbook
   p=self.f.name+'-dup.xlsx'; self.s.create_material({'base_code':'D','version':'1','name':'旧','unit':'pcs'}); w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.active.append(['D','1','新','','pcs','厂商','M']); w.save(p); ok,fail=self.s.import_materials(p,lambda d,o:'overwrite'); self.assertEqual(ok,['D']); self.assertEqual(self.s.materials()[0]['name'],'新')
+ def test_identical_duplicate_auto_skip(self):
+  from openpyxl import Workbook
+  p=self.f.name+'-same.xlsx'; self.s.create_material({'base_code':'S','version':'1','name':'相同','description':'','unit':'pcs','manufacturer':'厂','mpn':'M'}); w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.active.append(['S','1','相同','','pcs','厂','M']); w.save(p); ok,fail=self.s.import_materials(p,lambda d,o:'cancel'); self.assertEqual(ok,[]); self.assertEqual(len(fail),1); self.assertIn('自动跳过',fail[0][3])
 if __name__=='__main__': unittest.main()

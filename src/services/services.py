@@ -99,6 +99,9 @@ class Services:
    if d['单位'] not in self.UNITS: fail.append((no,d['物料基础编码'],d['物料名称'],'单位不合规')); continue
    old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
    if old:
+    same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')])
+    if same:
+     fail.append((no,d['物料基础编码'],d['物料名称'],'重复物料信息相同，自动跳过')); continue
     choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
     if choice=='cancel': return ok,fail+[(no,d['物料基础编码'],d['物料名称'],'用户取消')]
     if choice=='overwrite':

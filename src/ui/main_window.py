@@ -5,12 +5,14 @@ from pathlib import Path
 from config.config_service import ConfigService
 from infrastructure.events import WindowRefreshBus
 class MaterialDialog(QDialog):
- def __init__(self,parent=None,data=None):
-  super().__init__(parent); self.setWindowTitle('物料'); f=QFormLayout(self); data=data or {}; self.e={}
+ def __init__(self,parent=None,data=None,readonly_keys=None):
+  super().__init__(parent); self.setWindowTitle('物料'); f=QFormLayout(self); data=data or {}; self.e={}; readonly_keys=readonly_keys or set()
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('manufacturer','物料制造商'),('mpn','物料MPN')]:
-   w=QLineEdit(str(data.get(k,''))); self.e[k]=w; f.addRow(l,w)
-  self.unit=QComboBox(); self.unit.addItems(['pcs','套','ml','L','mm','cm','m']); self.unit.setCurrentText(data.get('unit','pcs')); f.addRow('单位',self.unit)
-  self.mp_flag=QComboBox(); self.mp_flag.addItems(['M','P']); self.mp_flag.setCurrentText(data.get('mp_flag','M')); f.addRow('M/P',self.mp_flag)
+   if k in readonly_keys: w=QLabel(str(data.get(k,'')))
+   else: w=QLineEdit(str(data.get(k,'')))
+   self.e[k]=w; f.addRow(l,w)
+  self.unit=QComboBox(); self.unit.addItems(['pcs','套','ml','L','mm','cm','m']); self.unit.setCurrentText(data.get('unit','pcs')); self.unit.setEnabled('unit' not in readonly_keys); f.addRow('单位',self.unit)
+  self.mp_flag=QComboBox(); self.mp_flag.addItems(['M','P']); self.mp_flag.setCurrentText(data.get('mp_flag','M')); self.mp_flag.setEnabled('mp_flag' not in readonly_keys); f.addRow('M/P',self.mp_flag)
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self):
   d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
@@ -45,11 +47,11 @@ class MainWindow(QMainWindow):
   if p:
    cfg['database']['last_import_dir']=str(Path(p).parent); ConfigService(Path(self.svc.db.path).parent).save(cfg)
    def resolver(d,old):
-    box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']} 已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
+    box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']}（{d['物料名称']}）已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
    try:
     ok,fail=self.svc.import_materials(p,resolver); self.refresh();
     if hasattr(self,'_materials') and self._materials.isVisible(): self._materials.refresh()
-    QMessageBox.information(self,'导入结果',f'成功{len(ok)}条，失败{len(fail)}条')
+    dup=sum(1 for x in fail if '重复物料' in x[3]); QMessageBox.information(self,'导入结果',f'成功{len(ok)}条，失败{len(fail)-dup}条，发现{dup}个重复物料未导入')
    except Exception as e: QMessageBox.warning(self,'导入失败',str(e))
  def new_material(self):
   d=MaterialDialog(self)
@@ -148,7 +150,7 @@ class MaterialWindow(QMainWindow):
   m=QMenu(self); e=m.addAction('编辑物料'); d=m.addAction('删除物料'); a=m.exec_(self.t.viewport().mapToGlobal(pos))
   rid=self.svc.materials()[row]['id']
   if a==e:
-   r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn']}); dlg.e['base_code'].setReadOnly(True); dlg.e['version'].setReadOnly(True)
+   r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
    if dlg.exec_(): self.svc.update_material(rid,dlg.data()); self.refresh()
   elif a==d and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
    try:self.svc.delete_material(rid); self.refresh()
