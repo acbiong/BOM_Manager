@@ -1,6 +1,7 @@
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt
+from infrastructure.events import WindowRefreshBus
 class MaterialDialog(QDialog):
  def __init__(self,parent=None,data=None):
   super().__init__(parent); self.setWindowTitle('物料'); f=QFormLayout(self); self.e={}
@@ -12,13 +13,16 @@ class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
  def build(self):
-  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=fm.addAction('导出物料库'); a.triggered.connect(self.export_materials); a=fm.addAction('导出模板'); a.triggered.connect(self.template); mm=bar.addMenu('物料库'); a=mm.addAction('新建物料'); a.triggered.connect(self.new_material); a=mm.addAction('物料库窗口'); a.triggered.connect(self.show_materials); a=mm.addAction('导入物料'); a.triggered.connect(self.import_materials); a=mm.addAction('刷新'); a.triggered.connect(self.refresh); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); sm=bar.addMenu('SKU'); a=sm.addAction('新建SKU'); a.triggered.connect(self.new_sku); a=sm.addAction('删除SKU'); a.triggered.connect(self.delete_sku)
+  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=fm.addAction('导出物料库'); a.triggered.connect(self.export_materials); a=fm.addAction('导出模板'); a.triggered.connect(self.template); mm=bar.addMenu('物料库'); a=mm.addAction('新建物料'); a.triggered.connect(self.new_material); a=mm.addAction('物料库窗口'); a.triggered.connect(self.show_materials); a=mm.addAction('导入物料'); a.triggered.connect(self.import_materials); a=mm.addAction('刷新'); a.triggered.connect(self.refresh); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); sm=bar.addMenu('SKU'); a=sm.addAction('新建SKU'); a.triggered.connect(self.new_sku); a=sm.addAction('版本变更'); a.triggered.connect(self.change_sku_version); a=sm.addAction('删除SKU'); a.triggered.connect(self.delete_sku)
   self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.cellDoubleClicked.connect(self.open_bom); self.setCentralWidget(self.table); self.statusBar().showMessage('版本 '+self.version); self.refresh()
  def refresh(self):
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+'-'+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
   self.statusBar().showMessage(f'共计{len(rows)}个SKU | 版本 {self.version}')
+ def select_database(self):
+  p=QFileDialog.getSaveFileName(self,'选择SQLite数据库','bom.db','SQLite (*.db)')[0]
+  if p: QMessageBox.information(self,'配置已保存','数据库路径已选择，请重启软件后生效：'+p)
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库','资料库.xlsx','Excel (*.xlsx)')[0]
   if p:self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
@@ -43,6 +47,13 @@ class MainWindow(QMainWindow):
   if ok:
    try: mid=rows[items.index(x)]['id']; sid=self.svc.create_sku(mid); self.refresh(); self.open_bom_id(sid)
    except Exception as e: QMessageBox.warning(self,'失败',str(e))
+ def change_sku_version(self):
+  r=self.table.currentRow()
+  if r<0:return
+  sid=int(self.table.item(r,5).text()); v,ok=QInputDialog.getText(self,'SKU版本变更','新版本号')
+  if ok:
+   try:self.svc.change_sku_version(sid,v.strip()); self.refresh()
+   except Exception as e: QMessageBox.warning(self,'版本变更失败',str(e))
  def delete_sku(self):
   r=self.table.currentRow()
   if r<0:return
@@ -59,7 +70,12 @@ class MainWindow(QMainWindow):
   if p:
    from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.save(p)
 class BomWindow(QMainWindow):
- def __init__(self,svc,root,parent=None): super().__init__(parent); self.svc=svc; self.root=root; self.setWindowTitle('BOM管理'); self.resize(900,600); self.dirty=False; self.tree=QTreeWidget(); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料','数量','单位','位置']); self.info=QTextEdit(); self.info.setReadOnly(True); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(self.info); self.setCentralWidget(spl); tb=self.addToolBar('BOM'); save=QAction('保存',self); save.triggered.connect(self.save); tb.addAction(save); add=QAction('新增物料',self); add.triggered.connect(self.add); tb.addAction(add); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); alt=QAction('替代料',self); alt.triggered.connect(self.manage_alternates); tb.addAction(alt); self.load()
+ def __init__(self,svc,root,parent=None): super().__init__(parent); self.svc=svc; self.root=root; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(900,600); self.dirty=False; self.tree=QTreeWidget(); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料','数量','单位','位置']); self.info=QTextEdit(); self.info.setReadOnly(True); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(self.info); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(self.notice); lay.addWidget(spl); self.setCentralWidget(box); tb=self.addToolBar('BOM'); save=QAction('保存',self); save.triggered.connect(self.save); tb.addAction(save); ref=QAction('刷新',self); ref.triggered.connect(lambda:(self.load(),self.notice.setText(''))); tb.addAction(ref); add=QAction('新增物料',self); add.triggered.connect(self.add); tb.addAction(add); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); alt=QAction('替代料',self); alt.triggered.connect(self.manage_alternates); tb.addAction(alt); self.load()
+ def on_external_change(self,event):
+  if event.get('type')=='bom_changed' and event.get('root')==self.root:
+   self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.statusBar().showMessage('检测到外部BOM更新')
+ def closeEvent(self,event):
+  WindowRefreshBus.unsubscribe(self.on_external_change); event.accept()
  def context_menu(self,pos):
   it=self.tree.itemAt(pos)
   if not it:return
