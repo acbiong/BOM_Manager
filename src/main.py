@@ -6,7 +6,8 @@ from config.config_service import ConfigService
 from database.database import Database
 from services.services import Services
 from ui.main_window import MainWindow
-VERSION='0.0.1'
+from version import get_version
+VERSION=get_version()
 def main():
  base=Path(__file__).resolve().parents[1]; cfg=ConfigService(base).load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema(); app=QApplication(sys.argv);
  if not valid:

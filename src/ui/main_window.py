@@ -4,11 +4,14 @@ from PyQt5.QtCore import Qt
 from infrastructure.events import WindowRefreshBus
 class MaterialDialog(QDialog):
  def __init__(self,parent=None,data=None):
-  super().__init__(parent); self.setWindowTitle('物料'); f=QFormLayout(self); self.e={}
-  for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')]:
-   w=QLineEdit(str((data or {}).get(k,''))); self.e[k]=w; f.addRow(l,w)
-  self.e['unit'].setText((data or {}).get('unit','pcs')); b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
- def data(self): return {k:w.text().strip() for k,w in self.e.items()}
+  super().__init__(parent); self.setWindowTitle('物料'); f=QFormLayout(self); data=data or {}; self.e={}
+  for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('manufacturer','物料制造商'),('mpn','物料MPN')]:
+   w=QLineEdit(str(data.get(k,''))); self.e[k]=w; f.addRow(l,w)
+  self.unit=QComboBox(); self.unit.addItems(['pcs','套','ml','L','mm','cm','m']); self.unit.setCurrentText(data.get('unit','pcs')); f.addRow('单位',self.unit)
+  self.mp_flag=QComboBox(); self.mp_flag.addItems(['M','P']); self.mp_flag.setCurrentText(data.get('mp_flag','M')); f.addRow('M/P',self.mp_flag)
+  b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
+ def data(self):
+  d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
 class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
