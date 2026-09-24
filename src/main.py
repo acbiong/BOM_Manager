@@ -9,7 +9,7 @@ from ui.main_window import MainWindow
 from version import get_version
 VERSION=get_version()
 def main():
- base=Path(__file__).resolve().parents[1]; cfg=ConfigService(base).load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema(); app=QApplication(sys.argv);
+ base=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]; cfg=ConfigService(base).load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema(); app=QApplication(sys.argv);
  if not valid:
   QMessageBox.warning(None,'数据库结构异常','缺少数据表：'+','.join(missing)+'，将自动修复。'); db.recreate_schema()
  w=MainWindow(Services(db),VERSION); w.show(); rc=app.exec_(); db.close(); return rc

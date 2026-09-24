@@ -1,6 +1,8 @@
 """软件版本管理：三段式版本号，发布修复时通过工具自动递增。编辑时间：2026-09-24。"""
 from pathlib import Path
-VERSION_FILE=Path(__file__).resolve().parents[1]/'VERSION'
+import sys
+_root=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
+VERSION_FILE=_root/'VERSION'
 def get_version():
  try:return VERSION_FILE.read_text(encoding='utf-8').strip() or '0.0.1'
  except FileNotFoundError:return '0.0.1'
