@@ -39,6 +39,12 @@ class Services:
     seen.add(r['id']); d=dict(r); d['material_id']=r['child_material_id']; d['unit']=r['material_unit']; d['level_no']=level; d['parent_item_id']=parent_item_id; d['bom_root_id']=root; result.append(d); walk(r['child_material_id'],level+1,r['id'])
   walk(root,1,None); return result
  def save_bom(self,root,items):
+  changed_parents={root}
+  old_rows=self.bom(root)
+  old_by_id={x['id']:x for x in old_rows}
+  for old in old_rows:
+   parent=old_by_id.get(old.get('parent_item_id'))
+   changed_parents.add(parent['material_id'] if parent else root)
   with self.db.transaction():
    def find_parent(x):
     pid=x.get('parent_item_id')
@@ -49,7 +55,8 @@ class Services:
    parents={root}
    for x in items:
     parent_row=find_parent(x)
-    parents.add(parent_row['material_id'] if parent_row else root)
+    parent_material=parent_row['material_id'] if parent_row else root
+    parents.add(parent_material); changed_parents.add(parent_material)
    for parent in parents: self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(parent,))
    relation_ids={}; pending=list(items); n=0
    while pending:
@@ -64,7 +71,8 @@ class Services:
     if not progressed: raise ValueError('BOM结构存在无效的父级关系')
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END'); self.log('bom',root,'update',f'{len(items)}行')
   try:
-   from infrastructure.events import WindowRefreshBus; WindowRefreshBus.publish({'type':'bom_changed','root':root})
+   from infrastructure.events import WindowRefreshBus
+   for changed_root in changed_parents: WindowRefreshBus.publish({'type':'bom_changed','root':changed_root})
   except Exception: pass
  def validate_bom_rows(self,root,rows):
   """校验导入BOM与现有结构的子项、数量、位置一致性。"""

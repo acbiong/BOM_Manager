@@ -244,6 +244,16 @@ class BomWindow(QMainWindow):
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
   r=rows[items.index(x)]; item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1',r['unit'],'','']); temporary_id=-id(item); data={'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; item.setData(0,Qt.UserRole,data); self.by[temporary_id]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  self.add_existing_children(item,r['id'],set())
+  fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+ def add_existing_children(self,parent_item,material_id,ancestors):
+  if material_id in ancestors:return
+  ancestors=set(ancestors); ancestors.add(material_id)
+  rows=self.svc.db.conn.execute('SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN materials m ON m.id=b.child_material_id WHERE b.parent_material_id=? ORDER BY b.sort_no,b.id',(material_id,)).fetchall()
+  parent_data=parent_item.data(0,Qt.UserRole) or {}
+  for row in rows:
+   child=QTreeWidgetItem(parent_item,[f"{row['base_code']}-{row['version']} {row['name']}",str(row['quantity']),row['material_unit'],row['position'],row['remark']]); d=dict(row); d.update({'material_id':row['child_material_id'],'unit':row['material_unit'],'parent_item_id':parent_data.get('id'),'level_no':(parent_data.get('level_no') or 0)+1}); child.setData(0,Qt.UserRole,d); self.by[row['id']]=child; self.add_existing_children(child,row['child_material_id'],ancestors)
+  parent_item.setExpanded(True)
  def manage_alternates(self):
   it=self.tree.currentItem(); d=it.data(0,Qt.UserRole) if it else None
   if not d or not d.get('id'): QMessageBox.information(self,'提示','请先选择BOM物料'); return
