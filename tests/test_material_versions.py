@@ -165,3 +165,16 @@ class MaterialVersionTests(unittest.TestCase):
   finally:
    for window in list(main._bom_windows.values()): window.dirty=False; window.close()
    main._materials.close(); main.close()
+ def test_sku_version_menu_disabled_only_in_material_library(self):
+  from PyQt5.QtWidgets import QMenu
+  from PyQt5.QtCore import QPoint
+  window=MaterialWindow(self.s)
+  try:
+   for name,enabled in [('SKU1',False),('PART',True)]:
+    row=next(n for n,m in enumerate(self.s.materials()) if m['id']==self.ids[name])
+    def inspect(menu,pos):
+     action=next(a for a in menu.actions() if a.text()=='物料版本变更'); self.assertEqual(action.isEnabled(),enabled); return None
+    with patch.object(window.t,'rowAt',return_value=row),patch.object(QMenu,'exec_',inspect):window.menu(QPoint())
+   with patch.object(QInputDialog,'getText') as text,patch('ui.main_window.QMessageBox.information') as message:
+    window.change_version(self.ids['SKU1']); text.assert_not_called(); message.assert_called_once()
+  finally:window.close()

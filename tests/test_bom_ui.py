@@ -29,7 +29,7 @@ class BomUiTests(unittest.TestCase):
   self.w.show_item_info(parent); self.w.fields['quantity'].setValue(2.34)
   self.assertEqual(parent.text(1),'2.3')
   self.s.update_material(p,dict(name='修改后的名称',unit='pcs'))
-  self.assertTrue(self.w.refresh_action.isEnabled()); self.assertTrue(self.w.statusBar().currentMessage())
+  self.assertTrue(self.w.refresh_action.isEnabled()); self.assertEqual(self.w.statusBar().currentMessage(),''); self.assertEqual(self.w.notice.text(),'BOM有更新，请点击刷新或重新打开窗口')
   self.w.refresh_external()
   self.assertEqual(self.w.statusBar().currentMessage(),''); self.assertEqual(self.w.notice.text(),'')
   self.assertFalse(self.w.refresh_action.isEnabled()); self.assertTrue(self.w.save_action.isEnabled())
@@ -186,11 +186,11 @@ class BomUiTests(unittest.TestCase):
  def test_context_menu_has_only_add_and_delete(self):
   item=self.w.root_item.child(0)
   with patch.object(self.w.tree,'itemAt',return_value=item), patch('ui.main_window.QMenu') as menu:
-   menu.return_value.addAction.side_effect=[object(),object(),object()]
+   menu.return_value.addAction.side_effect=[object(),object(),object(),object()]
    menu.return_value.exec_.return_value=None
    from PyQt5.QtCore import QPoint
    self.w.context_menu(QPoint())
-   self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['新增同级物料','新增子级物料','删除物料'])
+   self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['新增同级物料','新增子级物料','删除物料','增加替代料'])
  def test_idle_flags_recursive_shared_skus_and_red_rows(self):
   from ui.main_window import MaterialWindow
   from PyQt5.QtGui import QColor
@@ -277,3 +277,53 @@ class BomUiTests(unittest.TestCase):
   finally:
    for window in list(main._material_bom_windows.values()):window.dirty=False; window.close()
    main._materials.close(); main.close()
+ def test_inline_alternates_add_remove_and_save(self):
+  from PyQt5.QtWidgets import QMenu
+  from PyQt5.QtCore import QPoint
+  r,p,c,o,x=self.ids; node=self.w.root_item.child(0); relation=node.data(0,Qt.UserRole)['id']
+  self.w.tree.setCurrentItem(node); self.w.show_item_info(node)
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER-1 OTHER',True)):self.w.add_alternate()
+  self.assertEqual(self.w.alt_table.rowCount(),1); self.assertTrue(self.w.dirty)
+  self.assertEqual(self.s.alternates(relation),[])
+  self.w.show_item_info(self.w.root_item); self.w.show_item_info(node)
+  self.assertEqual(self.w.alt_table.rowCount(),1)
+  self.w.refresh_external(); node=self.w.root_item.child(0); self.w.show_item_info(node)
+  self.assertEqual(self.w.alt_table.rowCount(),1)
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.assertEqual(self.s.alternates(relation)[0]['material_id'],o)
+  node=self.w.root_item.child(0); self.w.tree.setCurrentItem(node); self.w.show_item_info(node)
+  def choose(menu,pos):
+   self.assertEqual([a.text() for a in menu.actions()],['删除替代料']); return menu.actions()[0]
+  with patch.object(self.w.alt_table,'rowAt',return_value=0),patch.object(QMenu,'exec_',choose),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes):self.w.alternate_menu(QPoint())
+  self.assertEqual(self.w.alt_table.rowCount(),0); self.assertEqual(len(self.s.alternates(relation)),1)
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.assertEqual(self.s.alternates(relation),[])
+ def test_new_unsaved_node_alternates_persist_transactionally(self):
+  r,p,c,o,x=self.ids
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER 1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(QInputDialog,'getItem',return_value=('CHILD-1 CHILD',True)):self.w.add_alternate()
+  self.assertEqual(self.w.alt_table.rowCount(),1)
+  self.db.conn.execute("CREATE TEMP TRIGGER fail_alt BEFORE INSERT ON alternates BEGIN SELECT RAISE(ABORT,'替代料保存失败'); END")
+  with patch.object(QMessageBox,'warning'):self.assertFalse(self.w.save())
+  self.assertFalse(any(row['material_id']==o for row in self.s.bom(r)))
+  self.assertTrue(self.w.dirty); self.assertEqual(self.w.alt_table.rowCount(),1)
+  self.db.conn.execute('DROP TRIGGER fail_alt')
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  relation=next(row['id'] for row in self.s.bom(r) if row['material_id']==o)
+  self.assertEqual(self.s.alternates(relation)[0]['material_id'],c)
+ def test_notice_in_status_bar_and_material_menu_buttons(self):
+  from ui.main_window import MaterialWindow
+  from PyQt5.QtWidgets import QToolBar
+  self.assertIsNone(self.w.menuBar().cornerWidget(Qt.TopRightCorner))
+  self.assertTrue(self.w.statusBar().isAncestorOf(self.w.notice)); self.assertIn('red',self.w.notice.styleSheet())
+  actions=[a.text() for bar in self.w.findChildren(QToolBar) for a in bar.actions()]
+  self.assertNotIn('替代料',actions)
+  self.w.on_external_change({'type':'bom_changed','root':self.ids[0]})
+  self.assertEqual(self.w.notice.text(),'BOM有更新，请点击刷新或重新打开窗口'); self.assertEqual(self.w.statusBar().currentMessage(),'')
+  self.w.refresh_external(); self.assertEqual(self.w.notice.text(),'')
+  materials=MaterialWindow(self.s)
+  try:
+   actions=materials.menuBar().actions()
+   self.assertEqual([a.text() for a in actions],['新建物料','导入物料','导出物料库','导出模板'])
+   self.assertTrue(all(a.menu() is None for a in actions))
+  finally:materials.close()

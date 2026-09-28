@@ -58,7 +58,7 @@ class Services:
   retained={root}|{row['material_id'] for row in items}
   parents={root}|{row['parent_material_id'] for row in old_rows if row['parent_material_id'] in retained}
   by_id={row['id']:row for row in items if row.get('id') is not None}
-  desired={}
+  desired={}; alternate_updates={}
   old={ (row['parent_material_id'],row['child_material_id'],row['position'] or ''):dict(row)
         for row in self.db.conn.execute('SELECT * FROM material_bom_items') }
   def payload(row):
@@ -72,6 +72,13 @@ class Services:
      else: raise ValueError('BOM结构存在无效的父级关系')
     parent=parent_row['material_id'] if parent_row else root
    key=(parent,row['material_id'],row.get('position','') or '')
+   if 'alternate_material_ids' in row:
+    alternates=list(dict.fromkeys(row['alternate_material_ids']))
+    if key in alternate_updates and alternate_updates[key]!=alternates:raise ValueError('共享BOM的替代料修改不一致')
+    if row['material_id'] in alternates:raise ValueError('物料不能作为自身的替代料')
+    for mid in alternates:
+     if not self.db.conn.execute('SELECT 1 FROM materials WHERE id=?',(mid,)).fetchone():raise ValueError('替代料不存在，请重新选择')
+    alternate_updates[key]=alternates
    values=payload(row)
    if values[0]<=0: raise ValueError('物料数量必须至少为0.1')
    parents.add(parent)
@@ -103,6 +110,10 @@ class Services:
    for order,(key,values) in enumerate(desired.items()):
     parent,child,position=key; quantity,unit,remark=values
     self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?) ON CONFLICT(parent_material_id,child_material_id,position) DO UPDATE SET quantity=excluded.quantity,unit=excluded.unit,remark=excluded.remark,sort_no=excluded.sort_no,updated_at=CURRENT_TIMESTAMP',(parent,child,quantity,unit,position,remark,order))
+   for key,alternates in alternate_updates.items():
+    relation=self.db.conn.execute('SELECT id FROM material_bom_items WHERE parent_material_id=? AND child_material_id=? AND position=?',key).fetchone()[0]
+    self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(relation,))
+    for order,mid in enumerate(alternates):self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',(relation,mid,order))
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
    self.log('bom',root,'update',f'{len(desired)}条物料关系')
   from infrastructure.events import WindowRefreshBus
