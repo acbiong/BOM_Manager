@@ -146,7 +146,7 @@ class BomWindow(QMainWindow):
    w=QLineEdit() if k in ('quantity','position','remark') else QLabel(); self.fields[k]=w; form.addRow(l,w)
   for key in ('quantity','position','remark'): self.fields[key].textChanged.connect(lambda value,k=key:self.update_tree_field(k,value))
   info_box=QGroupBox('物料信息'); info_box.setLayout(form); self.alt_table=QTableWidget(0,6); self.alt_table.setHorizontalHeaderLabels(['替代料编码','版本号','名称','描述','制造商','MPN']); alt_box=QGroupBox('替代料'); alt_l=QVBoxLayout(alt_box); alt_l.addWidget(self.alt_table)
-  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.menuBar().setCornerWidget(self.notice,Qt.TopRightCorner); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(lambda:(self.load(),self.notice.setText(''))); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); add=QAction('新增物料',self); add.triggered.connect(self.add); tb.addAction(add); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); alt=QAction('替代料',self); alt.triggered.connect(self.manage_alternates); tb.addAction(alt); self.load()
+  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.menuBar().setCornerWidget(self.notice,Qt.TopRightCorner); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(lambda:(self.load(),self.notice.setText(''))); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); alt=QAction('替代料',self); alt.triggered.connect(self.manage_alternates); tb.addAction(alt); self.load()
  def mark_dirty(self):
   self.dirty=True
   self.save_action.setEnabled(True)
@@ -204,7 +204,14 @@ class BomWindow(QMainWindow):
  def add_relative(self,parent,child):
   target=self.by.get(parent.get('id'),self.root_item) if child else (self.by.get(parent.get('parent_item_id'),self.root_item) or self.root_item)
   used={target.child(i).data(0,Qt.UserRole).get('material_id') for i in range(target.childCount()) if target.child(i).data(0,Qt.UserRole)}
-  rows=[r for r in self.svc.materials() if r['id'] not in used]; items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]
+  blocked=set(used)
+  if child:
+   node=target
+   while node is not None:
+    node_data=node.data(0,Qt.UserRole) or {}
+    if node_data.get('material_id'): blocked.add(node_data['material_id'])
+    node=node.parent()
+  rows=[r for r in self.svc.materials() if r['id'] not in blocked]; items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
