@@ -1,0 +1,20 @@
+BOM管理系统测试报告
+时间：2026-09-28 15:58:55 +0800
+项目：/home/biong/Documents/code/BOM管理系统
+
+[需求追踪审计]
+$ env PYTHONDONTWRITEBYTECODE=1 python3 tests/audit_requirements.py
+TRACE_OK 137/137
+[exit=0]
+
+[自动化测试]
+$ env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -q
+----------------------------------------------------------------------
+Ran 19 tests in 0.102s
+
+OK
+[exit=0]
+
+[源码编译校验]
+COMPILE_OK
+[exit=0]

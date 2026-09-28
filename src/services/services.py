@@ -19,6 +19,8 @@ class Services:
   return i
  def update_material(self,i,d):
   with self.db.transaction(): self.db.conn.execute('UPDATE materials SET name=?,description=?,unit=?,manufacturer=?,mpn=?,mp_flag=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(d['name'],d.get('description',''),d['unit'],d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'),i)); self.log('material',i,'update',d['name'])
+  from infrastructure.events import WindowRefreshBus
+  WindowRefreshBus.publish({'type':'material_changed','id':i})
  def delete_material(self,i):
   r=self.db.conn.execute('SELECT COUNT(*) n FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)).fetchone();
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
@@ -70,7 +72,7 @@ class Services:
      parent_material=parent_row['material_id'] if parent_row else root
      parent_index=items.index(parent_row) if parent_row else None
      if parent_row and parent_index not in relation_ids and parent_row.get('id') not in relation_ids: continue
-     cur=self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(parent_material,x['material_id'],x['quantity'],x['unit'],x.get('position',''),x.get('remark',''),n)); relation_ids[x.get('id')]=cur.lastrowid; n+=1; pending.remove(x); progressed=True
+     cur=self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(parent_material,x['material_id'],round(float(x['quantity']),1),x['unit'],x.get('position',''),x.get('remark',''),n)); relation_ids[x.get('id')]=cur.lastrowid; n+=1; pending.remove(x); progressed=True
      relation_ids[items.index(x)]=cur.lastrowid
     if not progressed: raise ValueError('BOM结构存在无效的父级关系')
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END'); self.log('bom',root,'update',f'{len(items)}行')
@@ -120,6 +122,8 @@ class Services:
   old=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
   if self.db.conn.execute('SELECT 1 FROM materials WHERE base_code=? AND version=?',(old['base_code'],new_version)).fetchone(): raise ValueError('目标版本已存在')
   with self.db.transaction(): self.db.conn.execute('UPDATE materials SET version=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(new_version,i)); self.log('material',i,'version',f'{old["version"]}->{new_version}')
+  from infrastructure.events import WindowRefreshBus
+  WindowRefreshBus.publish({'type':'material_changed','id':i})
  def add_alternate(self,bom_item_id,material_id):
   with self.db.transaction(): self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,COALESCE((SELECT MAX(sort_no)+1 FROM alternates WHERE bom_item_id=?),0))',(bom_item_id,material_id,bom_item_id))
  def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
@@ -158,13 +162,25 @@ class Services:
   for r in self.skus():
    b=wb.create_sheet((r['base_code']+'-'+r['version'])[:31]); b.append(['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','用量','单位','M/P','制造商','MPN'])
    for n,x in enumerate(self.bom(r['material_id']),1): b.append([n,x['level_no'],r['base_code'],r['version'],x['base_code'],x['version'],x['name'],x['description'],x['quantity'],x['unit'],x['mp_flag'],x['manufacturer'],x['mpn']])
+  for sheet in wb:
+   headers=[cell.value for cell in sheet[1]]
+   if '用量' in headers:
+    for row in sheet.iter_rows(min_row=2): row[headers.index('用量')].number_format='0.0'
   wb.save(path)
  def export_materials(self,path):
   wb=Workbook(); ws=wb.active; ws.title='变更记录'; ws.append(['序号','变更时间','变更详细内容','变更日期','变更时间']); ws2=wb.create_sheet('物料库'); ws2.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN','M/P','是否存在BOM结构']);
   for r in self.materials(): ws2.append([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom']])
   for n,r in enumerate(self.db.conn.execute('SELECT * FROM change_logs ORDER BY id'),1): ws.append([n,r['changed_at'],r['detail'],r['changed_at'][:10],r['changed_at'][11:]])
+  for sheet in wb:
+   headers=[cell.value for cell in sheet[1]]
+   if '用量' in headers:
+    for row in sheet.iter_rows(min_row=2): row[headers.index('用量')].number_format='0.0'
   wb.save(path)
  def export_sku(self,sid,path):
   s=self.db.conn.execute('SELECT s.*,m.* FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone(); wb=Workbook(); w=wb.active; w.title='变更记录'; w.append(['序号','变更时间','变更详细内容','变更日期','变更时间']); b=wb.create_sheet('SKU对应的BOM'); b.append(['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','用量','单位','M/P','制造商','MPN']);
   for n,r in enumerate(self.bom(s['material_id']),1): b.append([n,r['level_no'],s['base_code'],s['version'],r['base_code'],r['version'],r['name'],r['description'],r['quantity'],r['unit'],r['mp_flag'],r['manufacturer'],r['mpn']])
+  for sheet in wb:
+   headers=[cell.value for cell in sheet[1]]
+   if '用量' in headers:
+    for row in sheet.iter_rows(min_row=2): row[headers.index('用量')].number_format='0.0'
   wb.save(path)

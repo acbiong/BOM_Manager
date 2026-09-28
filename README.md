@@ -13,3 +13,5 @@
 每次功能修改或修复完成后，在项目根目录执行 `tools/release.sh`。脚本会自动递增补丁版本号、执行需求追踪审计、运行全部测试、编译检查、PyInstaller 打包、动态库可迁移性检查并生成 SHA256 文件。每次测试都会在 `test_reports/` 生成带时间戳的完整报告。可传入 `minor` 或 `major` 进行对应版本升级。
 
 AI 编程完成后执行 `tools/finish_ai_change.sh`，脚本会一次性完成测试、需求审计、编译校验、补丁版本升级和 Git 提交，提交钩子随后生成新的 AppImage。可将准确的提交描述作为第一个参数传入，例如 `tools/finish_ai_change.sh '修复：调整BOM窗口按钮状态'`；未传入时会根据实际变更文件自动生成变更类型和内容。该流程不运行常驻监视进程，不增加系统后台负担。
+
+AI每次修改完成后，应在 `.tmp/` 写入提交说明文件（标题、具体变更、验证结果），执行 `tools/finish_ai_change.sh --message-file .tmp/change_message.txt`。脚本不再生成泛化提交描述，仍自动测试、升级版本、提交和打包。测试报告保存在 `test_reports/`。
