@@ -33,13 +33,17 @@ class Services:
   with self.db.transaction(): r=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone(); self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(r['material_id'],)); self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,)); self.log('sku',sid,'delete','删除SKU')
  def bom(self,root):
   """递归展开物料关系表，返回兼容BOM编辑器的扁平树行。"""
-  result=[]; seen=set()
-  def walk(parent_id,level,parent_item_id):
+  result=[]
+  def walk(parent_id,level,parent_item_id,parent_node_id,ancestors):
+   if parent_id in ancestors:return
+   ancestors=ancestors|{parent_id}
    rows=self.db.conn.execute('SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN materials m ON m.id=b.child_material_id WHERE b.parent_material_id=? ORDER BY b.sort_no,b.id',(parent_id,)).fetchall()
    for r in rows:
-    if r['id'] in seen: continue
-    seen.add(r['id']); d=dict(r); d['material_id']=r['child_material_id']; d['unit']=r['material_unit']; d['level_no']=level; d['parent_item_id']=parent_item_id; d['bom_root_id']=root; result.append(d); walk(r['child_material_id'],level+1,r['id'])
-  walk(root,1,None); return result
+    if r['child_material_id'] in ancestors:continue
+    node_id=f"{parent_node_id or ''}/{r['id']}"
+    d=dict(r); d.update(material_id=r['child_material_id'],unit=r['material_unit'],level_no=level,parent_item_id=parent_item_id,bom_root_id=root,node_id=node_id,parent_node_id=parent_node_id)
+    result.append(d); walk(r['child_material_id'],level+1,r['id'],node_id,ancestors)
+  walk(root,1,None,None,set()); return result
  def save_bom(self,root,items):
   """把树中的重复子BOM归并为物料关系，在单个事务中保存。"""
   old_rows=self.bom(root)

@@ -111,3 +111,49 @@ class BomUiTests(unittest.TestCase):
   with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
   self.assertEqual(self.s.bom(r)[0]['id'],relation)
   self.assertEqual(self.s.alternates(relation)[0]['material_id'],o)
+ def test_shared_branches_have_distinct_nodes_and_full_children(self):
+  r,p,c,o,x=self.ids
+  self.s.save_bom(c,[dict(material_id=o,quantity=1,unit='pcs')]); self.w.load()
+  with patch.object(QInputDialog,'getItem',return_value=('CHILD 1 CHILD',True)):
+   self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
+  first=self.w.root_item.child(0).child(0); second=self.w.root_item.child(1)
+  self.assertEqual(first.childCount(),1); self.assertEqual(second.childCount(),1)
+  a,b=first.child(0),second.child(0)
+  self.assertEqual(a.data(0,Qt.UserRole)['id'],b.data(0,Qt.UserRole)['id'])
+  self.assertNotEqual(a.data(0,Qt.UserRole)['node_id'],b.data(0,Qt.UserRole)['node_id'])
+  self.assertIs(self.w.by[a.data(0,Qt.UserRole)['node_id']],a)
+  self.assertIs(self.w.by[b.data(0,Qt.UserRole)['node_id']],b)
+  self.s.add_alternate(a.data(0,Qt.UserRole)['id'],p)
+  self.w.show_item_info(b); self.assertEqual(self.w.alt_table.rowCount(),1)
+  with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
+  self.assertEqual(self.w.root_item.child(1).childCount(),1)
+ def test_cycle_guard_is_path_local(self):
+  r,p,c,o,x=self.ids
+  self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit) VALUES(?,?,1,?)',(c,r,'pcs')); self.db.conn.commit()
+  self.assertEqual([row['material_id'] for row in self.s.bom(r)],[p,c])
+ def test_single_windows_reactivate_and_reopen(self):
+  from ui.main_window import MainWindow
+  main=MainWindow(self.s); one=self.s.create_sku(self.ids[0]); two=self.s.create_sku(self.ids[4])
+  try:
+   main.open_bom_id(one); original=main._bom_windows[one]
+   original.show_item_info(original.root_item.child(0)); original.fields['quantity'].setValue(7.8)
+   original.showMinimized(); main.open_bom_id(one)
+   self.assertIs(main._bom_windows[one],original); self.assertFalse(original.isMinimized())
+   self.assertEqual(original.root_item.child(0).text(1),'7.8')
+   main.open_bom_id(two); self.assertEqual(len(main._bom_windows),2)
+   with patch('ui.main_window.QMessageBox') as box:
+    save,discard,cancel=object(),object(),object()
+    box.return_value.addButton.side_effect=[save,discard,cancel]; box.return_value.clickedButton.return_value=cancel
+    self.assertFalse(original.close())
+   main.open_bom_id(one); self.assertIs(main._bom_windows[one],original)
+   original.dirty=False; original.close(); self.assertNotIn(one,main._bom_windows)
+   main.open_bom_id(one); self.assertIsNot(main._bom_windows[one],original)
+   main.show_materials(); materials=main._materials; materials.showMinimized(); main.show_materials()
+   self.assertIs(main._materials,materials); self.assertFalse(materials.isMinimized())
+   materials.close(); self.assertIsNone(main._materials)
+   main.show_materials(); self.assertIsNot(main._materials,materials)
+  finally:
+   for window in list(main._bom_windows.values()): window.dirty=False; window.close()
+   if main._materials is not None: main._materials.close()
+   main.close()
