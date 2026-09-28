@@ -166,7 +166,9 @@ class BomWindow(QMainWindow):
  def closeEvent(self,event):
   if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); event.accept(); return
   box=QMessageBox(self); box.setWindowTitle('BOM未保存'); box.setText('BOM结构或物料信息已修改，是否保存？'); save=box.addButton('保存并退出',QMessageBox.AcceptRole); discard=box.addButton('不保存退出',QMessageBox.DestructiveRole); cancel=box.addButton('取消',QMessageBox.RejectRole); box.exec_()
-  if box.clickedButton()==save: self.save(); WindowRefreshBus.unsubscribe(self.on_external_change); event.accept()
+  if box.clickedButton()==save:
+   if self.save(): WindowRefreshBus.unsubscribe(self.on_external_change); event.accept()
+   else: event.ignore()
   elif box.clickedButton()==discard: WindowRefreshBus.unsubscribe(self.on_external_change); event.accept()
   else: event.ignore()
 
@@ -285,14 +287,24 @@ class BomWindow(QMainWindow):
   self.add_relative({'id':None,'parent_item_id':None,'level_no':0},False)
  def save(self):
   self._saving=True
-  rows=[]
-  for i in range(self.tree.topLevelItemCount()):
-   def walk(it):
-    d=it.data(0,Qt.UserRole) or {}; d['quantity']=float(it.text(1)); d['position']=it.text(3); d['remark']=it.text(4); rows.append(d)
-    for j in range(it.childCount()): walk(it.child(j))
-   top=self.tree.topLevelItem(i)
-   for j in range(top.childCount()): walk(top.child(j))
-  self.svc.save_bom(self.root,rows); self.dirty=False; self._saving=False; self.notice.setText(''); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False); QMessageBox.information(self,'保存','BOM已保存')
+  try:
+   rows=[]
+   def walk(it,parent_material):
+    d=dict(it.data(0,Qt.UserRole) or {})
+    d.update(quantity=float(it.text(1)),position=it.text(3),remark=it.text(4),parent_material_id=parent_material)
+    rows.append(d)
+    for j in range(it.childCount()): walk(it.child(j),d['material_id'])
+   for j in range(self.root_item.childCount()): walk(self.root_item.child(j),self.root)
+   self.svc.save_bom(self.root,rows)
+  except Exception as error:
+   self.mark_dirty()
+   QMessageBox.warning(self,'保存失败',f'BOM未保存，编辑内容已保留。\n{error}')
+   return False
+  finally:
+   self._saving=False
+  self.dirty=False; self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+  QMessageBox.information(self,'保存','BOM已保存')
+  return True
 
 class MaterialWindow(QMainWindow):
  def __init__(self,svc,parent=None):

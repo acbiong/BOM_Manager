@@ -41,45 +41,60 @@ class Services:
     seen.add(r['id']); d=dict(r); d['material_id']=r['child_material_id']; d['unit']=r['material_unit']; d['level_no']=level; d['parent_item_id']=parent_item_id; d['bom_root_id']=root; result.append(d); walk(r['child_material_id'],level+1,r['id'])
   walk(root,1,None); return result
  def save_bom(self,root,items):
-  changed_parents={root}
-  old_parent_materials={root}
+  """把树中的重复子BOM归并为物料关系，在单个事务中保存。"""
   old_rows=self.bom(root)
-  old_by_id={x['id']:x for x in old_rows}
-  for old in old_rows:
-   # 即使该物料保存后不再有任何子项，也必须通知它的 BOM 状态发生变化。
-   changed_parents.add(old['material_id'])
-   parent=old_by_id.get(old.get('parent_item_id'))
-   parent_material=parent['material_id'] if parent else root
-   changed_parents.add(parent_material); old_parent_materials.add(parent_material)
+  retained={root}|{row['material_id'] for row in items}
+  parents={root}|{row['parent_material_id'] for row in old_rows if row['parent_material_id'] in retained}
+  by_id={row['id']:row for row in items if row.get('id') is not None}
+  desired={}
+  old={ (row['parent_material_id'],row['child_material_id'],row['position'] or ''):dict(row)
+        for row in self.db.conn.execute('SELECT * FROM material_bom_items') }
+  def payload(row):
+   return (round(float(row['quantity']),1),row['unit'],row.get('remark','') or '')
+  for row in items:
+   parent=row.get('parent_material_id')
+   if parent is None:
+    pid=row.get('parent_item_id'); parent_row=by_id.get(pid)
+    if pid is not None and parent_row is None:
+     if isinstance(pid,int) and 1<=pid<=len(items): parent_row=items[pid-1]
+     else: raise ValueError('BOM结构存在无效的父级关系')
+    parent=parent_row['material_id'] if parent_row else root
+   key=(parent,row['material_id'],row.get('position','') or '')
+   values=payload(row)
+   if values[0]<=0: raise ValueError('物料数量必须至少为0.1')
+   parents.add(parent)
+   if key in desired and desired[key]!=values:
+    baseline=payload(old[key]) if key in old else None
+    if values==baseline: continue
+    if desired[key]!=baseline:
+     material=self.db.conn.execute('SELECT base_code,version,name FROM materials WHERE id=?',(row['material_id'],)).fetchone()
+     raise ValueError(f'共享子BOM的同一关系存在不同修改：{material[0]}-{material[1]} {material[2]}。请统一数量、位置和备注后保存。')
+   desired[key]=values
+  # 同一个物料关系可能在树的多条路径出现，但数据库只保存一份。
+  graph={}
+  for key in old:
+   if key[0] not in parents: graph.setdefault(key[0],set()).add(key[1])
+  for parent,child,_ in desired: graph.setdefault(parent,set()).add(child)
+  visiting=set(); visited=set()
+  def check(node):
+   if node in visiting: raise ValueError('BOM包含循环引用，请检查父级和子级物料')
+   if node in visited: return
+   visiting.add(node)
+   for child in graph.get(node,()): check(child)
+   visiting.remove(node); visited.add(node)
+  for parent in parents: check(parent)
   with self.db.transaction():
-   def find_parent(x):
-    pid=x.get('parent_item_id')
-    if pid is None:return None
-    found=next((y for y in items if y.get('id')==pid),None)
-    if found is None and isinstance(pid,int) and 1 <= pid <= len(items): found=items[pid-1]
-    return found
-   parents=set(old_parent_materials)
-   for x in items:
-    parent_row=find_parent(x)
-    parent_material=parent_row['material_id'] if parent_row else root
-    parents.add(parent_material); changed_parents.add(parent_material)
-   for parent in parents: self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(parent,))
-   relation_ids={}; pending=list(items); n=0
-   while pending:
-    progressed=False
-    for x in pending[:]:
-     parent_row=find_parent(x)
-     parent_material=parent_row['material_id'] if parent_row else root
-     parent_index=items.index(parent_row) if parent_row else None
-     if parent_row and parent_index not in relation_ids and parent_row.get('id') not in relation_ids: continue
-     cur=self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(parent_material,x['material_id'],round(float(x['quantity']),1),x['unit'],x.get('position',''),x.get('remark',''),n)); relation_ids[x.get('id')]=cur.lastrowid; n+=1; pending.remove(x); progressed=True
-     relation_ids[items.index(x)]=cur.lastrowid
-    if not progressed: raise ValueError('BOM结构存在无效的父级关系')
-   self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END'); self.log('bom',root,'update',f'{len(items)}行')
-  try:
-   from infrastructure.events import WindowRefreshBus
-   for changed_root in changed_parents: WindowRefreshBus.publish({'type':'bom_changed','root':changed_root})
-  except Exception: pass
+   for key,row in old.items():
+    if key[0] in parents and key not in desired:
+     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(row['id'],))
+     self.db.conn.execute('DELETE FROM material_bom_items WHERE id=?',(row['id'],))
+   for order,(key,values) in enumerate(desired.items()):
+    parent,child,position=key; quantity,unit,remark=values
+    self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?) ON CONFLICT(parent_material_id,child_material_id,position) DO UPDATE SET quantity=excluded.quantity,unit=excluded.unit,remark=excluded.remark,sort_no=excluded.sort_no,updated_at=CURRENT_TIMESTAMP',(parent,child,quantity,unit,position,remark,order))
+   self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
+   self.log('bom',root,'update',f'{len(desired)}条物料关系')
+  from infrastructure.events import WindowRefreshBus
+  for parent in parents: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
  def validate_bom_rows(self,root,rows):
   """校验导入BOM与现有结构的子项、数量、位置一致性。"""
   old={(x['material_id'],str(x['position'])):float(x['quantity']) for x in self.bom(root)}; new={(x['material_id'],str(x.get('position',''))):float(x['quantity']) for x in rows}
