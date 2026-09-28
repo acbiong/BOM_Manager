@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt
 from pathlib import Path
 from config.config_service import ConfigService
+from database.database import Database
 from infrastructure.events import WindowRefreshBus
 class MaterialDialog(QDialog):
  def __init__(self,parent=None,data=None,readonly_keys=None):
@@ -32,10 +33,29 @@ class MainWindow(QMainWindow):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+'-'+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
   self.statusBar().showMessage(f'共计{len(rows)}个SKU')
  def select_database(self):
-  p=QFileDialog.getSaveFileName(self,'选择SQLite数据库','bom.db','SQLite (*.db)')[0]
-  if p:
-   from config.config_service import ConfigService
-   c=ConfigService().load(); c['database']['path']=p; ConfigService().save(c); QMessageBox.information(self,'配置已保存','数据库路径已选择，请重启软件后生效：'+p)
+  current=Path(self.svc.db.path).expanduser()
+  # 保存对话框允许选择已有文件，也允许直接编辑文件名创建新数据库。
+  p=QFileDialog.getSaveFileName(self,'选择SQLite数据库',str(current),'SQLite (*.db *.sqlite);;所有文件 (*)')[0]
+  if not p:return
+  selected=Path(p).expanduser()
+  selected.parent.mkdir(parents=True,exist_ok=True)
+  existed=selected.exists()
+  if selected.resolve() == current.resolve():
+   QMessageBox.information(self,'数据库未切换','当前已经在使用该数据库：\n'+str(selected)); return
+  try:
+   # sqlite3.connect 对已有数据库是打开，对不存在的数据库才是创建，不会覆盖原文件。
+   new_db=Database(str(selected))
+   old_db=self.svc.db
+   self.svc.db=new_db
+   old_db.close()
+   c=ConfigService().load(); c['database']['path']=str(selected); ConfigService().save(c)
+   for attr in ('_materials','_bom'):
+    window=getattr(self,attr,None)
+    if window is not None: window.close()
+   self.refresh()
+   QMessageBox.information(self,'数据库已切换',('已打开已有数据库' if existed else '已创建并打开新数据库')+'：\n'+str(selected))
+  except Exception as exc:
+   QMessageBox.critical(self,'数据库切换失败',f'无法打开数据库：\n{selected}\n\n{exc}')
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库','资料库.xlsx','Excel (*.xlsx)')[0]
   if p:self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')

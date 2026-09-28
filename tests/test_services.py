@@ -25,6 +25,15 @@ class TestServices(unittest.TestCase):
   a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); self.s.save_bom(a,[{'material_id':b,'quantity':2,'unit':'pcs','position':'P'}]); same,detail=self.s.validate_bom_rows(a,[{'material_id':b,'quantity':2,'unit':'pcs','position':'P'}]); self.assertTrue(same); sid=self.s.create_sku(a); self.s.change_sku_version(sid,'2'); self.assertEqual(self.s.skus()[0]['version'],'2')
  def test_sqlite_schema_validation(self):
   ok,missing=self.s.db.validate_schema(); self.assertTrue(ok); self.assertEqual(missing,[])
+ def test_existing_sqlite_database_is_reused_without_overwrite(self):
+  """打开已有数据库应保留数据，不应以空库覆盖。"""
+  existing=self.f.name+'-existing.db'
+  first=Database(existing); Services(first).create_material({'base_code':'KEEP','version':'1','name':'已有物料','unit':'pcs'}); first.close()
+  reopened=Database(existing)
+  self.assertEqual(reopened.conn.execute('SELECT name FROM materials WHERE base_code=?',('KEEP',)).fetchone()['name'],'已有物料')
+  reopened.close()
+  new_path=self.f.name+'-new.db'; created=Database(new_path)
+  self.assertTrue(created.validate_schema()[0]); created.close()
  def test_alternate_crud(self):
   a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); c=self.s.create_material({'base_code':'C','version':'1','name':'C','unit':'pcs'}); self.s.save_bom(a,[{'material_id':b,'quantity':1,'unit':'pcs'}]); bid=self.s.bom(a)[0]['id']; self.s.add_alternate(bid,c); self.assertEqual(len(self.s.alternates(bid)),1); self.s.remove_alternate(self.s.alternates(bid)[0]['id']); self.assertEqual(len(self.s.alternates(bid)),0)
  def test_recursive_delete_and_event_bus(self):

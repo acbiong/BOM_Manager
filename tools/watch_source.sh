@@ -8,7 +8,7 @@ while :; do
  if [ "$hash" != "$last" ]; then
   if [ -n "$last" ]; then
    echo '[watch-package] 检测到源代码变化，开始生成AppImage'
-   APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE_RUNTIME="${APPIMAGE_RUNTIME:-$HOME/.local/bin/runtime-x86_64}" PATH="$HOME/.local/bin:$PATH" package/build_appimage.sh || echo '[watch-package] 打包失败，等待下次变化'
+   APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE_RUNTIME="${APPIMAGE_RUNTIME:-$HOME/.local/bin/runtime-x86_64}" PATH="$HOME/.local/bin:$PATH" tools/build_appimage.sh || echo '[watch-package] 打包失败，等待下次变化'
   fi
   last=$hash
  fi

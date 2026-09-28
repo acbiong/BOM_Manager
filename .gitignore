@@ -14,6 +14,8 @@ config.ini
 
 # 编译与打包生成物
 .pyinstaller/
+.tmp/
+tmp/
 *.toc
 *.manifest
 *.map
