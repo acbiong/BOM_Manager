@@ -99,3 +99,47 @@ class MaterialVersionTests(unittest.TestCase):
     window.change_version(i); simple.assert_called_once(); references.assert_not_called()
    self.assertEqual(self.material(i)['version'],'101')
   finally:window.close()
+ def test_version_dialog_two_columns_checkbox_left(self):
+  a=self.ids; dialog=MaterialVersionDialog(self.material(a['PART']),self.s.material_version_references(a['PART']))
+  try:
+   self.assertEqual(dialog.references.columnCount(),2)
+   self.assertFalse(dialog.references.rootIsDecorated())
+   item=dialog.references.topLevelItem(0)
+   self.assertEqual(item.checkState(0),Qt.Checked)
+   self.assertIn('SKU1-100 SKU1名称',item.text(0)); self.assertIn('SKU2-100 SKU2名称',item.text(0))
+   self.assertEqual(item.text(1),'P1-100 P1名称')
+  finally:dialog.close()
+ def test_reverse_lookup_two_lines_and_independent_parent(self):
+  from ui.main_window import MaterialUsageDialog
+  a=self.ids; parent=self.s.create_material(dict(base_code='LOOSE',version='1',name='独立',unit='pcs'))
+  self.s.save_bom(parent,[dict(material_id=a['PART'],quantity=1,unit='pcs')])
+  usages=self.s.material_usage(a['PART'])
+  self.assertEqual(len(usages),4)
+  self.assertIn({'sku':'未包含在SKU中','parent':'LOOSE-1 独立'},usages)
+  dialog=MaterialUsageDialog(self.material(a['PART']),usages)
+  try:
+   for i,usage in enumerate(usages):
+    self.assertEqual(dialog.table.item(i,0).text().splitlines(),['SKU：'+usage['sku'],'父级物料：'+usage['parent']])
+  finally:dialog.close()
+ def test_nonidle_context_delete_disabled_and_lookup_opens(self):
+  from PyQt5.QtWidgets import QMenu
+  from PyQt5.QtCore import QPoint
+  a=self.ids; window=MaterialWindow(self.s)
+  try:
+   def capture(menu,pos):
+    actions={action.text():action for action in menu.actions()}
+    self.assertFalse(actions['删除物料'].isEnabled()); self.assertIn('物料反查',actions)
+    return actions['物料反查']
+   row=next(n for n,r in enumerate(self.s.materials()) if r['id']==a['PART'])
+   with patch.object(window.t,'rowAt',return_value=row),patch.object(QMenu,'exec_',capture),patch('ui.main_window.MaterialUsageDialog') as usage:
+    window.menu(QPoint()); usage.return_value.exec_.assert_called_once()
+   with self.assertRaises(ValueError):self.s.delete_material(a['PART'])
+   with self.assertRaises(ValueError):self.s.delete_material(a['SKU1'])
+   unused=self.s.create_material(dict(base_code='FREE',version='1',name='未使用',unit='pcs'))
+   row=next(n for n,r in enumerate(self.s.materials()) if r['id']==unused)
+   def capture_idle(menu,pos):
+    actions={action.text():action for action in menu.actions()}
+    self.assertTrue(actions['删除物料'].isEnabled()); self.assertNotIn('物料反查',actions)
+    return None
+   with patch.object(window.t,'rowAt',return_value=row),patch.object(QMenu,'exec_',capture_idle):window.menu(QPoint())
+  finally:window.close()

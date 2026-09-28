@@ -7,7 +7,7 @@ class Services:
  def __init__(self,db): self.db=db
  def log(self,typ,obj,act,detail): self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail) VALUES(?,?,?,?)',(typ,obj,act,detail))
  def materials(self,query=''):
-  q=f'%{query}%'; return self.db.conn.execute('WITH RECURSIVE used_materials(id) AS (SELECT material_id FROM skus UNION SELECT b.child_material_id FROM material_bom_items b JOIN used_materials u ON b.parent_material_id=u.id) SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM used_materials u WHERE u.id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
+  q=f'%{query}%'; return self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
  def create_material(self,d):
   if not all(d.get(k) for k in ('base_code','version','name')): raise ValueError('基础编码、版本号、名称为必填')
   if d.get('unit','pcs') not in self.UNITS: raise ValueError('单位不合规')
@@ -22,6 +22,7 @@ class Services:
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'material_changed','id':i})
  def delete_material(self,i):
+  if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(i,)).fetchone(): raise ValueError('物料是SKU，请先删除SKU引用')
   r=self.db.conn.execute('SELECT COUNT(*) n FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)).fetchone();
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料')
@@ -152,7 +153,12 @@ class Services:
     if any(row['material_id']==i and row['parent_material_id']==parent['id'] for row in self.bom(sku['material_id'])):
      usages.append(f"{sku['base_code']}-{sku['version']} {sku['name']}")
    parent_label=f"{parent['base_code']}-{parent['version']} {parent['name']}"
-   result.append({'parent_id':parent['id'],'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
+   result.append({'parent_id':parent['id'],'sku_labels':usages or ['未包含在SKU中'],'parent_label':parent_label,'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
+  return result
+ def material_usage(self,i):
+  result=[{'sku':sku,'parent':reference['parent_label']} for reference in self.material_version_references(i) for sku in reference['sku_labels']]
+  for sku in self.skus():
+   if sku['material_id']==i: result.append({'sku':f"{sku['base_code']}-{sku['version']} {sku['name']}",'parent':'SKU根节点（无父级）'})
   return result
  def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
   new_version=new_version.strip()

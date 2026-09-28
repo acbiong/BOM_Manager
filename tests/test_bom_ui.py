@@ -203,20 +203,22 @@ class BomUiTests(unittest.TestCase):
    for col in range(materials.t.columnCount()):
     self.assertEqual(materials.t.item(index,col).background().color()==QColor('red'),idle=='Y')
   try:
-   self.assertTrue(all(value=='Y' for value in flags().values()))
-   assert_color('CHILD','Y')
+   self.assertEqual(flags(),{r:'N',p:'N',c:'N',o:'Y',x:'Y'})
+   assert_color('CHILD','N')
    first=self.s.create_sku(r)
    self.assertEqual(flags(),{r:'N',p:'N',c:'N',o:'Y',x:'Y'})
    assert_color('CHILD','N'); assert_color('OTHER','Y'); assert_color('ROOT','N')
    second=self.s.create_sku(x)
    self.s.save_bom(r,[])
-   self.assertEqual(flags(),{r:'N',p:'Y',c:'Y',o:'Y',x:'N'})
-   assert_color('PARENT','Y'); assert_color('CHILD','Y')
+   self.assertEqual(flags(),{r:'N',p:'Y',c:'N',o:'Y',x:'N'})
+   assert_color('PARENT','Y'); assert_color('CHILD','N')
    self.s.delete_sku(first)
    self.assertEqual(flags()[r],'N')  # 仍在另一个SKU下
    self.s.delete_sku(second)
-   self.assertTrue(all(value=='Y' for value in flags().values()))
+   self.assertEqual(flags(),{r:'Y',p:'Y',c:'N',o:'Y',x:'Y'})
    assert_color('ROOT','Y')
+   self.s.save_bom(p,[])
+   self.assertEqual(flags()[c],'Y'); assert_color('CHILD','Y')
   finally: materials.close()
  def test_idle_query_handles_legacy_cycles_and_filter(self):
   r,p,c,o,x=self.ids; self.s.create_sku(r)
