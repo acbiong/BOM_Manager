@@ -368,16 +368,29 @@ class MaterialWindow(QMainWindow):
   m=QMenu(self); e=m.addAction('编辑物料'); v=m.addAction('物料版本变更'); d=m.addAction('删除物料'); a=m.exec_(self.t.viewport().mapToGlobal(pos))
   rid=self.svc.materials()[row]['id']
   if a==v:
-   r=self.svc.materials()[row]; nv,ok=QInputDialog.getText(self,'物料版本变更','新版本号',text=r['version'])
-   if ok:
-    try:self.svc.change_material_version(r['id'],nv.strip()); self.refresh()
-    except Exception as ex: QMessageBox.warning(self,'版本变更失败',str(ex))
+   self.change_version(rid)
   elif a==e:
    r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
    if dlg.exec_(): self.svc.update_material(rid,dlg.data()); self.refresh()
   elif a==d and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
    try:self.svc.delete_material(rid); self.refresh()
    except Exception as ex: QMessageBox.warning(self,'无法删除',str(ex))
+ def change_version(self,material_id):
+  try:
+   references=self.svc.material_version_references(material_id)
+   old=next(row for row in self.svc.materials() if row['id']==material_id)
+   if references:
+    dialog=MaterialVersionDialog(old,references,self)
+    if dialog.exec_()!=QDialog.Accepted:return
+    version=dialog.version.text(); selected=dialog.selected_parents()
+   else:
+    version,ok=QInputDialog.getText(self,'物料版本变更','新版本号',text=old['version'])
+    if not ok:return
+    selected=set()
+   self.svc.change_material_version(material_id,version,selected,{r['parent_id'] for r in references})
+   self.refresh()
+   if self.parent() is not None and hasattr(self.parent(),'refresh'): self.parent().refresh()
+  except Exception as error: QMessageBox.warning(self,'版本变更失败',str(error))
  def new_material(self):
   d=MaterialDialog(self)
   if d.exec_(): self.svc.create_material(d.data()); self.refresh()
@@ -403,6 +416,24 @@ class MaterialWindow(QMainWindow):
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
     self.t.setItem(i,j,item)
   fit_columns(self.t)
+
+class MaterialVersionDialog(QDialog):
+ def __init__(self,material,references,parent=None):
+  super().__init__(parent); self.setWindowTitle('物料版本变更'); self.resize(720,430)
+  layout=QVBoxLayout(self)
+  label=QLabel(f"{material['base_code']}-{material['version']} {material['name']}"); label.setWordWrap(True); layout.addWidget(label)
+  form=QFormLayout(); self.version=QLineEdit(material['version']); form.addRow('新版本号',self.version); layout.addLayout(form)
+  text=QLabel('该物料被如下BOM所使用，请勾选需要同步使用新版本的BOM。\n同一父级BOM由多个SKU共享时统一更新，下方列出全部受影响SKU。\n全部勾选直接修改原物料；部分或全部不勾选则保留旧物料并创建新版本。'); text.setWordWrap(True); layout.addWidget(text)
+  self.references=QTreeWidget(); self.references.setHeaderLabels(['同步更新 / SKU编码 SKU名称 / 父级物料编码 父级物料名称']); self.references.setWordWrap(True)
+  for reference in references:
+   item=QTreeWidgetItem(self.references,['\n'.join(reference['labels'])]); item.setData(0,Qt.UserRole,reference['parent_id']); item.setCheckState(0,Qt.Checked)
+  layout.addWidget(self.references)
+  buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def selected_parents(self):
+  return {self.references.topLevelItem(n).data(0,Qt.UserRole) for n in range(self.references.topLevelItemCount()) if self.references.topLevelItem(n).checkState(0)==Qt.Checked}
+ def accept(self):
+  if not self.version.text().strip(): QMessageBox.warning(self,'版本号无效','版本号不能为空'); return
+  super().accept()
 
 class ProjectDialog(QDialog):
  def __init__(self,parent=None,row=None):

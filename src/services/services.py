@@ -142,13 +142,47 @@ class Services:
  def update_project(self,d):
   with self.db.transaction(): self.db.conn.execute('UPDATE project SET project_name=?,project_code=?,product_name=?,product_model=? WHERE id=1',(d.get('project_name',''),d.get('project_code',''),d.get('product_name',''),d.get('product_model',''))); self.log('project',1,'update',d.get('project_name',''))
  def project(self): return self.db.conn.execute('SELECT * FROM project WHERE id=1').fetchone()
- def change_material_version(self,i,new_version):
+ def material_version_references(self,i):
+  """以实际共享父级BOM为选择单位，列出所有受影响SKU。"""
+  parents=self.db.conn.execute('SELECT DISTINCT m.* FROM material_bom_items b JOIN materials m ON m.id=b.parent_material_id WHERE b.child_material_id=? ORDER BY m.base_code,m.version',(i,)).fetchall()
+  result=[]
+  for parent in parents:
+   usages=[]
+   for sku in self.skus():
+    if any(row['material_id']==i and row['parent_material_id']==parent['id'] for row in self.bom(sku['material_id'])):
+     usages.append(f"{sku['base_code']}-{sku['version']} {sku['name']}")
+   parent_label=f"{parent['base_code']}-{parent['version']} {parent['name']}"
+   result.append({'parent_id':parent['id'],'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
+  return result
+ def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
+  new_version=new_version.strip()
   if not new_version: raise ValueError('版本号不能为空')
-  old=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
-  if self.db.conn.execute('SELECT 1 FROM materials WHERE base_code=? AND version=?',(old['base_code'],new_version)).fetchone(): raise ValueError('目标版本已存在')
-  with self.db.transaction(): self.db.conn.execute('UPDATE materials SET version=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(new_version,i)); self.log('material',i,'version',f'{old["version"]}->{new_version}')
+  with self.db.transaction():
+   old=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
+   if old is None: raise ValueError('物料不存在')
+   if self.db.conn.execute('SELECT 1 FROM materials WHERE base_code=? AND version=?',(old['base_code'],new_version)).fetchone(): raise ValueError('目标版本已存在')
+   parents={r[0] for r in self.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items WHERE child_material_id=?',(i,))}
+   if expected_parents is not None and parents!=set(expected_parents): raise ValueError('物料的BOM引用已变化，请重新打开版本变更窗口')
+   selected=parents if selected_parents is None else set(selected_parents)
+   if not selected<=parents: raise ValueError('所选BOM引用已变化，请重新选择')
+   if selected==parents:
+    new_id=i
+    self.db.conn.execute('UPDATE materials SET version=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(new_version,i))
+   else:
+    columns=['base_code','name','description','unit','manufacturer','mpn','mp_flag','has_bom']
+    values=[old[k] for k in columns]
+    new_id=self.db.conn.execute('INSERT INTO materials('+','.join(columns)+',version) VALUES('+','.join('?' for _ in range(len(columns)+1))+')',values+[new_version]).lastrowid
+    # 新版本继承原物料自己的下阶结构和替代料，新旧版本后续可独立维护。
+    for child in self.db.conn.execute('SELECT * FROM material_bom_items WHERE parent_material_id=?',(i,)).fetchall():
+     relation=self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(new_id,child['child_material_id'],child['quantity'],child['unit'],child['position'],child['remark'],child['sort_no'])).lastrowid
+     self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) SELECT ?,material_id,sort_no FROM alternates WHERE bom_item_id=?',(relation,child['id']))
+    for parent in selected:
+     self.db.conn.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,parent,i))
+   self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={sorted(selected)}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
   from infrastructure.events import WindowRefreshBus
-  WindowRefreshBus.publish({'type':'material_changed','id':i})
+  WindowRefreshBus.publish({'type':'material_changed','id':new_id})
+  for parent in selected: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
+  return new_id
  def add_alternate(self,bom_item_id,material_id):
   with self.db.transaction(): self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,COALESCE((SELECT MAX(sort_no)+1 FROM alternates WHERE bom_item_id=?),0))',(bom_item_id,material_id,bom_item_id))
  def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
