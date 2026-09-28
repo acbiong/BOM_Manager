@@ -43,7 +43,7 @@ class MaterialDialog(QDialog):
   d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
 class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
-  super().__init__(); self.svc=svc; self._bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
+  super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database);  mm=bar.addMenu('物料库'); a=mm.addAction('物料库窗口'); a.triggered.connect(self.show_materials); a=mm.addAction('刷新'); a.triggered.connect(self.refresh); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); sm=bar.addMenu('SKU'); a=sm.addAction('新建SKU'); a.triggered.connect(self.new_sku); a=sm.addAction('版本变更'); a.triggered.connect(self.change_sku_version); a=sm.addAction('删除SKU'); a.triggered.connect(self.delete_sku)
   self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom)
@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
    if not valid:
     new_db.close()
     raise ValueError('数据库结构不可用，缺少表：'+', '.join(missing))
-   for window in list(self._bom_windows.values()):
+   for window in list(self._material_bom_windows.values()):
     if not window.close(): new_db.close(); return
    if self._materials is not None: self._materials.close()
    old_db=self.svc.db
@@ -145,13 +145,23 @@ class MainWindow(QMainWindow):
   if QMessageBox.question(self,'确认','删除当前SKU及BOM？')==QMessageBox.Yes:self.svc.delete_sku(sid); self.refresh()
  def open_bom(self,row,col): self.open_bom_id(int(self.table.item(row,5).text()))
  def open_bom_id(self,sid):
-  if sid not in self._bom_windows:
-   row=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
-   if row is None:return
-   window=BomWindow(self.svc,row['material_id'],self)
-   self._bom_windows[sid]=window
-   window.closed.connect(lambda:self._bom_windows.pop(sid,None))
-  self.activate_window(self._bom_windows[sid])
+  row=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
+  if row is None:return
+  window=self.open_material_bom(row['material_id'])
+  if window is not None:self._bom_windows[sid]=window
+ def open_material_bom(self,material_id):
+  if self.svc.db.conn.execute('SELECT 1 FROM materials WHERE id=?',(material_id,)).fetchone() is None:return
+  if material_id not in self._material_bom_windows:
+   window=BomWindow(self.svc,material_id,self)
+   self._material_bom_windows[material_id]=window
+   def unregister():
+    self._material_bom_windows.pop(material_id,None)
+    for sid,opened in list(self._bom_windows.items()):
+     if opened is window:self._bom_windows.pop(sid,None)
+   window.closed.connect(unregister)
+  window=self._material_bom_windows[material_id]
+  self.activate_window(window)
+  return window
  def export_materials(self):
   p=QFileDialog.getSaveFileName(self,'导出物料库','物料库.xlsx','Excel (*.xlsx)')[0]
   if p:self.svc.export_materials(p); QMessageBox.information(self,'完成','导出成功')
@@ -177,7 +187,7 @@ class BomWindow(QMainWindow):
  def on_external_change(self,event):
   if self._saving: return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
-   self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.refresh_action.setEnabled(True); self.statusBar().showMessage('检测到当前SKU包含的BOM有更新')
+   self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.refresh_action.setEnabled(True); self.statusBar().showMessage('检测到当前物料包含的BOM有更新')
  def closeEvent(self,event):
   if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); event.accept(); return
   box=QMessageBox(self); box.setWindowTitle('BOM未保存'); box.setText('BOM结构或物料信息已修改，是否保存？'); save=box.addButton('保存并退出',QMessageBox.AcceptRole); discard=box.addButton('不保存退出',QMessageBox.DestructiveRole); cancel=box.addButton('取消',QMessageBox.RejectRole); box.exec_()
@@ -353,7 +363,7 @@ class BomWindow(QMainWindow):
 class MaterialWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,parent=None):
-  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
+  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
   menu=self.menuBar().addMenu('物料库'); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('刷新'); a.triggered.connect(self.refresh); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current); self.refresh()
  def edit_current(self,row,column):
   rs=self.svc.materials();
@@ -367,9 +377,12 @@ class MaterialWindow(QMainWindow):
   if row<0:return
   material=self.svc.materials()[row]; rid=material['id']
   m=QMenu(self); e=m.addAction('编辑物料'); v=m.addAction('物料版本变更'); d=m.addAction('删除物料'); d.setEnabled(material['idle']=='Y')
+  edit_bom=m.addAction('编辑物料BOM结构') if material['has_bom']=='Y' else None
   reverse=m.addAction('物料反查') if material['idle']=='N' else None
   a=m.exec_(self.t.viewport().mapToGlobal(pos))
   if a is None:return
+  if edit_bom is not None and a==edit_bom:
+   self.open_material_bom(rid); return
   if reverse is not None and a==reverse:
    MaterialUsageDialog(material,self.svc.material_usage(rid),self).exec_(); return
   if a==v:
@@ -380,6 +393,17 @@ class MaterialWindow(QMainWindow):
   elif a==d and d.isEnabled() and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
    try:self.svc.delete_material(rid); self.refresh()
    except Exception as ex: QMessageBox.warning(self,'无法删除',str(ex))
+ def open_material_bom(self,material_id):
+  main=self.parent()
+  while main is not None and not isinstance(main,MainWindow): main=main.parent()
+  if main is not None:return main.open_material_bom(material_id)
+  if material_id not in self._local_bom_windows:
+   window=BomWindow(self.svc,material_id,self); self._local_bom_windows[material_id]=window
+   window.closed.connect(lambda:self._local_bom_windows.pop(material_id,None))
+  window=self._local_bom_windows[material_id]
+  if window.isMinimized():window.showNormal()
+  else:window.show()
+  window.raise_(); window.activateWindow(); return window
  def change_version(self,material_id):
   try:
    references=self.svc.material_version_references(material_id)
@@ -412,6 +436,8 @@ class MaterialWindow(QMainWindow):
  def on_event(self,event):
   if event.get('type') in ('material_changed','bom_changed','sku_changed'): self.refresh()
  def closeEvent(self,event):
+  for window in list(self._local_bom_windows.values()):
+   if not window.close(): event.ignore(); return
   WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); event.accept()
  def refresh(self):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))

@@ -234,3 +234,46 @@ class BomUiTests(unittest.TestCase):
    self.assertEqual(rows[0][-1],'是否为呆滞料')
    flags={row[0]:row[-1] for row in rows[1:]}
    self.assertEqual(flags['CHILD'],'N'); self.assertEqual(flags['OTHER'],'Y'); wb.close()
+ def test_unreferenced_non_sku_bom_is_idle_and_editable(self):
+  from ui.main_window import MainWindow,MaterialWindow
+  from PyQt5.QtWidgets import QMenu
+  from PyQt5.QtCore import QPoint
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  main=MainWindow(self.s); main.show_materials(); materials=main._materials
+  try:
+   flags={row['id']:row for row in self.s.materials()}
+   self.assertEqual(flags[x]['has_bom'],'Y'); self.assertEqual(flags[x]['idle'],'Y')
+   row=next(i for i,m in enumerate(self.s.materials()) if m['id']==x)
+   self.assertEqual(materials.t.item(row,9).text(),'Y')
+   for col in range(materials.t.columnCount()):self.assertEqual(materials.t.item(row,col).background().color(),QColor('red'))
+   def choose(menu,pos):return next(action for action in menu.actions() if action.text()=='编辑物料BOM结构')
+   with patch.object(materials.t,'rowAt',return_value=row),patch.object(QMenu,'exec_',choose):materials.menu(QPoint())
+   window=main._material_bom_windows[x]
+   self.assertEqual(window.root_item.data(0,Qt.UserRole)['material_id'],x)
+   self.assertEqual(window.root_item.child(0).child(0).child(0).data(0,Qt.UserRole)['material_id'],c)
+   observer=BomWindow(self.s,r)
+   try:
+    window.show_item_info(window.root_item.child(0).child(0).child(0)); window.fields['quantity'].setValue(8.5)
+    with patch.object(QMessageBox,'information'):self.assertTrue(window.save())
+    self.assertEqual(self.s.bom(p)[0]['quantity'],8.5); self.assertTrue(observer.refresh_action.isEnabled())
+    observer.refresh_external(); self.assertEqual(observer.root_item.child(0).child(0).text(1),'8.5')
+    self.assertEqual({m['id']:m['idle'] for m in self.s.materials()}[x],'Y')
+   finally:observer.close()
+  finally:
+   for window in list(main._material_bom_windows.values()):window.dirty=False; window.close()
+   materials.close(); main.close()
+ def test_material_and_sku_entries_share_one_bom_window(self):
+  from ui.main_window import MainWindow
+  r,p,c,o,x=self.ids; sid=self.s.create_sku(r); main=MainWindow(self.s)
+  try:
+   main.show_materials(); first=main._materials.open_material_bom(r)
+   main.open_bom_id(sid); self.assertIs(main._bom_windows[sid],first)
+   self.assertIs(main._materials.open_material_bom(r),first)
+   self.assertEqual(len(main._material_bom_windows),1)
+   first.close(); self.assertNotIn(sid,main._bom_windows); self.assertNotIn(r,main._material_bom_windows)
+   main.open_bom_id(sid); second=main._bom_windows[sid]
+   self.assertIs(main._materials.open_material_bom(r),second)
+  finally:
+   for window in list(main._material_bom_windows.values()):window.dirty=False; window.close()
+   main._materials.close(); main.close()
