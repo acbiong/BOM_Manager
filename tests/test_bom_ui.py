@@ -327,3 +327,41 @@ class BomUiTests(unittest.TestCase):
    self.assertEqual([a.text() for a in actions],['新建物料','导入物料','导出物料库','导出模板'])
    self.assertTrue(all(a.menu() is None for a in actions))
   finally:materials.close()
+ def test_alternate_notifications_follow_owning_bom(self):
+  r,p,c,o,x=self.ids
+  # 两个SKU均直接包含PARENT，但ROOT->PARENT与CYCLE->PARENT属于各自的BOM。
+  subtree=[dict(row) for row in self.s.bom(p)]
+  self.s.save_bom(x,[dict(material_id=p,parent_material_id=x,quantity=1,unit='pcs')]+subtree)
+  self.s.create_sku(r); self.s.create_sku(x)
+  other=BomWindow(self.s,x); events=[]; WindowRefreshBus.subscribe(events.append)
+  try:
+   node=self.w.root_item.child(0); self.w.tree.setCurrentItem(node); self.w.show_item_info(node)
+   with patch.object(QInputDialog,'getItem',return_value=('OTHER-1 OTHER',True)):self.w.add_alternate()
+   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+   self.assertEqual({e['root'] for e in events if e['type']=='bom_changed'},{r})
+   self.assertFalse(other.refresh_action.isEnabled()); self.assertEqual(other.notice.text(),'')
+   self.assertEqual(self.s.alternates(self.s.bom(x)[0]['id']),[])
+   self.assertEqual(self.s.alternates(self.s.bom(r)[0]['id'])[0]['material_id'],o)
+   # 修改共享PARENT下CHILD的替代料，真正变更的是PARENT的BOM。
+   events.clear(); leaf=self.w.root_item.child(0).child(0); self.w.tree.setCurrentItem(leaf); self.w.show_item_info(leaf)
+   with patch.object(QInputDialog,'getItem',return_value=('OTHER-1 OTHER',True)):self.w.add_alternate()
+   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+   self.assertEqual({e['root'] for e in events if e['type']=='bom_changed'},{p})
+   self.assertTrue(other.refresh_action.isEnabled()); other.refresh_external()
+   other.show_item_info(other.root_item.child(0).child(0)); self.assertEqual(other.alt_table.item(0,0).text(),'OTHER')
+   self.assertFalse(self.w.refresh_action.isEnabled()); self.assertEqual(self.w.notice.text(),'')
+   # 未修改再次保存、或重复提交相同替代料，不应产生无关更新事件。
+   events.clear()
+   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+   self.assertEqual(events,[]); self.assertFalse(other.refresh_action.isEnabled())
+   leaf=self.w.root_item.child(0).child(0); self.w._alternate_edits[self.w.alternate_key(leaf)]=[o]
+   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+   self.assertEqual(events,[])
+   # 删除共享子BOM替代料同样通知其他SKU，并同步空列表。
+   leaf=self.w.root_item.child(0).child(0)
+   self.w._alternate_edits[self.w.alternate_key(leaf)]=[]
+   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+   self.assertEqual({e['root'] for e in events if e['type']=='bom_changed'},{p})
+   other.refresh_external(); other.show_item_info(other.root_item.child(0).child(0)); self.assertEqual(other.alt_table.rowCount(),0)
+  finally:
+   WindowRefreshBus.unsubscribe(events.append); other.close()

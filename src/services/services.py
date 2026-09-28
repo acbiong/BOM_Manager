@@ -89,6 +89,17 @@ class Services:
      material=self.db.conn.execute('SELECT base_code,version,name FROM materials WHERE id=?',(row['material_id'],)).fetchone()
      raise ValueError(f'共享子BOM的同一关系存在不同修改：{material[0]}-{material[1]} {material[2]}。请统一数量、位置和备注后保存。')
    desired[key]=values
+  # 替代料属于父子关系。只通知真正改变的父级BOM，不能把整棵树都当成已更新。
+  changed_parents=set()
+  old_groups={}; new_groups={}
+  for key,row in sorted(old.items(),key=lambda pair:(pair[1]['sort_no'],pair[1]['id'])):
+   old_groups.setdefault(key[0],[]).append((key,payload(row)))
+  for key,values in desired.items():new_groups.setdefault(key[0],[]).append((key,values))
+  for parent in parents:
+   if old_groups.get(parent,[])!=new_groups.get(parent,[]):changed_parents.add(parent)
+  for key,alternates in alternate_updates.items():
+   previous=[row['material_id'] for row in self.alternates(old[key]['id'])] if key in old else []
+   if previous!=alternates:changed_parents.add(key[0])
   # 同一个物料关系可能在树的多条路径出现，但数据库只保存一份。
   graph={}
   for key in old:
@@ -117,7 +128,7 @@ class Services:
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
    self.log('bom',root,'update',f'{len(desired)}条物料关系')
   from infrastructure.events import WindowRefreshBus
-  for parent in parents: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
+  for parent in changed_parents: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
  def validate_bom_rows(self,root,rows):
   """校验导入BOM与现有结构的子项、数量、位置一致性。"""
   old={(x['material_id'],str(x['position'])):float(x['quantity']) for x in self.bom(root)}; new={(x['material_id'],str(x.get('position',''))):float(x['quantity']) for x in rows}
