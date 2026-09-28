@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
  def build(self):
-  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database);  mm=bar.addMenu('物料库'); a=mm.addAction('物料库窗口'); a.triggered.connect(self.show_materials); a=mm.addAction('刷新'); a.triggered.connect(self.refresh); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); sm=bar.addMenu('SKU'); a=sm.addAction('新建SKU'); a.triggered.connect(self.new_sku); a=sm.addAction('版本变更'); a.triggered.connect(self.change_sku_version); a=sm.addAction('删除SKU'); a.triggered.connect(self.delete_sku)
+  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database);  a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); sm=bar.addMenu('SKU'); a=sm.addAction('新建SKU'); a.triggered.connect(self.new_sku); a=sm.addAction('版本变更'); a.triggered.connect(self.change_sku_version); a=sm.addAction('删除SKU'); a.triggered.connect(self.delete_sku)
   self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom)
   self.project_label=QLabel(); self.project_label.setAlignment(Qt.AlignCenter); self.project_label.setStyleSheet('font-size:18px;font-weight:bold;padding:8px;')
   body=QWidget(); layout=QVBoxLayout(body); layout.addWidget(self.project_label); layout.addWidget(self.table); self.setCentralWidget(body)
@@ -250,35 +250,93 @@ class BomWindow(QMainWindow):
     if d.get('material_id')==material_id:return True
     stack.extend([item.child(j) for j in range(item.childCount())])
   return False
- def cached_values(self):
-  values={}
-  for i in range(self.tree.topLevelItemCount()):
-   stack=[self.tree.topLevelItem(i)]
-   while stack:
-    item=stack.pop(); d=item.data(0,Qt.UserRole) or {}
-    if not d.get('root') and d.get('material_id'):
-     parent=item.parent(); pd=parent.data(0,Qt.UserRole) if parent else {}
-     values[(pd.get('material_id'),d.get('material_id'),str(item.text(3)))] = (item.text(1),item.text(3),item.text(4))
-    stack.extend([item.child(j) for j in range(item.childCount())])
-  return values
+ def capture_tree(self):
+  def capture(item):
+   data=dict(item.data(0,Qt.UserRole) or {})
+   data.update(quantity=float(item.text(1)),position=item.text(3),remark=item.text(4))
+   return {'data':data,'children':[capture(item.child(n)) for n in range(item.childCount())]}
+  return [capture(self.root_item.child(n)) for n in range(self.root_item.childCount())]
+ def database_tree(self):
+  roots=[]; nodes={}
+  for row in self.svc.bom(self.root):
+   node={'data':dict(row),'children':[]}; nodes[row['node_id']]=node
+   parent=nodes.get(row['parent_node_id'])
+   (parent['children'] if parent else roots).append(node)
+  return roots
+ def merge_refresh(self,baseline,local,remote,conflicts):
+  """三方合并：只把本地相对载入基线的修改覆盖到最新数据库结构。"""
+  from copy import deepcopy
+  def identity(node,all_nodes):
+   mid=node['data']['material_id']
+   # 正常BOM同一父级仅出现一次物料；兼容历史多位置同物料关系。
+   duplicate=any(sum(n['data']['material_id']==mid for n in group)>1 for group in all_nodes)
+   return (mid,node['data'].get('id')) if duplicate else (mid,)
+  groups=(baseline,local,remote)
+  base={identity(n,groups):n for n in baseline}; ours={identity(n,groups):n for n in local}; theirs={identity(n,groups):n for n in remote}
+  def modified(node,original):
+   pending=[node]
+   while pending:
+    candidate=pending.pop()
+    if candidate['data'].get('id') in self._alternate_edits:return True
+    pending.extend(candidate['children'])
+   if any(node['data'].get(k)!=original['data'].get(k) for k in ('quantity','position','remark')):return True
+   if node['children']!=original['children']:return True
+   return False
+  merged=[]
+  for key,new in theirs.items():
+   previous=base.get(key); edit=ours.get(key)
+   if previous is not None and edit is None:continue  # 本地明确删除，刷新不能恢复。
+   if edit is None:merged.append(deepcopy(new)); continue
+   if previous is None:
+    if edit['data'].get('id')!=new['data'].get('id'):conflicts.append('双方新增相同物料')
+    previous={'data':{},'children':[]}
+   result=deepcopy(new)
+   for field in ('quantity','position','remark'):
+    value=edit['data'].get(field)
+    if value!=previous['data'].get(field):
+     if new['data'].get(field)!=previous['data'].get(field) and value!=new['data'].get(field):conflicts.append('同一字段同时修改')
+     result['data'][field]=value
+   old_id=edit['data'].get('id'); new_id=result['data'].get('id')
+   if old_id in self._alternate_edits and old_id!=new_id:self._alternate_edits[new_id]=list(self._alternate_edits[old_id])
+   result['children']=self.merge_refresh(previous['children'],edit['children'],new['children'],conflicts)
+   merged.append(result)
+  for key,edit in ours.items():
+   if key in theirs:continue
+   previous=base.get(key)
+   if previous is None or modified(edit,previous):
+    if previous is not None:conflicts.append('外部删除了本地已编辑物料')
+    merged.append(deepcopy(edit))
+  return merged
  def refresh_external(self):
-  cached=self.cached_values() if self.dirty else {}
-  self.load(cached); self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(self.dirty)
+  from copy import deepcopy
+  fresh=self.database_tree(); conflicts=[]
+  merged=self.merge_refresh(self._baseline_tree,self.capture_tree(),fresh,conflicts) if self.dirty else fresh
+  def exclude_deleted(nodes,parent_id):
+   result=[]
+   for node in nodes:
+    data=node['data']
+    if (parent_id,data['material_id'],data.get('position','') or '') in self._deleted_relations:continue
+    node['children']=exclude_deleted(node['children'],data['material_id']); result.append(node)
+   return result
+  self.render_tree(exclude_deleted(merged,self.root)); self._baseline_tree=deepcopy(fresh)
+  self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(self.dirty)
+  if conflicts:self.statusBar().showMessage('已加载外部更新；检测到冲突，已保留本地未保存修改，请核对后保存。')
  def load(self,preserve=None):
+  from copy import deepcopy
+  fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh)
+  self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+ def render_tree(self,nodes):
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
   self.setWindowTitle(f"{root['base_code']}-{root['version']} {root['name']}")
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}-{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
-  for r in self.svc.bom(self.root):
-   if (r['parent_material_id'],r['material_id'],r['position'] or '') in self._deleted_relations:continue
-   if r['parent_node_id'] is not None and r['parent_node_id'] not in self.by:continue
-   parent=self.by.get(r['parent_node_id'],self.root_item); item=QTreeWidgetItem(parent,[f"{r['base_code']}-{r['version']} {r['name']}",f"{r['quantity']:.1f}",r['unit'],r['position'],r['remark']]); item.setData(0,Qt.UserRole,dict(r)); self.by[r['node_id']]=item
-   if preserve:
-    pd=parent.data(0,Qt.UserRole) or {}; values=preserve.get((pd.get('material_id'),r['material_id'],str(r['position'])))
-    if values:
-     item.setText(1,values[0]); item.setText(3,values[1]); item.setText(4,values[2]); d=item.data(0,Qt.UserRole) or {}; d.update({'quantity':float(values[0]),'position':values[1],'remark':values[2]}); item.setData(0,Qt.UserRole,d)
-  fit_columns(self.tree)
-  self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
-  self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
+  def append(node,parent,path,level):
+   data=dict(node['data']); parent_data=parent.data(0,Qt.UserRole) or {}
+   node_id=f"{path}/{data['id']}"
+   data.update(node_id=node_id,parent_node_id=path or None,parent_material_id=parent_data['material_id'],parent_item_id=parent_data.get('id'),level_no=level)
+   item=QTreeWidgetItem(parent,[f"{data['base_code']}-{data['version']} {data['name']}",f"{data['quantity']:.1f}",data['unit'],data.get('position',''),data.get('remark','')]); item.setData(0,Qt.UserRole,data); self.by[node_id]=item
+   for child in node['children']:append(child,item,node_id,level+1)
+  for node in nodes:append(node,self.root_item,'',1)
+  fit_columns(self.tree); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
  def show_item_info(self,item,column=0):
   self.current_item=item
   d=item.data(0,Qt.UserRole) or {}
@@ -538,4 +596,3 @@ class ProjectDialog(QDialog):
    w=QLineEdit(str(value or '')); self.e[k]=w; f.addRow(l,w)
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self): return {k:w.text().strip() for k,w in self.e.items()}
-

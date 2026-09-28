@@ -365,3 +365,71 @@ class BomUiTests(unittest.TestCase):
    other.refresh_external(); other.show_item_info(other.root_item.child(0).child(0)); self.assertEqual(other.alt_table.rowCount(),0)
   finally:
    WindowRefreshBus.unsubscribe(events.append); other.close()
+ def test_refresh_preserves_changed_position_and_merges_external_fields(self):
+  r,p,c,o,x=self.ids
+  parent=self.w.root_item.child(0); self.w.show_item_info(parent)
+  self.w.fields['quantity'].setValue(4.5); self.w.fields['position'].setText('本地位置'); self.w.fields['remark'].setText('本地备注')
+  rows=[dict(row) for row in self.s.bom(r)]
+  rows[0]['quantity']=9.0  # 同字段冲突保留本地值
+  rows[1]['quantity']=6.7; rows[1]['remark']='外部下阶备注'
+  self.s.save_bom(r,rows)
+  self.assertTrue(self.w.refresh_action.isEnabled()); self.w.refresh_external()
+  parent=self.w.root_item.child(0); self.w.show_item_info(parent)
+  self.assertEqual((parent.text(1),parent.text(3),parent.text(4)),('4.5','本地位置','本地备注'))
+  self.assertEqual(self.w.fields['position'].text(),'本地位置')
+  self.assertEqual((parent.child(0).text(1),parent.child(0).text(4)),('6.7','外部下阶备注'))
+  self.assertTrue(self.w.save_action.isEnabled()); self.assertIn('保留本地',self.w.statusBar().currentMessage())
+  self.w.refresh_external(); parent=self.w.root_item.child(0)
+  self.assertEqual(parent.text(3),'本地位置'); self.assertEqual(parent.child(0).text(1),'6.7')
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  saved=self.s.bom(r); self.assertEqual(saved[0]['position'],'本地位置'); self.assertEqual(saved[1]['quantity'],6.7)
+ def test_refresh_keeps_unsaved_nodes_descendants_and_alternates(self):
+  r,p,c,o,x=self.ids
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER 1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  self.w.fields['position'].setText('新增位置')
+  with patch.object(QInputDialog,'getItem',return_value=('CHILD-1 CHILD',True)):self.w.add_alternate()
+  added=self.w.tree.currentItem()
+  with patch.object(QInputDialog,'getItem',return_value=('CHILD 1 CHILD',True)):self.w.add_relative(added.data(0,Qt.UserRole),True)
+  self.w.fields['quantity'].setValue(3.2)
+  rows=[dict(row) for row in self.s.bom(p)]; rows[0]['quantity']=8.1; self.s.save_bom(p,rows)
+  self.w.refresh_external(); self.w.refresh_external()
+  self.assertEqual(self.w.root_item.child(0).child(0).text(1),'8.1')
+  added=self.w.root_item.child(1); self.assertEqual(added.text(3),'新增位置'); self.assertEqual(added.child(0).text(1),'3.2')
+  self.w.show_item_info(added); self.assertEqual(self.w.alt_table.rowCount(),1)
+  self.assertEqual(len(self.s.bom(r)),2)  # 刷新没有提前提交新增节点
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  relation=next(row['id'] for row in self.s.bom(r) if row['material_id']==o)
+  self.assertEqual(self.s.alternates(relation)[0]['material_id'],c)
+  self.assertEqual(self.s.bom(o)[0]['quantity'],3.2)
+ def test_refresh_keeps_local_deletion_but_accepts_external_addition(self):
+  r,p,c,o,x=self.ids
+  self.w.remove_relation(self.w.root_item.child(0).child(0))
+  rows=[dict(row) for row in self.s.bom(p)]+[dict(material_id=o,parent_material_id=p,quantity=2,unit='pcs')]
+  self.s.save_bom(p,rows); self.w.refresh_external()
+  parent=self.w.root_item.child(0)
+  self.assertEqual(parent.childCount(),1); self.assertEqual(parent.child(0).data(0,Qt.UserRole)['material_id'],o)
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.assertEqual([row['material_id'] for row in self.s.bom(p)],[o])
+ def test_external_delete_does_not_discard_edited_local_subtree(self):
+  r,p,c,o,x=self.ids
+  self.w.show_item_info(self.w.root_item.child(0).child(0)); self.w.fields['remark'].setText('尚未保存')
+  self.s.save_bom(r,[]); self.w.refresh_external()
+  self.assertEqual(self.w.root_item.child(0).child(0).text(4),'尚未保存')
+  self.assertIn('冲突',self.w.statusBar().currentMessage()); self.assertTrue(self.w.dirty)
+ def test_sku_menu_material_button_opens_existing_library(self):
+  from ui.main_window import MainWindow
+  main=MainWindow(self.s)
+  try:
+   actions={a.text():a for a in main.menuBar().actions()}
+   self.assertIn('物料库',actions); self.assertIsNone(actions['物料库'].menu()); self.assertNotIn('刷新',actions)
+   actions['物料库'].trigger(); first=main._materials; actions['物料库'].trigger(); self.assertIs(main._materials,first)
+  finally:
+   if main._materials is not None:main._materials.close()
+   main.close()
+ def test_refresh_retains_descendant_alternate_when_parent_removed_externally(self):
+  r,p,c,o,x=self.ids; leaf=self.w.root_item.child(0).child(0)
+  self.w.tree.setCurrentItem(leaf); self.w.show_item_info(leaf)
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER-1 OTHER',True)):self.w.add_alternate()
+  self.s.save_bom(r,[]); self.w.refresh_external()
+  leaf=self.w.root_item.child(0).child(0); self.w.show_item_info(leaf)
+  self.assertEqual(self.w.alt_table.rowCount(),1); self.assertIn('冲突',self.w.statusBar().currentMessage())
