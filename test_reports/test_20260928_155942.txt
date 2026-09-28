@@ -10,7 +10,7 @@ TRACE_OK 137/137
 [自动化测试]
 $ env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -q
 ----------------------------------------------------------------------
-Ran 19 tests in 0.098s
+Ran 19 tests in 0.099s
 
 OK
 [exit=0]
