@@ -34,8 +34,15 @@ class MainWindow(QMainWindow):
   self.statusBar().showMessage(f'共计{len(rows)}个SKU')
  def select_database(self):
   current=Path(self.svc.db.path).expanduser()
-  # 保存对话框允许选择已有文件，也允许直接编辑文件名创建新数据库。
-  p=QFileDialog.getSaveFileName(self,'选择SQLite数据库',str(current),'SQLite (*.db *.sqlite);;所有文件 (*)')[0]
+  # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
+  # 这样已有文件会直接作为候选数据库打开，输入新文件名仍可创建数据库。
+  chooser=QFileDialog(self,'选择SQLite数据库',str(current),'SQLite (*.db *.sqlite);;所有文件 (*)')
+  chooser.setFileMode(QFileDialog.AnyFile)
+  chooser.setAcceptMode(QFileDialog.AcceptSave)
+  chooser.setOption(QFileDialog.DontUseNativeDialog,True)
+  chooser.setOption(QFileDialog.DontConfirmOverwrite,True)
+  if chooser.exec_()!=QDialog.Accepted:return
+  p=chooser.selectedFiles()[0] if chooser.selectedFiles() else ''
   if not p:return
   selected=Path(p).expanduser()
   selected.parent.mkdir(parents=True,exist_ok=True)
@@ -45,6 +52,10 @@ class MainWindow(QMainWindow):
   try:
    # sqlite3.connect 对已有数据库是打开，对不存在的数据库才是创建，不会覆盖原文件。
    new_db=Database(str(selected))
+   valid,missing=new_db.validate_schema()
+   if not valid:
+    new_db.close()
+    raise ValueError('数据库结构不可用，缺少表：'+', '.join(missing))
    old_db=self.svc.db
    self.svc.db=new_db
    old_db.close()
@@ -55,7 +66,7 @@ class MainWindow(QMainWindow):
    self.refresh()
    QMessageBox.information(self,'数据库已切换',('已打开已有数据库' if existed else '已创建并打开新数据库')+'：\n'+str(selected))
   except Exception as exc:
-   QMessageBox.critical(self,'数据库切换失败',f'无法打开数据库：\n{selected}\n\n{exc}')
+   QMessageBox.critical(self,'数据库错误','目标数据库无法使用，请重新选择数据库。\n\n'+str(exc))
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库','资料库.xlsx','Excel (*.xlsx)')[0]
   if p:self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
@@ -175,8 +186,7 @@ class BomWindow(QMainWindow):
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  r=rows[items.index(x)]; data={'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}
-  item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1',r['unit'],'','']); item.setData(0,Qt.UserRole,data); self.by[0]=item; target.setExpanded(True); self.dirty=True; self.tree.setCurrentItem(item); self.show_item_info(item)
+  r=rows[items.index(x)]; item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1',r['unit'],'','']); temporary_id=-id(item); data={'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; item.setData(0,Qt.UserRole,data); self.by[temporary_id]=item; target.setExpanded(True); self.dirty=True; self.tree.setCurrentItem(item); self.show_item_info(item)
  def manage_alternates(self):
   it=self.tree.currentItem(); d=it.data(0,Qt.UserRole) if it else None
   if not d or not d.get('id'): QMessageBox.information(self,'提示','请先选择BOM物料'); return
@@ -207,7 +217,7 @@ class BomWindow(QMainWindow):
 class MaterialWindow(QMainWindow):
  def __init__(self,svc,parent=None):
   super().__init__(parent); self.svc=svc; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
-  menu=self.menuBar().addMenu('物料库'); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('刷新'); a.triggered.connect(self.refresh); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['序号','基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','呆滞物料']); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current); self.refresh()
+  menu=self.menuBar().addMenu('物料库'); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('刷新'); a.triggered.connect(self.refresh); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(9); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','是否存在BOM结构']); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current); self.refresh()
  def edit_current(self,row,column):
   rs=self.svc.materials();
   if row<0 or row>=len(rs): return
@@ -251,7 +261,7 @@ class MaterialWindow(QMainWindow):
  def refresh(self):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
-   for j,v in enumerate([i+1,r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['manufacturer'],r['mpn'],r['mp_flag'],r['idle']]): self.t.setItem(i,j,QTableWidgetItem(str(v or '')))
+   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom']]): self.t.setItem(i,j,QTableWidgetItem(str(v or '')))
 
 class ProjectDialog(QDialog):
  def __init__(self,parent=None,row=None):
