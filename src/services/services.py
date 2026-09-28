@@ -40,11 +40,15 @@ class Services:
   walk(root,1,None); return result
  def save_bom(self,root,items):
   changed_parents={root}
+  old_parent_materials={root}
   old_rows=self.bom(root)
   old_by_id={x['id']:x for x in old_rows}
   for old in old_rows:
+   # 即使该物料保存后不再有任何子项，也必须通知它的 BOM 状态发生变化。
+   changed_parents.add(old['material_id'])
    parent=old_by_id.get(old.get('parent_item_id'))
-   changed_parents.add(parent['material_id'] if parent else root)
+   parent_material=parent['material_id'] if parent else root
+   changed_parents.add(parent_material); old_parent_materials.add(parent_material)
   with self.db.transaction():
    def find_parent(x):
     pid=x.get('parent_item_id')
@@ -52,7 +56,7 @@ class Services:
     found=next((y for y in items if y.get('id')==pid),None)
     if found is None and isinstance(pid,int) and 1 <= pid <= len(items): found=items[pid-1]
     return found
-   parents={root}
+   parents=set(old_parent_materials)
    for x in items:
     parent_row=find_parent(x)
     parent_material=parent_row['material_id'] if parent_row else root
@@ -90,6 +94,10 @@ class Services:
    self.db.conn.execute('DELETE FROM material_bom_items WHERE id=?',(bom_item_id,))
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
    self.log('bom',r['parent_material_id'],'delete',f'删除下阶物料{r["child_material_id"]}')
+  try:
+   from infrastructure.events import WindowRefreshBus
+   WindowRefreshBus.publish({'type':'bom_changed','root':r['parent_material_id']})
+  except Exception: pass
  def import_bom(self,path,root=None):
   required=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
   wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; hs=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]; miss=[x for x in required if x not in hs]
