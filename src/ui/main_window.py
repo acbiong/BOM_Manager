@@ -1,7 +1,7 @@
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QBrush, QFont
 from pathlib import Path
 from config.config_service import ConfigService
 from database.database import Database
@@ -172,7 +172,7 @@ class MainWindow(QMainWindow):
 class BomWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,root,parent=None):
-  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
+  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
   self.tree=QTreeWidget(); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
   self.fields={}; form=QFormLayout();
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
@@ -184,6 +184,7 @@ class BomWindow(QMainWindow):
  def mark_dirty(self):
   self.dirty=True
   self.save_action.setEnabled(True)
+  self.refresh_styles()
  def on_external_change(self,event):
   if self._saving: return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
@@ -201,6 +202,7 @@ class BomWindow(QMainWindow):
   it=self.tree.itemAt(pos)
   if not it:return
   d=it.data(0,Qt.UserRole) or {}
+  if d.get('_deleted'):return
   if it is getattr(self,'root_item',None):
    m=QMenu(self); child=m.addAction('增加子级物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
    if act==child: self.add_relative(d,True)
@@ -216,7 +218,7 @@ class BomWindow(QMainWindow):
   parent_data=parent.data(0,Qt.UserRole) if parent else {}
   return (parent_data.get('material_id'),data.get('material_id'),item.text(3))
  def remove_relation(self,item):
-  """共享BOM只存一份关系，删除时同步移除当前树中该关系的所有副本。"""
+  """将共享关系的所有显示副本标记为待删除，保存前保留可见。"""
   if item is self.root_item:return
   key=self.relation_key(item); relation_id=(item.data(0,Qt.UserRole) or {}).get('id')
   matches=[]; stack=[self.root_item]
@@ -236,9 +238,8 @@ class BomWindow(QMainWindow):
    pending=[node]
    while pending:
     removed=pending.pop(); removed_data=removed.data(0,Qt.UserRole) or {}
-    self.by.pop(removed_data.get('node_id'),None)
+    removed_data['_deleted']=True; removed.setData(0,Qt.UserRole,removed_data)
     pending.extend(removed.child(i) for i in range(removed.childCount()))
-   node.parent().removeChild(node)
   self.mark_dirty(); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
  def contains_material(self,material_id):
   if material_id is None:return False
@@ -253,13 +254,14 @@ class BomWindow(QMainWindow):
  def capture_tree(self):
   def capture(item):
    data=dict(item.data(0,Qt.UserRole) or {})
-   data.update(quantity=float(item.text(1)),position=item.text(3),remark=item.text(4))
+   data.update(quantity=float(item.text(1)),position=item.text(3),remark=data.get('remark',''))
    return {'data':data,'children':[capture(item.child(n)) for n in range(item.childCount())]}
   return [capture(self.root_item.child(n)) for n in range(self.root_item.childCount())]
  def database_tree(self):
-  roots=[]; nodes={}
+  roots=[]; nodes={}; alternate_cache={}
   for row in self.svc.bom(self.root):
-   node={'data':dict(row),'children':[]}; nodes[row['node_id']]=node
+   if row['id'] not in alternate_cache:alternate_cache[row['id']]=[r['material_id'] for r in self.svc.alternates(row['id'])]
+   node={'data':dict(row),'children':[]}; node['data']['_db_alternates']=alternate_cache[row['id']]; nodes[row['node_id']]=node
    parent=nodes.get(row['parent_node_id'])
    (parent['children'] if parent else roots).append(node)
   return roots
@@ -274,23 +276,24 @@ class BomWindow(QMainWindow):
   groups=(baseline,local,remote)
   base={identity(n,groups):n for n in baseline}; ours={identity(n,groups):n for n in local}; theirs={identity(n,groups):n for n in remote}
   def modified(node,original):
-   pending=[node]
-   while pending:
-    candidate=pending.pop()
-    if candidate['data'].get('id') in self._alternate_edits:return True
-    pending.extend(candidate['children'])
-   if any(node['data'].get(k)!=original['data'].get(k) for k in ('quantity','position','remark')):return True
-   if node['children']!=original['children']:return True
-   return False
+   data=node['data']; previous=original['data']
+   if data.get('_deleted') or data.get('_added'):return True
+   if data.get('id') in self._alternate_edits and self._alternate_edits[data['id']]!=previous.get('_db_alternates',[]):return True
+   if any(data.get(k)!=previous.get(k) for k in ('quantity','position','remark')):return True
+   if [n['data'].get('id') for n in node['children']]!=[n['data'].get('id') for n in original['children']]:return True
+   return any(modified(child,old) for child,old in zip(node['children'],original['children']))
   merged=[]
   for key,new in theirs.items():
    previous=base.get(key); edit=ours.get(key)
+   if edit is not None and edit['data'].get('_deleted'):
+    merged.append(deepcopy(edit)); continue
    if previous is not None and edit is None:continue  # 本地明确删除，刷新不能恢复。
    if edit is None:merged.append(deepcopy(new)); continue
    if previous is None:
     if edit['data'].get('id')!=new['data'].get('id'):conflicts.append('双方新增相同物料')
     previous={'data':{},'children':[]}
    result=deepcopy(new)
+   if edit['data'].get('_added'):result['data']['_added']=True
    for field in ('quantity','position','remark'):
     value=edit['data'].get(field)
     if value!=previous['data'].get(field):
@@ -303,47 +306,91 @@ class BomWindow(QMainWindow):
   for key,edit in ours.items():
    if key in theirs:continue
    previous=base.get(key)
-   if previous is None or modified(edit,previous):
-    if previous is not None:conflicts.append('外部删除了本地已编辑物料')
+   if previous is None or edit['data'].get('_deleted') or modified(edit,previous):
+    if previous is not None and not edit['data'].get('_deleted'):conflicts.append('外部删除了本地已编辑物料')
     merged.append(deepcopy(edit))
   return merged
  def refresh_external(self):
   from copy import deepcopy
   fresh=self.database_tree(); conflicts=[]
+  root=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone())
+  if any(root.get(k)!=self._root_baseline.get(k) for k in ('base_code','version','name','description','unit','manufacturer','mpn','mp_flag')):self._external_paths.add(())
+  self._root_baseline=root
+  before=self.snapshot_map(self._baseline_tree); after=self.snapshot_map(fresh)
+  for path,node in after.items():
+   old=before.get(path)
+   if old is None or self.remote_signature(old)!=self.remote_signature(node):self._external_paths.add(path)
+  for path in before.keys()-after.keys():self._external_paths.add(path[:-1])
   merged=self.merge_refresh(self._baseline_tree,self.capture_tree(),fresh,conflicts) if self.dirty else fresh
   def exclude_deleted(nodes,parent_id):
    result=[]
    for node in nodes:
     data=node['data']
-    if (parent_id,data['material_id'],data.get('position','') or '') in self._deleted_relations:continue
+    if (parent_id,data['material_id'],data.get('position','') or '') in self._deleted_relations:data['_deleted']=True
     node['children']=exclude_deleted(node['children'],data['material_id']); result.append(node)
    return result
   self.render_tree(exclude_deleted(merged,self.root)); self._baseline_tree=deepcopy(fresh)
-  self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(self.dirty)
+  self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(self.dirty or bool(self._external_paths)); self.refresh_styles()
   if conflicts:self.statusBar().showMessage('已加载外部更新；检测到冲突，已保留本地未保存修改，请核对后保存。')
  def load(self,preserve=None):
   from copy import deepcopy
-  fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh)
+  fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()); self._external_paths.clear(); self.refresh_styles()
   self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
  def render_tree(self,nodes):
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
   self.setWindowTitle(f"{root['base_code']}-{root['version']} {root['name']}")
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}-{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
   def append(node,parent,path,level):
-   data=dict(node['data']); parent_data=parent.data(0,Qt.UserRole) or {}
+   data=dict(node['data']); data.setdefault('_edit_base',{k:data.get(k) for k in ('quantity','position','remark')}); parent_data=parent.data(0,Qt.UserRole) or {}
    node_id=f"{path}/{data['id']}"
    data.update(node_id=node_id,parent_node_id=path or None,parent_material_id=parent_data['material_id'],parent_item_id=parent_data.get('id'),level_no=level)
    item=QTreeWidgetItem(parent,[f"{data['base_code']}-{data['version']} {data['name']}",f"{data['quantity']:.1f}",data['unit'],data.get('position',''),data.get('remark','')]); item.setData(0,Qt.UserRole,data); self.by[node_id]=item
    for child in node['children']:append(child,item,node_id,level+1)
   for node in nodes:append(node,self.root_item,'',1)
   fit_columns(self.tree); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
+ def snapshot_map(self,nodes,path=()):
+  result={}
+  for node in nodes:
+   key=path+(node['data']['material_id'],); result[key]=node
+   result.update(self.snapshot_map(node['children'],key))
+  return result
+ def remote_signature(self,node):
+  fields=('material_id','quantity','position','remark','base_code','version','name','description','unit','manufacturer','mpn','mp_flag','_db_alternates')
+  return ([node['data'].get(k) for k in fields],[(n['data']['material_id'],n['data'].get('position','')) for n in node['children']])
+ def refresh_styles(self):
+  if not hasattr(self,'root_item'):return
+  baseline=self.snapshot_map(getattr(self,'_baseline_tree',[]))
+  def style(item,path,added=False,deleted=False):
+   data=item.data(0,Qt.UserRole) or {}; root=item is self.root_item
+   if not root:path=path+(data['material_id'],)
+   added=added or data.get('_added',False); deleted=deleted or data.get('_deleted',False)
+   if deleted and not data.get('_deleted'):
+    data['_deleted']=True; item.setData(0,Qt.UserRole,data)
+   original=baseline.get(path,{}).get('data',data.get('_edit_base',{}))
+   changed={column for field,column in [('quantity',1),('position',3),('remark',4)] if not root and data.get(field,'')!=original.get(field,'')}
+   alternate_changed=self.alternate_key(item) in self._alternate_edits and self.alternate_ids(item)!=original.get('_db_alternates',[])
+   if alternate_changed:changed.add(0)
+   for column in range(self.tree.columnCount()):
+    font=QFont(self.tree.font()); font.setStrikeOut(bool(deleted)); font.setBold(column in changed and not deleted)
+    item.setFont(column,font)
+    color=QColor('red') if deleted else QColor('green') if added else QColor('yellow') if changed else None
+    item.setForeground(column,QBrush(color) if color else QBrush())
+    item.setBackground(column,QBrush(QColor('#d9b3ff')) if path in self._external_paths else QBrush())
+   remark=data.get('remark','') if not root else ''
+   display=remark
+   if path in self._external_paths:display=(remark+'\n' if remark else '')+'由其他BOM更新导入此变更'
+   item.setText(4,display); item.setToolTip(4,remark)
+   for n in range(item.childCount()):style(item.child(n),path,added,deleted)
+  style(self.root_item,())
+  fit_columns(self.tree)
  def show_item_info(self,item,column=0):
   self.current_item=item
   d=item.data(0,Qt.UserRole) or {}
   if d.get('root'):
    r=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone(); d=dict(r) if r else d
   self._loading_fields=True
-  self.fields['quantity'].setEnabled(not (item.data(0,Qt.UserRole) or {}).get('root'))
+  editable=not ((item.data(0,Qt.UserRole) or {}).get('root') or (item.data(0,Qt.UserRole) or {}).get('_deleted'))
+  for field in ('quantity','position','remark'):self.fields[field].setEnabled(editable)
   for k in self.fields: self.fields[k].setText(str(d.get(k,'') or ''))
   self._loading_fields=False
   self.alt_table.setRowCount(0)
@@ -358,6 +405,7 @@ class BomWindow(QMainWindow):
   fit_columns(self.alt_table)
  def update_tree_field(self,key,value):
   if self._loading_fields or self.current_item is None or self.current_item is getattr(self,'root_item',None): return
+  if (self.current_item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   value=f'{float(value):.1f}' if key=='quantity' else value
   col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); d=self.current_item.data(0,Qt.UserRole) or {}; d[key]=float(value) if key=='quantity' and value else value; self.current_item.setData(0,Qt.UserRole,d); self.mark_dirty()
  def add_relative(self,parent,child):
@@ -376,7 +424,7 @@ class BomWindow(QMainWindow):
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'_added':True,'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
   self.add_existing_children(item,r['id'],set())
   fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
  def add_existing_children(self,parent_item,material_id,ancestors):
@@ -386,7 +434,7 @@ class BomWindow(QMainWindow):
   parent_data=parent_item.data(0,Qt.UserRole) or {}
   for row in rows:
    if row['child_material_id'] in ancestors:continue
-   child=QTreeWidgetItem(parent_item,[f"{row['base_code']}-{row['version']} {row['name']}",f"{row['quantity']:.1f}",row['material_unit'],row['position'],row['remark']]); d=dict(row); d.update({'material_id':row['child_material_id'],'unit':row['material_unit'],'parent_item_id':parent_data.get('id'),'level_no':(parent_data.get('level_no') or 0)+1}); d.update(node_id=f"{parent_data.get('node_id')}/{row['id']}",parent_node_id=parent_data.get('node_id')); child.setData(0,Qt.UserRole,d); self.by[d['node_id']]=child; self.add_existing_children(child,row['child_material_id'],ancestors)
+   child=QTreeWidgetItem(parent_item,[f"{row['base_code']}-{row['version']} {row['name']}",f"{row['quantity']:.1f}",row['material_unit'],row['position'],row['remark']]); d=dict(row); d['_added']=parent_data.get('_added',False); d.update({'material_id':row['child_material_id'],'unit':row['material_unit'],'parent_item_id':parent_data.get('id'),'level_no':(parent_data.get('level_no') or 0)+1}); d.update(node_id=f"{parent_data.get('node_id')}/{row['id']}",parent_node_id=parent_data.get('node_id')); child.setData(0,Qt.UserRole,d); self.by[d['node_id']]=child; self.add_existing_children(child,row['child_material_id'],ancestors)
   parent_item.setExpanded(True)
  def alternate_key(self,item):
   data=item.data(0,Qt.UserRole) or {}
@@ -397,7 +445,7 @@ class BomWindow(QMainWindow):
   return [row['material_id'] for row in self.svc.alternates(key)] if isinstance(key,int) and key>0 else []
  def add_alternate(self):
   item=self.tree.currentItem()
-  if item is None or item is self.root_item:return
+  if item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   existing=self.alternate_ids(item); data=item.data(0,Qt.UserRole) or {}
   rows=[row for row in self.svc.materials() if row['id']!=data.get('material_id') and row['id'] not in existing]
   if not rows: QMessageBox.information(self,'增加替代料','没有可选替代料'); return
@@ -408,7 +456,7 @@ class BomWindow(QMainWindow):
   self.mark_dirty(); self.show_item_info(item)
  def alternate_menu(self,pos):
   row=self.alt_table.rowAt(pos.y()); item=self.current_item
-  if row<0 or item is None or item is self.root_item:return
+  if row<0 or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   menu=QMenu(self); remove=menu.addAction('删除替代料')
   if menu.exec_(self.alt_table.viewport().mapToGlobal(pos))!=remove:return
   if QMessageBox.question(self,'确认','删除当前替代料？')!=QMessageBox.Yes:return
@@ -433,7 +481,8 @@ class BomWindow(QMainWindow):
    rows=[]
    def walk(it,parent_material):
     d=dict(it.data(0,Qt.UserRole) or {})
-    d.update(quantity=float(it.text(1)),position=it.text(3),remark=it.text(4),parent_material_id=parent_material)
+    if d.get('_deleted'):return
+    d.update(quantity=float(it.text(1)),position=it.text(3),remark=d.get('remark',''),parent_material_id=parent_material)
     if self.alternate_key(it) in self._alternate_edits:d['alternate_material_ids']=self.alternate_ids(it)
     rows.append(d)
     for j in range(it.childCount()): walk(it.child(j),d['material_id'])

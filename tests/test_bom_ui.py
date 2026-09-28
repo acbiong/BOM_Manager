@@ -168,12 +168,12 @@ class BomUiTests(unittest.TestCase):
   try:
    child=self.w.root_item.child(1).child(0)
    self.w.remove_relation(child)
-   self.assertEqual(self.w.root_item.child(0).child(0).childCount(),0)
-   self.assertEqual(self.w.root_item.child(1).childCount(),0)
+   self.assertTrue(self.w.root_item.child(0).child(0).child(0).data(0,Qt.UserRole)['_deleted'])
+   self.assertTrue(self.w.root_item.child(1).child(0).data(0,Qt.UserRole)['_deleted'])
    self.assertEqual(len(self.s.bom(c)),1)  # 未保存不改数据库
    self.assertIs(self.w.tree.currentItem(),self.w.root_item)
    self.w.refresh_external()  # 未保存删除在外部刷新后仍然保留
-   self.assertEqual(self.w.root_item.child(1).childCount(),0)
+   self.assertTrue(self.w.root_item.child(1).child(0).data(0,Qt.UserRole)['_deleted'])
    with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
    self.assertEqual(self.s.bom(c),[])
    self.assertTrue(other.refresh_action.isEnabled()); other.refresh_external()
@@ -375,9 +375,9 @@ class BomUiTests(unittest.TestCase):
   self.s.save_bom(r,rows)
   self.assertTrue(self.w.refresh_action.isEnabled()); self.w.refresh_external()
   parent=self.w.root_item.child(0); self.w.show_item_info(parent)
-  self.assertEqual((parent.text(1),parent.text(3),parent.text(4)),('4.5','本地位置','本地备注'))
+  self.assertEqual((parent.text(1),parent.text(3),parent.data(0,Qt.UserRole)['remark']),('4.5','本地位置','本地备注'))
   self.assertEqual(self.w.fields['position'].text(),'本地位置')
-  self.assertEqual((parent.child(0).text(1),parent.child(0).text(4)),('6.7','外部下阶备注'))
+  self.assertEqual((parent.child(0).text(1),parent.child(0).data(0,Qt.UserRole)['remark']),('6.7','外部下阶备注'))
   self.assertTrue(self.w.save_action.isEnabled()); self.assertIn('保留本地',self.w.statusBar().currentMessage())
   self.w.refresh_external(); parent=self.w.root_item.child(0)
   self.assertEqual(parent.text(3),'本地位置'); self.assertEqual(parent.child(0).text(1),'6.7')
@@ -407,7 +407,7 @@ class BomUiTests(unittest.TestCase):
   rows=[dict(row) for row in self.s.bom(p)]+[dict(material_id=o,parent_material_id=p,quantity=2,unit='pcs')]
   self.s.save_bom(p,rows); self.w.refresh_external()
   parent=self.w.root_item.child(0)
-  self.assertEqual(parent.childCount(),1); self.assertEqual(parent.child(0).data(0,Qt.UserRole)['material_id'],o)
+  self.assertEqual(parent.childCount(),2); self.assertTrue(parent.child(0).data(0,Qt.UserRole)['_deleted']); self.assertEqual(parent.child(1).data(0,Qt.UserRole)['material_id'],o)
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
   self.assertEqual([row['material_id'] for row in self.s.bom(p)],[o])
  def test_external_delete_does_not_discard_edited_local_subtree(self):
@@ -433,3 +433,75 @@ class BomUiTests(unittest.TestCase):
   self.s.save_bom(r,[]); self.w.refresh_external()
   leaf=self.w.root_item.child(0).child(0); self.w.show_item_info(leaf)
   self.assertEqual(self.w.alt_table.rowCount(),1); self.assertIn('冲突',self.w.statusBar().currentMessage())
+ def test_pending_add_delete_colors_and_commit(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  # 新增有子BOM的物料：自身和递归子孙全部绿色。
+  self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER 1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  added=self.w.tree.currentItem()
+  for node in [added,added.child(0)]:
+   for column in range(self.w.tree.columnCount()):self.assertEqual(node.foreground(column).color(),QColor('green'))
+  # 待删除物料及子孙保留显示，但不提前写入数据库。
+  removed=self.w.root_item.child(0); self.w.remove_relation(removed)
+  self.assertEqual(self.w.root_item.childCount(),2); self.assertEqual(removed.childCount(),1)
+  for node in [removed,removed.child(0)]:
+   for column in range(self.w.tree.columnCount()):
+    self.assertEqual(node.foreground(column).color(),QColor('red')); self.assertTrue(node.font(column).strikeOut())
+  self.assertEqual(self.s.bom(r)[0]['material_id'],p)
+  self.w.show_item_info(removed); self.assertFalse(self.w.fields['quantity'].isEnabled()); self.assertFalse(self.w.fields['remark'].isEnabled())
+  self.w.refresh_external()
+  removed=self.w.root_item.child(0); self.assertTrue(removed.font(0).strikeOut()); self.assertEqual(self.w.root_item.child(1).foreground(0).color(),QColor('green'))
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.assertEqual(self.w.root_item.childCount(),1); added=self.w.root_item.child(0)
+  self.assertEqual(added.data(0,Qt.UserRole)['material_id'],o)
+  for node in [added,added.child(0)]:
+   for column in range(self.w.tree.columnCount()):
+    self.assertEqual(node.foreground(column).style(),Qt.NoBrush); self.assertEqual(node.background(column).style(),Qt.NoBrush)
+    self.assertFalse(node.font(column).strikeOut()); self.assertFalse(node.font(column).bold())
+ def test_modified_row_yellow_only_changed_cells_bold(self):
+  from PyQt5.QtGui import QColor
+  node=self.w.root_item.child(0); self.w.show_item_info(node)
+  self.w.fields['quantity'].setValue(5.4); self.w.fields['remark'].setText('真实修改备注')
+  for column in range(self.w.tree.columnCount()):
+   self.assertEqual(node.foreground(column).color(),QColor('yellow'))
+   self.assertEqual(node.font(column).bold(),column in (1,4))
+  self.w.fields['quantity'].setValue(1.0); self.assertFalse(node.font(1).bold())
+  self.w.fields['remark'].setText('')
+  self.assertEqual(node.foreground(0).style(),Qt.NoBrush)
+ def test_external_update_purple_note_not_persisted(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids; rows=[dict(row) for row in self.s.bom(p)]
+  rows[0]['quantity']=9.2; rows[0]['remark']='数据库真实备注'; self.s.save_bom(p,rows)
+  self.w.refresh_external(); node=self.w.root_item.child(0).child(0)
+  for column in range(self.w.tree.columnCount()):self.assertEqual(node.background(column).color(),QColor('#d9b3ff'))
+  self.assertIn('由其他BOM更新导入此变更',node.text(4)); self.assertTrue(self.w.save_action.isEnabled())
+  self.w.show_item_info(node); self.assertEqual(self.w.fields['remark'].text(),'数据库真实备注')
+  self.w.fields['position'].setText('本地位置'); self.w.refresh_external(); self.w.refresh_external()
+  node=self.w.root_item.child(0).child(0)
+  self.assertIn('由其他BOM更新导入此变更',node.text(4)); self.assertEqual(node.text(3),'本地位置')
+  self.assertEqual(node.background(0).color(),QColor('#d9b3ff')); self.assertEqual(node.foreground(0).color(),QColor('yellow'))
+  self.assertTrue(node.font(3).bold()); self.assertFalse(node.font(4).bold())
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  saved=self.s.bom(p)[0]; self.assertEqual(saved['remark'],'数据库真实备注'); self.assertEqual(saved['position'],'本地位置')
+  node=self.w.root_item.child(0).child(0)
+  self.assertEqual(node.text(4),'数据库真实备注'); self.assertEqual(node.background(0).style(),Qt.NoBrush); self.assertEqual(node.foreground(0).style(),Qt.NoBrush)
+ def test_external_alternate_update_marks_owner_row_purple(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids; rows=[dict(row) for row in self.s.bom(p)]; rows[0]['alternate_material_ids']=[o]
+  self.s.save_bom(p,rows); self.w.refresh_external()
+  node=self.w.root_item.child(0).child(0)
+  self.assertEqual(node.background(0).color(),QColor('#d9b3ff')); self.assertIn('由其他BOM更新导入此变更',node.text(4))
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.assertEqual(self.s.bom(p)[0]['remark'],'')
+ def test_failed_save_keeps_delete_visuals(self):
+  from PyQt5.QtGui import QColor
+  node=self.w.root_item.child(0); self.w.remove_relation(node)
+  with patch.object(self.s,'save_bom',side_effect=ValueError('模拟失败')),patch.object(QMessageBox,'warning'):self.assertFalse(self.w.save())
+  self.assertEqual(node.foreground(0).color(),QColor('red')); self.assertTrue(node.font(0).strikeOut()); self.assertTrue(self.w.dirty)
+ def test_root_material_update_is_highlighted_on_refresh(self):
+  from PyQt5.QtGui import QColor
+  self.s.update_material(self.ids[0],dict(name='新的根名称',unit='pcs'))
+  self.w.refresh_external()
+  self.assertEqual(self.w.root_item.background(0).color(),QColor('#d9b3ff'))
+  self.assertIn('新的根名称',self.w.root_item.text(0)); self.assertIn('由其他BOM更新导入此变更',self.w.root_item.text(4))
