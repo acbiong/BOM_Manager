@@ -322,7 +322,7 @@ class MaterialWindow(QMainWindow):
   if p:
    from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.save(p)
  def on_event(self,event):
-  if event.get('type')=='material_changed': self.refresh()
+  if event.get('type') in ('material_changed','bom_changed'): self.refresh()
  def closeEvent(self,event):
   WindowRefreshBus.unsubscribe(self.on_event); event.accept()
  def refresh(self):

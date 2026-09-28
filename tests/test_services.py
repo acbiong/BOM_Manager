@@ -11,6 +11,7 @@ class TestServices(unittest.TestCase):
   self.s.create_sku(i); self.assertEqual(len(self.s.skus()),1)
  def test_bom_and_idle(self):
   a=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'}); b=self.s.create_material({'base_code':'B','version':'1','name':'B','unit':'pcs'}); c=self.s.create_material({'base_code':'C','version':'1','name':'C','unit':'pcs'}); self.s.save_bom(a,[{'material_id':b,'quantity':2,'unit':'pcs','level_no':1},{'material_id':c,'quantity':1,'unit':'pcs','level_no':2,'parent_item_id':1}]); rows=self.s.bom(a); self.assertEqual([r['material_id'] for r in rows],[b,c]); self.assertEqual([r['level_no'] for r in rows],[1,2]); flags={r['id']:r['has_bom'] for r in self.s.materials()}; self.assertEqual(flags[a],'Y'); self.assertEqual(flags[b],'Y'); self.assertEqual(flags[c],'N')
+  self.s.save_bom(b,[]); self.assertEqual({r['id']:r['has_bom'] for r in self.s.materials()}[b],'N')
  def test_import_export(self):
   from openpyxl import Workbook,load_workbook
   p=self.f.name+'.xlsx'; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.active.append(['X','1','测试','','pcs','厂商','M']); w.save(p); ok,fail=self.s.import_materials(p); self.assertEqual(ok,['X']); self.assertEqual(fail,[]); out=self.f.name+'-out.xlsx'; self.s.export_materials(out); self.assertEqual(load_workbook(out).sheetnames,['变更记录','物料库']); os.unlink(p); os.unlink(out)
