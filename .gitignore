@@ -24,3 +24,6 @@ package/*.tar.gz
 package/*.sha256
 release/
 AppDir/
+
+# 测试报告仅在本地保存，不纳入版本控制
+/test_reports/

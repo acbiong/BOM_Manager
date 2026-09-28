@@ -191,3 +191,44 @@ class BomUiTests(unittest.TestCase):
    from PyQt5.QtCore import QPoint
    self.w.context_menu(QPoint())
    self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['新增同级物料','新增子级物料','删除物料'])
+ def test_idle_flags_recursive_shared_skus_and_red_rows(self):
+  from ui.main_window import MaterialWindow
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  materials=MaterialWindow(self.s)
+  def flags(): return {row['id']:row['idle'] for row in self.s.materials()}
+  def assert_color(code,idle):
+   index=next(i for i in range(materials.t.rowCount()) if materials.t.item(i,0).text()==code)
+   self.assertEqual(materials.t.item(index,9).text(),idle)
+   for col in range(materials.t.columnCount()):
+    self.assertEqual(materials.t.item(index,col).background().color()==QColor('red'),idle=='Y')
+  try:
+   self.assertTrue(all(value=='Y' for value in flags().values()))
+   assert_color('CHILD','Y')
+   first=self.s.create_sku(r)
+   self.assertEqual(flags(),{r:'N',p:'N',c:'N',o:'Y',x:'Y'})
+   assert_color('CHILD','N'); assert_color('OTHER','Y'); assert_color('ROOT','N')
+   second=self.s.create_sku(x)
+   self.s.save_bom(r,[])
+   self.assertEqual(flags(),{r:'N',p:'Y',c:'Y',o:'Y',x:'N'})
+   assert_color('PARENT','Y'); assert_color('CHILD','Y')
+   self.s.delete_sku(first)
+   self.assertEqual(flags()[r],'N')  # 仍在另一个SKU下
+   self.s.delete_sku(second)
+   self.assertTrue(all(value=='Y' for value in flags().values()))
+   assert_color('ROOT','Y')
+  finally: materials.close()
+ def test_idle_query_handles_legacy_cycles_and_filter(self):
+  r,p,c,o,x=self.ids; self.s.create_sku(r)
+  self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit) VALUES(?,?,1,?)',(c,r,'pcs')); self.db.conn.commit()
+  self.assertEqual(self.s.materials('CHILD')[0]['idle'],'N')
+  self.assertEqual(self.s.materials('OTHER')[0]['idle'],'Y')
+ def test_material_export_includes_idle_flag(self):
+  from openpyxl import load_workbook
+  self.s.create_sku(self.ids[0])
+  for method in (self.s.export_materials,self.s.export_database):
+   path=Path(self.tmp.name)/'materials.xlsx'; method(path)
+   wb=load_workbook(path); rows=list(wb['物料库'].values)
+   self.assertEqual(rows[0][-1],'是否为呆滞料')
+   flags={row[0]:row[-1] for row in rows[1:]}
+   self.assertEqual(flags['CHILD'],'N'); self.assertEqual(flags['OTHER'],'Y'); wb.close()

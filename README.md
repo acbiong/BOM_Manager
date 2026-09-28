@@ -15,3 +15,5 @@
 AI 编程完成后执行 `tools/finish_ai_change.sh`，脚本会一次性完成测试、需求审计、编译校验、补丁版本升级和 Git 提交，提交钩子随后生成新的 AppImage。可将准确的提交描述作为第一个参数传入，例如 `tools/finish_ai_change.sh '修复：调整BOM窗口按钮状态'`；未传入时会根据实际变更文件自动生成变更类型和内容。该流程不运行常驻监视进程，不增加系统后台负担。
 
 AI每次修改完成后，应在 `.tmp/` 写入提交说明文件（标题、具体变更、验证结果），执行 `tools/finish_ai_change.sh --message-file .tmp/change_message.txt`。脚本不再生成泛化提交描述，仍自动测试、升级版本、提交和打包。测试报告保存在 `test_reports/`。
+
+测试报告仍输出到 `test_reports/`，该目录已被 Git 忽略，仅保存在本地，不参与提交。物料库“是否为呆滞料”按全部SKU及其递归子物料计算；未被任何SKU使用的物料显示Y并标红。
