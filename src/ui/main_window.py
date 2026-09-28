@@ -428,11 +428,14 @@ class MaterialVersionDialog(QDialog):
   layout=QVBoxLayout(self)
   label=QLabel(f"{material['base_code']}-{material['version']} {material['name']}"); label.setWordWrap(True); layout.addWidget(label)
   form=QFormLayout(); self.version=QLineEdit(material['version']); form.addRow('新版本号',self.version); layout.addLayout(form)
-  text=QLabel('该物料被如下BOM所使用，请勾选需要同步使用新版本的BOM。\n同一父级BOM由多个SKU共享时统一更新，下方列出全部受影响SKU。\n全部勾选直接修改原物料；部分或全部不勾选则保留旧物料并创建新版本。'); text.setWordWrap(True); layout.addWidget(text)
-  self.references=QTreeWidget(); self.references.setHeaderLabels(['SKU编码 SKU名称','父级物料编码 父级物料名称']); self.references.setRootIsDecorated(False); self.references.setWordWrap(True)
+  text=QLabel('该物料被如下BOM所使用，请勾选需要同步使用新版本的BOM。'); text.setWordWrap(True); layout.addWidget(text)
+  self.references=QTreeWidget(); self.references.setHeaderLabels(['','SKU','父项物料']); self.references.setRootIsDecorated(False); self.references.setWordWrap(True)
   for reference in references:
-   item=QTreeWidgetItem(self.references,['\n'.join(reference['sku_labels']),reference['parent_label']]); item.setData(0,Qt.UserRole,reference['parent_id']); item.setCheckState(0,Qt.Checked)
-  fit_columns(self.references); layout.addWidget(self.references)
+   item=QTreeWidgetItem(self.references,['','\n'.join(reference['sku_labels']),reference['parent_label']]); item.setData(0,Qt.UserRole,reference['parent_id']); item.setCheckState(0,Qt.Checked)
+  fit_columns(self.references); self.references.header().setSectionResizeMode(0,QHeaderView.Fixed); self.references.setColumnWidth(0,40); layout.addWidget(self.references)
+  self.note=QLabel('同一父级BOM由多个SKU共享时统一更新，下方列出全部受影响SKU。\n全部勾选直接修改原物料；部分或全部不勾选则保留旧物料并创建新版本。')
+  self.note.setWordWrap(True); self.note.setAlignment(Qt.AlignLeft|Qt.AlignBottom)
+  font=self.note.font(); font.setPointSizeF(max(7.0,font.pointSizeF()-2)); self.note.setFont(font); layout.addWidget(self.note)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
  def selected_parents(self):
   return {self.references.topLevelItem(n).data(0,Qt.UserRole) for n in range(self.references.topLevelItemCount()) if self.references.topLevelItem(n).checkState(0)==Qt.Checked}
@@ -446,9 +449,23 @@ class MaterialUsageDialog(QDialog):
   layout=QVBoxLayout(self); title=QLabel(f"{material['base_code']}-{material['version']} {material['name']}"); title.setWordWrap(True); layout.addWidget(title)
   self.table=QTableWidget(len(usages),1); self.table.setHorizontalHeaderLabels(['包含此物料的SKU / 父级物料']); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.setWordWrap(True)
   for index,usage in enumerate(usages):
-   self.table.setItem(index,0,QTableWidgetItem(f"SKU：{usage['sku']}\n父级物料：{usage['parent']}"))
+   item=QTableWidgetItem(f"SKU：{usage['sku']}\n父级物料：{usage['parent']}"); item.setData(Qt.UserRole,usage.get('sku_id')); self.table.setItem(index,0,item)
+  self.table.cellDoubleClicked.connect(self.open_sku); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
   self.table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch); self.table.resizeRowsToContents(); layout.addWidget(self.table)
   buttons=QDialogButtonBox(QDialogButtonBox.Close); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def open_sku(self,row,column=0):
+  item=self.table.item(row,0)
+  if item is None:return
+  sku_id=item.data(Qt.UserRole)
+  if sku_id is None:
+   QMessageBox.information(self,'无对应SKU','此引用属于独立BOM，未包含在任何SKU中。'); return
+  main=self.parent()
+  while main is not None and not isinstance(main,MainWindow): main=main.parent()
+  if main is None:return
+  if main.svc.db.conn.execute('SELECT 1 FROM skus WHERE id=?',(sku_id,)).fetchone() is None:
+   QMessageBox.information(self,'SKU不存在','该SKU已删除，请重新进行物料反查。'); return
+  self.accept()  # 先结束模态反查，避免目标BOM被反查弹窗阻挡。
+  main.open_bom_id(sku_id)
  def resizeEvent(self,event):
   super().resizeEvent(event)
   self.table.resizeRowsToContents()

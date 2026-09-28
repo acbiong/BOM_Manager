@@ -99,15 +99,18 @@ class MaterialVersionTests(unittest.TestCase):
     window.change_version(i); simple.assert_called_once(); references.assert_not_called()
    self.assertEqual(self.material(i)['version'],'101')
   finally:window.close()
- def test_version_dialog_two_columns_checkbox_left(self):
+ def test_version_dialog_three_columns_checkbox_left(self):
   a=self.ids; dialog=MaterialVersionDialog(self.material(a['PART']),self.s.material_version_references(a['PART']))
   try:
-   self.assertEqual(dialog.references.columnCount(),2)
+   self.assertEqual(dialog.references.columnCount(),3)
    self.assertFalse(dialog.references.rootIsDecorated())
    item=dialog.references.topLevelItem(0)
    self.assertEqual(item.checkState(0),Qt.Checked)
-   self.assertIn('SKU1-100 SKU1名称',item.text(0)); self.assertIn('SKU2-100 SKU2名称',item.text(0))
-   self.assertEqual(item.text(1),'P1-100 P1名称')
+   self.assertEqual(item.text(0),''); self.assertIn('SKU1-100 SKU1名称',item.text(1)); self.assertIn('SKU2-100 SKU2名称',item.text(1))
+   self.assertEqual(item.text(2),'P1-100 P1名称')
+   self.assertEqual([dialog.references.headerItem().text(n) for n in range(3)],['','SKU','父项物料'])
+   self.assertLess(dialog.note.font().pointSizeF(),dialog.font().pointSizeF())
+   self.assertGreater(dialog.layout().indexOf(dialog.note),dialog.layout().indexOf(dialog.references))
   finally:dialog.close()
  def test_reverse_lookup_two_lines_and_independent_parent(self):
   from ui.main_window import MaterialUsageDialog
@@ -115,7 +118,7 @@ class MaterialVersionTests(unittest.TestCase):
   self.s.save_bom(parent,[dict(material_id=a['PART'],quantity=1,unit='pcs')])
   usages=self.s.material_usage(a['PART'])
   self.assertEqual(len(usages),4)
-  self.assertIn({'sku':'未包含在SKU中','parent':'LOOSE-1 独立'},usages)
+  self.assertIn({'sku_id':None,'sku':'未包含在SKU中','parent':'LOOSE-1 独立'},usages)
   dialog=MaterialUsageDialog(self.material(a['PART']),usages)
   try:
    for i,usage in enumerate(usages):
@@ -143,3 +146,22 @@ class MaterialVersionTests(unittest.TestCase):
     return None
    with patch.object(window.t,'rowAt',return_value=row),patch.object(QMenu,'exec_',capture_idle):window.menu(QPoint())
   finally:window.close()
+ def test_reverse_double_click_reuses_sku_window(self):
+  from ui.main_window import MainWindow,MaterialUsageDialog
+  a=self.ids; main=MainWindow(self.s); main.show_materials()
+  def dialog():return MaterialUsageDialog(self.material(a['PART']),self.s.material_usage(a['PART']),main._materials)
+  try:
+   first=dialog(); sid=first.table.item(0,0).data(Qt.UserRole)
+   first.table.cellDoubleClicked.emit(0,0)
+   self.assertEqual(first.result(),QDialog.Accepted); self.assertEqual(len(main._bom_windows),1)
+   original=main._bom_windows[sid]; original.show_item_info(original.root_item.child(0)); original.fields['quantity'].setValue(7.3); original.showMinimized()
+   second=dialog(); second.table.cellDoubleClicked.emit(0,0)
+   self.assertIs(main._bom_windows[sid],original); self.assertEqual(len(main._bom_windows),1)
+   self.assertFalse(original.isMinimized()); self.assertEqual(original.root_item.child(0).text(1),'7.3')
+   independent=MaterialUsageDialog(self.material(a['PART']),[{'sku_id':None,'sku':'未包含在SKU中','parent':'独立'}],main._materials)
+   with patch('ui.main_window.QMessageBox.information') as info:
+    independent.table.cellDoubleClicked.emit(0,0); info.assert_called_once()
+   self.assertEqual(len(main._bom_windows),1); independent.close()
+  finally:
+   for window in list(main._bom_windows.values()): window.dirty=False; window.close()
+   main._materials.close(); main.close()

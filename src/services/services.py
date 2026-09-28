@@ -148,17 +148,17 @@ class Services:
   parents=self.db.conn.execute('SELECT DISTINCT m.* FROM material_bom_items b JOIN materials m ON m.id=b.parent_material_id WHERE b.child_material_id=? ORDER BY m.base_code,m.version',(i,)).fetchall()
   result=[]
   for parent in parents:
-   usages=[]
+   usages=[]; sku_ids=[]
    for sku in self.skus():
     if any(row['material_id']==i and row['parent_material_id']==parent['id'] for row in self.bom(sku['material_id'])):
-     usages.append(f"{sku['base_code']}-{sku['version']} {sku['name']}")
+     usages.append(f"{sku['base_code']}-{sku['version']} {sku['name']}"); sku_ids.append(sku['id'])
    parent_label=f"{parent['base_code']}-{parent['version']} {parent['name']}"
-   result.append({'parent_id':parent['id'],'sku_labels':usages or ['未包含在SKU中'],'parent_label':parent_label,'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
+   result.append({'parent_id':parent['id'],'sku_ids':sku_ids or [None],'sku_labels':usages or ['未包含在SKU中'],'parent_label':parent_label,'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
   return result
  def material_usage(self,i):
-  result=[{'sku':sku,'parent':reference['parent_label']} for reference in self.material_version_references(i) for sku in reference['sku_labels']]
+  result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label']} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
   for sku in self.skus():
-   if sku['material_id']==i: result.append({'sku':f"{sku['base_code']}-{sku['version']} {sku['name']}",'parent':'SKU根节点（无父级）'})
+   if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}-{sku['version']} {sku['name']}",'parent':'SKU根节点（无父级）'})
   return result
  def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
   new_version=new_version.strip()
