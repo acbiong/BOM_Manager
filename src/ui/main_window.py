@@ -267,10 +267,14 @@ class BomWindow(QMainWindow):
   return roots
  def mark_external_differences(self,before_nodes,after_nodes,path=()):
   before=self.snapshot_map(before_nodes,path); after=self.snapshot_map(after_nodes,path)
+  changed=set(before.keys()-after.keys())
   for key,node in after.items():
    old=before.get(key)
-   if old is None or self.remote_signature(old)!=self.remote_signature(node):self._external_paths.add(key)
-  for key in before.keys()-after.keys():self._external_paths.add(key[:-1])
+   if old is None or self.remote_signature(old)!=self.remote_signature(node):changed.add(key)
+  # 子孙变化也意味着包含它的子BOM变化；保留删除路径以标记冲突中留下的本地节点。
+  # 逐路径向祖先传播，不向未变化的兄弟分支扩散。
+  for key in changed:
+   self._external_paths.update(key[:depth] for depth in range(len(key)+1))
  def refresh_drafts(self,nodes,conflicts,path=()):
   from copy import deepcopy
   materials={row['id']:row for row in self.svc.materials()}
@@ -405,7 +409,7 @@ class BomWindow(QMainWindow):
     item.setBackground(column,QBrush(QColor('#4a148c')) if path in self._external_paths else QBrush())
    remark=data.get('remark','') if not root else ''
    display=remark
-   if path in self._external_paths:display=(remark+'\n' if remark else '')+'由其他BOM更新导入此变更'
+   if path in self._external_paths:display=(remark+'\n' if remark else '')+'有其他BOM更新导入此变更'
    item.setText(4,display); item.setToolTip(4,remark)
    for n in range(item.childCount()):style(item.child(n),path,added,deleted)
   style(self.root_item,())
