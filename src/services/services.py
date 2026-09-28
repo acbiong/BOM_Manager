@@ -57,6 +57,8 @@ class Services:
   old_rows=self.bom(root)
   retained={root}|{row['material_id'] for row in items}
   parents={root}|{row['parent_material_id'] for row in old_rows if row['parent_material_id'] in retained}
+  # 编辑器提供完整子树；新增父物料的全部子项被标删时也需要清空其原共享BOM。
+  parents.update(row['material_id'] for row in items if row.get('replace_children'))
   by_id={row['id']:row for row in items if row.get('id') is not None}
   desired={}; alternate_updates={}
   old={ (row['parent_material_id'],row['child_material_id'],row['position'] or ''):dict(row)

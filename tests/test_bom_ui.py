@@ -505,3 +505,57 @@ class BomUiTests(unittest.TestCase):
   self.w.refresh_external()
   self.assertEqual(self.w.root_item.background(0).color(),QColor('#4a148c'))
   self.assertIn('新的根名称',self.w.root_item.text(0)); self.assertIn('由其他BOM更新导入此变更',self.w.root_item.text(4))
+ def test_unsaved_added_material_imports_external_updates_with_colors(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER 1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  added=self.w.tree.currentItem(); self.w.fields['quantity'].setValue(4.2)
+  child=added.child(0); self.w.show_item_info(child); self.w.fields['position'].setText('本地位置')
+  self.w.show_item_info(self.w.root_item.child(0)); self.w.fields['quantity'].setValue(8.7)
+  # 新增关系尚未写入ROOT，但其物料自身BOM已由其他窗口更改。
+  self.s.update_material(o,dict(name='OTHER外部新名称',unit='pcs'))
+  rows=[dict(row) for row in self.s.bom(o)]; rows[0].update(quantity=7.6,remark='外部真实备注',alternate_material_ids=[p])
+  self.s.save_bom(o,rows); self.assertTrue(self.w.refresh_action.isEnabled())
+  self.w.refresh_external(); self.w.refresh_external()
+  added=self.w.root_item.child(1); child=added.child(0)
+  self.assertIn('OTHER外部新名称',added.text(0)); self.assertEqual(added.text(1),'4.2')
+  self.assertEqual((child.text(1),child.text(3)),('7.6','本地位置'))
+  for node in (added,child):
+   self.assertEqual(node.foreground(0).color(),QColor('green')); self.assertEqual(node.background(0).color(),QColor('#4a148c'))
+  self.assertEqual(self.w.root_item.child(0).foreground(0).color(),QColor('yellow'))
+  self.w.show_item_info(child); self.assertEqual(self.w.alt_table.rowCount(),1); self.assertEqual(self.w.fields['remark'].text(),'外部真实备注')
+  self.assertNotIn(o,[row['material_id'] for row in self.s.bom(r)])
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.assertEqual(self.s.bom(o)[0]['position'],'本地位置'); self.assertEqual(self.s.bom(o)[0]['quantity'],7.6)
+  self.assertEqual(self.s.bom(o)[0]['remark'],'外部真实备注')
+  added=self.w.root_item.child(1); self.assertEqual(added.foreground(0).style(),Qt.NoBrush); self.assertEqual(added.background(0).style(),Qt.NoBrush)
+ def test_draft_subtree_external_add_remove_and_no_false_highlights(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER 1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  self.w.refresh_external()
+  self.assertEqual(self.w.root_item.child(1).background(0).style(),Qt.NoBrush)
+  self.assertEqual(self.w.root_item.child(1).child(0).background(0).style(),Qt.NoBrush)
+  # 外部新增共享子项（不是当前SKU新增的本地关系）。
+  rows=[dict(row) for row in self.s.bom(o)]+[dict(material_id=p,parent_material_id=o,quantity=3,unit='pcs')]
+  rows.extend(dict(row) for row in self.s.bom(p)); self.s.save_bom(o,rows); self.w.refresh_external()
+  added=self.w.root_item.child(1); self.assertEqual(added.childCount(),2)
+  new_child=added.child(1); self.assertEqual(new_child.data(0,Qt.UserRole)['material_id'],p)
+  self.assertEqual(new_child.background(0).color(),QColor('#4a148c')); self.assertEqual(new_child.foreground(0).color(),QColor('green'))
+  # 多次刷新后，未被本地编辑的外部删除应生效，不能因绿字误认为本地编辑。
+  self.w.refresh_external(); rows=[dict(row) for row in self.s.bom(o) if row['parent_material_id']!=o or row['material_id']!=c]
+  self.s.save_bom(o,rows); self.w.refresh_external()
+  added=self.w.root_item.child(1); self.assertEqual(added.childCount(),1); self.assertEqual(added.child(0).data(0,Qt.UserRole)['material_id'],p)
+ def test_pending_deleted_draft_child_keeps_red_when_external_changes(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
+  with patch.object(QInputDialog,'getItem',return_value=('OTHER 1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  self.w.remove_relation(self.w.tree.currentItem().child(0))
+  rows=[dict(row) for row in self.s.bom(o)]; rows[0]['quantity']=6.3; self.s.save_bom(o,rows)
+  self.w.refresh_external(); deleted=self.w.root_item.child(1).child(0)
+  self.assertEqual(deleted.foreground(0).color(),QColor('red')); self.assertTrue(deleted.font(0).strikeOut()); self.assertEqual(deleted.background(0).color(),QColor('#4a148c'))
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.assertEqual(self.s.bom(o),[])
