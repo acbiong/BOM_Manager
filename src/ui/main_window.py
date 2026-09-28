@@ -146,11 +146,14 @@ class BomWindow(QMainWindow):
    w=QLineEdit() if k in ('quantity','position','remark') else QLabel(); self.fields[k]=w; form.addRow(l,w)
   for key in ('quantity','position','remark'): self.fields[key].textChanged.connect(lambda value,k=key:self.update_tree_field(k,value))
   info_box=QGroupBox('物料信息'); info_box.setLayout(form); self.alt_table=QTableWidget(0,6); self.alt_table.setHorizontalHeaderLabels(['替代料编码','版本号','名称','描述','制造商','MPN']); alt_box=QGroupBox('替代料'); alt_l=QVBoxLayout(alt_box); alt_l.addWidget(self.alt_table)
-  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.menuBar().setCornerWidget(self.notice,Qt.TopRightCorner); tb=self.addToolBar('BOM'); save=QAction('保存',self); save.triggered.connect(self.save); tb.addAction(save); ref=QAction('刷新',self); ref.triggered.connect(lambda:(self.load(),self.notice.setText(''))); tb.addAction(ref); add=QAction('新增物料',self); add.triggered.connect(self.add); tb.addAction(add); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); alt=QAction('替代料',self); alt.triggered.connect(self.manage_alternates); tb.addAction(alt); self.load()
+  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.menuBar().setCornerWidget(self.notice,Qt.TopRightCorner); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(lambda:(self.load(),self.notice.setText(''))); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); add=QAction('新增物料',self); add.triggered.connect(self.add); tb.addAction(add); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); alt=QAction('替代料',self); alt.triggered.connect(self.manage_alternates); tb.addAction(alt); self.load()
+ def mark_dirty(self):
+  self.dirty=True
+  self.save_action.setEnabled(True)
  def on_external_change(self,event):
   if self._saving: return
   if event.get('type')=='bom_changed' and event.get('root')==self.root:
-   self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.statusBar().showMessage('检测到外部BOM更新')
+   self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.refresh_action.setEnabled(True); self.statusBar().showMessage('检测到外部BOM更新')
  def closeEvent(self,event):
   if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); event.accept(); return
   box=QMessageBox(self); box.setWindowTitle('BOM未保存'); box.setText('BOM结构或物料信息已修改，是否保存？'); save=box.addButton('保存并退出',QMessageBox.AcceptRole); discard=box.addButton('不保存退出',QMessageBox.DestructiveRole); cancel=box.addButton('取消',QMessageBox.RejectRole); box.exec_()
@@ -170,15 +173,17 @@ class BomWindow(QMainWindow):
   if act in (same,child): self.add_relative(d, act==child); return
   if act==edit:
    q,ok=QInputDialog.getDouble(self,'编辑数量','数量',float(it.text(1)),0.0001,1e12,4)
-   if ok: it.setText(1,str(q)); d['quantity']=q; it.setData(0,Qt.UserRole,d); self.dirty=True; self.tree.setCurrentItem(it); self.show_item_info(it)
+   if ok: it.setText(1,str(q)); d['quantity']=q; it.setData(0,Qt.UserRole,d); self.mark_dirty(); self.tree.setCurrentItem(it); self.show_item_info(it)
   elif act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
-   parent=it.parent(); it.parent().removeChild(it) if parent else self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(it)); self.current_item=None; self.dirty=True; self.root_item.setSelected(True); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
+   parent=it.parent(); it.parent().removeChild(it) if parent else self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(it)); self.current_item=None; self.mark_dirty(); self.root_item.setSelected(True); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
  def load(self):
   self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
+  self.setWindowTitle(f"{root['base_code']}-{root['version']} {root['name']}")
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}-{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
   for r in self.svc.bom(self.root):
    parent=self.by.get(r['parent_item_id'],self.root_item); item=QTreeWidgetItem(parent,[f"{r['base_code']}-{r['version']} {r['name']}",str(r['quantity']),r['unit'],r['position'],r['remark']]); item.setData(0,Qt.UserRole,dict(r)); self.by[r['id']]=item
   fit_columns(self.tree)
+  self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
   self.tree.itemClicked.connect(self.show_item_info)
  def show_item_info(self,item,column=0):
   self.current_item=item
@@ -195,7 +200,7 @@ class BomWindow(QMainWindow):
     for j,k in enumerate(['base_code','version','name','description','manufacturer','mpn']): self.alt_table.setItem(row,j,QTableWidgetItem(str(r[k] or '')))
  def update_tree_field(self,key,value):
   if self._loading_fields or self.current_item is None or self.current_item is getattr(self,'root_item',None): return
-  col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); d=self.current_item.data(0,Qt.UserRole) or {}; d[key]=float(value) if key=='quantity' and value else value; self.current_item.setData(0,Qt.UserRole,d); self.dirty=True
+  col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); d=self.current_item.data(0,Qt.UserRole) or {}; d[key]=float(value) if key=='quantity' and value else value; self.current_item.setData(0,Qt.UserRole,d); self.mark_dirty()
  def add_relative(self,parent,child):
   target=self.by.get(parent.get('id'),self.root_item) if child else (self.by.get(parent.get('parent_item_id'),self.root_item) or self.root_item)
   used={target.child(i).data(0,Qt.UserRole).get('material_id') for i in range(target.childCount()) if target.child(i).data(0,Qt.UserRole)}
@@ -203,7 +208,7 @@ class BomWindow(QMainWindow):
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  r=rows[items.index(x)]; item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1',r['unit'],'','']); temporary_id=-id(item); data={'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; item.setData(0,Qt.UserRole,data); self.by[temporary_id]=item; target.setExpanded(True); self.dirty=True; self.tree.setCurrentItem(item); self.show_item_info(item)
+  r=rows[items.index(x)]; item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1',r['unit'],'','']); temporary_id=-id(item); data={'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; item.setData(0,Qt.UserRole,data); self.by[temporary_id]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
  def manage_alternates(self):
   it=self.tree.currentItem(); d=it.data(0,Qt.UserRole) if it else None
   if not d or not d.get('id'): QMessageBox.information(self,'提示','请先选择BOM物料'); return
@@ -229,7 +234,7 @@ class BomWindow(QMainWindow):
     for j in range(it.childCount()): walk(it.child(j))
    top=self.tree.topLevelItem(i)
    for j in range(top.childCount()): walk(top.child(j))
-  self.svc.save_bom(self.root,rows); self.dirty=False; self._saving=False; self.notice.setText(''); QMessageBox.information(self,'保存','BOM已保存')
+  self.svc.save_bom(self.root,rows); self.dirty=False; self._saving=False; self.notice.setText(''); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False); QMessageBox.information(self,'保存','BOM已保存')
 
 class MaterialWindow(QMainWindow):
  def __init__(self,svc,parent=None):
