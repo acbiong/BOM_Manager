@@ -23,7 +23,7 @@ This plugin does not support raise()
 This plugin does not support propagateSizeHints()
 This plugin does not support raise()
 ----------------------------------------------------------------------
-Ran 28 tests in 0.160s
+Ran 28 tests in 0.162s
 
 OK
 [exit=0]
