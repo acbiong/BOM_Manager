@@ -560,7 +560,7 @@ class BomUiTests(unittest.TestCase):
   self.assertEqual(deleted.foreground(0).color(),QColor('red')); self.assertTrue(deleted.font(0).strikeOut()); self.assertEqual(deleted.background(0).color(),QColor('#4a148c'))
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
   self.assertEqual(self.s.bom(o),[])
- def test_external_deep_change_marks_ancestor_boms_and_shared_occurrences(self):
+ def test_external_deep_change_marks_shared_occurrences_not_ancestors(self):
   from PyQt5.QtGui import QColor
   r,p,c,o,x=self.ids
   self.s.save_bom(o,[dict(material_id=p,quantity=1,unit='pcs')]+[dict(row) for row in self.s.bom(p)])
@@ -568,9 +568,12 @@ class BomUiTests(unittest.TestCase):
   rows=[dict(row) for row in self.s.bom(p)]; rows[0]['quantity']=7.4; self.s.save_bom(p,rows)
   self.w.refresh_external(); self.w.refresh_external()
   saved_parent=self.w.root_item.child(0); draft=self.w.root_item.child(1)
-  for node in (saved_parent,saved_parent.child(0),draft,draft.child(0),draft.child(0).child(0)):
+  for node in (saved_parent.child(0),draft.child(0).child(0)):
    for column in range(self.w.tree.columnCount()):self.assertEqual(node.background(column).color(),QColor('#4a148c'))
    self.assertIn('有其他BOM更新导入此变更',node.text(4))
+  for node in (self.w.root_item,saved_parent,draft,draft.child(0)):
+   for column in range(self.w.tree.columnCount()):self.assertEqual(node.background(column).style(),Qt.NoBrush)
+   self.assertNotIn('有其他BOM更新导入此变更',node.text(4))
   self.assertEqual(draft.child(0).child(0).text(1),'7.4')
   self.assertEqual(draft.child(0).child(0).foreground(0).color(),QColor('green'))
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
@@ -598,3 +601,31 @@ class BomUiTests(unittest.TestCase):
   sibling=self.w.root_item.child(1)
   for column in range(self.w.tree.columnCount()):self.assertEqual(sibling.background(column).style(),Qt.NoBrush)
   self.assertEqual(sibling.text(4),'')
+ def test_changed_material_highlights_descendants_only(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  self.s.save_bom(r,[dict(row) for row in self.s.bom(r)]+[dict(material_id=o,quantity=1,unit='pcs')]); self.w.load()
+  self.w.show_item_info(self.w.root_item.child(0).child(0)); self.w.fields['remark'].setText('本地备注')
+  self.s.update_material(p,dict(name='父物料外部修改',unit='pcs')); self.w.refresh_external(); self.w.refresh_external()
+  parent=self.w.root_item.child(0); child=parent.child(0)
+  for node in (parent,child):
+   for column in range(self.w.tree.columnCount()):self.assertEqual(node.background(column).color(),QColor('#4a148c'))
+   self.assertIn('有其他BOM更新导入此变更',node.text(4))
+  self.assertEqual(child.foreground(0).color(),QColor('yellow'))
+  for node in (self.w.root_item,self.w.root_item.child(1)):
+   self.assertEqual(node.background(0).style(),Qt.NoBrush); self.assertEqual(node.text(4),'')
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  for node in self.w.by.values():self.assertEqual(node.background(0).style(),Qt.NoBrush)
+  self.assertEqual(self.s.bom(p)[0]['remark'],'本地备注')
+ def test_external_child_add_remove_does_not_mark_parent_or_sibling(self):
+  from PyQt5.QtGui import QColor
+  r,p,c,o,x=self.ids
+  self.s.save_bom(p,[dict(row) for row in self.s.bom(p)]+[dict(material_id=o,quantity=1,unit='pcs')])
+  self.w.refresh_external(); parent=self.w.root_item.child(0)
+  self.assertEqual(parent.child(1).background(0).color(),QColor('#4a148c'))
+  for node in (self.w.root_item,parent,parent.child(0)):
+   self.assertEqual(node.background(0).style(),Qt.NoBrush); self.assertEqual(node.text(4),'')
+  self.s.save_bom(p,[dict(row) for row in self.s.bom(p) if row['material_id']==c]); self.w.refresh_external()
+  parent=self.w.root_item.child(0); self.assertEqual(parent.childCount(),1)
+  for node in (self.w.root_item,parent,parent.child(0)):
+   self.assertEqual(node.background(0).style(),Qt.NoBrush); self.assertEqual(node.text(4),'')

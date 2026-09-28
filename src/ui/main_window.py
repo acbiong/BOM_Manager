@@ -271,10 +271,8 @@ class BomWindow(QMainWindow):
   for key,node in after.items():
    old=before.get(key)
    if old is None or self.remote_signature(old)!=self.remote_signature(node):changed.add(key)
-  # 子孙变化也意味着包含它的子BOM变化；保留删除路径以标记冲突中留下的本地节点。
-  # 逐路径向祖先传播，不向未变化的兄弟分支扩散。
-  for key in changed:
-   self._external_paths.update(key[:depth] for depth in range(len(key)+1))
+  # 只记录自身变化；子项增删由子项路径表示，不能将父级误判为变化物料。
+  self._external_paths.update(changed)
  def refresh_drafts(self,nodes,conflicts,path=()):
   from copy import deepcopy
   materials={row['id']:row for row in self.svc.materials()}
@@ -384,13 +382,14 @@ class BomWindow(QMainWindow):
   return result
  def remote_signature(self,node):
   fields=('material_id','quantity','position','remark','base_code','version','name','description','unit','manufacturer','mpn','mp_flag','_db_alternates')
-  return ([node['data'].get(k) for k in fields],[(n['data']['material_id'],n['data'].get('position','')) for n in node['children']])
+  return [node['data'].get(k) for k in fields]
  def refresh_styles(self):
   if not hasattr(self,'root_item'):return
   baseline=self.snapshot_map(getattr(self,'_baseline_tree',[]))
-  def style(item,path,added=False,deleted=False):
+  def style(item,path,added=False,deleted=False,external=False):
    data=item.data(0,Qt.UserRole) or {}; root=item is self.root_item
    if not root:path=path+(data['material_id'],)
+   external=external or path in self._external_paths
    added=added or data.get('_added',False); deleted=deleted or data.get('_deleted',False)
    if deleted and not data.get('_deleted'):
     data['_deleted']=True; item.setData(0,Qt.UserRole,data)
@@ -405,13 +404,13 @@ class BomWindow(QMainWindow):
     font=QFont(self.tree.font()); font.setStrikeOut(bool(deleted)); font.setBold(column in changed and not deleted)
     item.setFont(column,font)
     color=QColor('red') if deleted else QColor('green') if added else QColor('yellow') if changed else None
-    item.setForeground(column,QBrush(color) if color else QBrush(QColor('white')) if path in self._external_paths else QBrush())
-    item.setBackground(column,QBrush(QColor('#4a148c')) if path in self._external_paths else QBrush())
+    item.setForeground(column,QBrush(color) if color else QBrush(QColor('white')) if external else QBrush())
+    item.setBackground(column,QBrush(QColor('#4a148c')) if external else QBrush())
    remark=data.get('remark','') if not root else ''
    display=remark
-   if path in self._external_paths:display=(remark+'\n' if remark else '')+'有其他BOM更新导入此变更'
+   if external:display=(remark+'\n' if remark else '')+'有其他BOM更新导入此变更'
    item.setText(4,display); item.setToolTip(4,remark)
-   for n in range(item.childCount()):style(item.child(n),path,added,deleted)
+   for n in range(item.childCount()):style(item.child(n),path,added,deleted,external)
   style(self.root_item,())
   fit_columns(self.tree)
  def show_item_info(self,item,column=0):
