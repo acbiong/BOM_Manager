@@ -161,7 +161,7 @@ class MainWindow(QMainWindow):
 class BomWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,root,parent=None):
-  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
+  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
   self.tree=QTreeWidget(); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
   self.fields={}; form=QFormLayout();
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
@@ -194,13 +194,39 @@ class BomWindow(QMainWindow):
    m=QMenu(self); child=m.addAction('增加子级物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
    if act==child: self.add_relative(d,True)
    return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); edit=m.addAction('编辑数量/位置'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); dele=m.addAction('删除物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
   if act in (same,child): self.add_relative(d, act==child); return
-  if act==edit:
-   q,ok=QInputDialog.getDouble(self,'编辑数量','数量',float(it.text(1)),0.1,1e12,1)
-   if ok: it.setText(1,f'{q:.1f}'); d['quantity']=q; it.setData(0,Qt.UserRole,d); self.mark_dirty(); self.tree.setCurrentItem(it); self.show_item_info(it)
-  elif act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
-   parent=it.parent(); it.parent().removeChild(it) if parent else self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(it)); self.current_item=None; self.mark_dirty(); self.root_item.setSelected(True); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
+  if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
+   self.remove_relation(it)
+ def relation_key(self,item):
+  data=item.data(0,Qt.UserRole) or {}; parent=item.parent()
+  parent_data=parent.data(0,Qt.UserRole) if parent else {}
+  return (parent_data.get('material_id'),data.get('material_id'),item.text(3))
+ def remove_relation(self,item):
+  """共享BOM只存一份关系，删除时同步移除当前树中该关系的所有副本。"""
+  if item is self.root_item:return
+  key=self.relation_key(item); relation_id=(item.data(0,Qt.UserRole) or {}).get('id')
+  matches=[]; stack=[self.root_item]
+  while stack:
+   node=stack.pop(); data=node.data(0,Qt.UserRole) or {}
+   if node is not self.root_item and (self.relation_key(node)==key or (relation_id and relation_id>0 and data.get('id')==relation_id)):
+    matches.append(node)
+   else: stack.extend(node.child(i) for i in range(node.childCount()))
+  if relation_id and relation_id>0:
+   original=self.svc.db.conn.execute('SELECT parent_material_id,child_material_id,position FROM material_bom_items WHERE id=?',(relation_id,)).fetchone()
+   if original:self._deleted_relations.add((original[0],original[1],original[2] or ''))
+  self.current_item=None
+  for node in matches:
+   data=node.data(0,Qt.UserRole) or {}; current_key=self.relation_key(node)
+   self._deleted_relations.add(current_key)
+   self._deleted_relations.add((current_key[0],current_key[1],data.get('position','') or ''))
+   pending=[node]
+   while pending:
+    removed=pending.pop(); removed_data=removed.data(0,Qt.UserRole) or {}
+    self.by.pop(removed_data.get('node_id'),None)
+    pending.extend(removed.child(i) for i in range(removed.childCount()))
+   node.parent().removeChild(node)
+  self.mark_dirty(); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
  def contains_material(self,material_id):
   if material_id is None:return False
   if material_id==self.root:return True
@@ -230,6 +256,8 @@ class BomWindow(QMainWindow):
   self.setWindowTitle(f"{root['base_code']}-{root['version']} {root['name']}")
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}-{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
   for r in self.svc.bom(self.root):
+   if (r['parent_material_id'],r['material_id'],r['position'] or '') in self._deleted_relations:continue
+   if r['parent_node_id'] is not None and r['parent_node_id'] not in self.by:continue
    parent=self.by.get(r['parent_node_id'],self.root_item); item=QTreeWidgetItem(parent,[f"{r['base_code']}-{r['version']} {r['name']}",f"{r['quantity']:.1f}",r['unit'],r['position'],r['remark']]); item.setData(0,Qt.UserRole,dict(r)); self.by[r['node_id']]=item
    if preserve:
     pd=parent.data(0,Qt.UserRole) or {}; values=preserve.get((pd.get('material_id'),r['material_id'],str(r['position'])))
@@ -272,7 +300,7 @@ class BomWindow(QMainWindow):
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  r=rows[items.index(x)]; item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
   self.add_existing_children(item,r['id'],set())
   fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
  def add_existing_children(self,parent_item,material_id,ancestors):
@@ -317,7 +345,7 @@ class BomWindow(QMainWindow):
    return False
   finally:
    self._saving=False
-  self.dirty=False; self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+  self.dirty=False; self._deleted_relations.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
   QMessageBox.information(self,'保存','BOM已保存')
   return True
 

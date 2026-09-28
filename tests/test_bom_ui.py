@@ -157,3 +157,37 @@ class BomUiTests(unittest.TestCase):
    for window in list(main._bom_windows.values()): window.dirty=False; window.close()
    if main._materials is not None: main._materials.close()
    main.close()
+ def test_delete_shared_relation_save_and_other_sku_refresh(self):
+  from ui.main_window import MaterialWindow
+  r,p,c,o,x=self.ids
+  self.s.save_bom(c,[dict(material_id=o,quantity=1,unit='pcs')]); self.w.load()
+  with patch.object(QInputDialog,'getItem',return_value=('CHILD 1 CHILD',True)):
+   self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
+  other=BomWindow(self.s,x); materials=MaterialWindow(self.s)
+  try:
+   child=self.w.root_item.child(1).child(0)
+   self.w.remove_relation(child)
+   self.assertEqual(self.w.root_item.child(0).child(0).childCount(),0)
+   self.assertEqual(self.w.root_item.child(1).childCount(),0)
+   self.assertEqual(len(self.s.bom(c)),1)  # 未保存不改数据库
+   self.assertIs(self.w.tree.currentItem(),self.w.root_item)
+   self.w.refresh_external()  # 未保存删除在外部刷新后仍然保留
+   self.assertEqual(self.w.root_item.child(1).childCount(),0)
+   with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
+   self.assertEqual(self.s.bom(c),[])
+   self.assertTrue(other.refresh_action.isEnabled()); other.refresh_external()
+   self.assertFalse(any(row['material_id']==o for row in self.s.bom(x)))
+   flags={materials.t.item(i,0).text():materials.t.item(i,8).text() for i in range(materials.t.rowCount())}
+   self.assertEqual(flags['CHILD'],'N')
+   self.w.load(); self.assertEqual(self.w.root_item.child(1).childCount(),0)
+  finally:
+   other.dirty=False; other.close(); materials.close()
+ def test_context_menu_has_only_add_and_delete(self):
+  item=self.w.root_item.child(0)
+  with patch.object(self.w.tree,'itemAt',return_value=item), patch('ui.main_window.QMenu') as menu:
+   menu.return_value.addAction.side_effect=[object(),object(),object()]
+   menu.return_value.exec_.return_value=None
+   from PyQt5.QtCore import QPoint
+   self.w.context_menu(QPoint())
+   self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['新增同级物料','新增子级物料','删除物料'])
