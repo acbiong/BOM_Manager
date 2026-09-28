@@ -374,8 +374,8 @@ class BomWindow(QMainWindow):
     font=QFont(self.tree.font()); font.setStrikeOut(bool(deleted)); font.setBold(column in changed and not deleted)
     item.setFont(column,font)
     color=QColor('red') if deleted else QColor('green') if added else QColor('yellow') if changed else None
-    item.setForeground(column,QBrush(color) if color else QBrush())
-    item.setBackground(column,QBrush(QColor('#d9b3ff')) if path in self._external_paths else QBrush())
+    item.setForeground(column,QBrush(color) if color else QBrush(QColor('white')) if path in self._external_paths else QBrush())
+    item.setBackground(column,QBrush(QColor('#4a148c')) if path in self._external_paths else QBrush())
    remark=data.get('remark','') if not root else ''
    display=remark
    if path in self._external_paths:display=(remark+'\n' if remark else '')+'由其他BOM更新导入此变更'

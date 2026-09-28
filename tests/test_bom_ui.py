@@ -474,13 +474,13 @@ class BomUiTests(unittest.TestCase):
   r,p,c,o,x=self.ids; rows=[dict(row) for row in self.s.bom(p)]
   rows[0]['quantity']=9.2; rows[0]['remark']='数据库真实备注'; self.s.save_bom(p,rows)
   self.w.refresh_external(); node=self.w.root_item.child(0).child(0)
-  for column in range(self.w.tree.columnCount()):self.assertEqual(node.background(column).color(),QColor('#d9b3ff'))
+  for column in range(self.w.tree.columnCount()):self.assertEqual(node.background(column).color(),QColor('#4a148c'))
   self.assertIn('由其他BOM更新导入此变更',node.text(4)); self.assertTrue(self.w.save_action.isEnabled())
   self.w.show_item_info(node); self.assertEqual(self.w.fields['remark'].text(),'数据库真实备注')
   self.w.fields['position'].setText('本地位置'); self.w.refresh_external(); self.w.refresh_external()
   node=self.w.root_item.child(0).child(0)
   self.assertIn('由其他BOM更新导入此变更',node.text(4)); self.assertEqual(node.text(3),'本地位置')
-  self.assertEqual(node.background(0).color(),QColor('#d9b3ff')); self.assertEqual(node.foreground(0).color(),QColor('yellow'))
+  self.assertEqual(node.background(0).color(),QColor('#4a148c')); self.assertEqual(node.foreground(0).color(),QColor('yellow'))
   self.assertTrue(node.font(3).bold()); self.assertFalse(node.font(4).bold())
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
   saved=self.s.bom(p)[0]; self.assertEqual(saved['remark'],'数据库真实备注'); self.assertEqual(saved['position'],'本地位置')
@@ -491,7 +491,7 @@ class BomUiTests(unittest.TestCase):
   r,p,c,o,x=self.ids; rows=[dict(row) for row in self.s.bom(p)]; rows[0]['alternate_material_ids']=[o]
   self.s.save_bom(p,rows); self.w.refresh_external()
   node=self.w.root_item.child(0).child(0)
-  self.assertEqual(node.background(0).color(),QColor('#d9b3ff')); self.assertIn('由其他BOM更新导入此变更',node.text(4))
+  self.assertEqual(node.background(0).color(),QColor('#4a148c')); self.assertIn('由其他BOM更新导入此变更',node.text(4))
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
   self.assertEqual(self.s.bom(p)[0]['remark'],'')
  def test_failed_save_keeps_delete_visuals(self):
@@ -503,5 +503,5 @@ class BomUiTests(unittest.TestCase):
   from PyQt5.QtGui import QColor
   self.s.update_material(self.ids[0],dict(name='新的根名称',unit='pcs'))
   self.w.refresh_external()
-  self.assertEqual(self.w.root_item.background(0).color(),QColor('#d9b3ff'))
+  self.assertEqual(self.w.root_item.background(0).color(),QColor('#4a148c'))
   self.assertIn('新的根名称',self.w.root_item.text(0)); self.assertIn('由其他BOM更新导入此变更',self.w.root_item.text(4))
