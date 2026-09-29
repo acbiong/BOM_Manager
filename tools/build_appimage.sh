@@ -10,7 +10,7 @@ APPDIR="$TMP_DIR/AppDir"
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 tools/run_tests.sh
 rm -rf "$APPDIR"
-ver=$(cat VERSION); stamp=$(date +%Y%m%d_%H%M%S); name="BOM管理系统_${ver}_${stamp}"
+ver=$(cat VERSION); stamp=$(date +%Y%m%d_%H%M%S); name="BOM_Manager_${ver}_${stamp}"
 rm -rf "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 python3 -m PyInstaller --noconfirm --clean --onefile --windowed \
