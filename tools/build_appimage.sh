@@ -73,7 +73,18 @@ b[pos+1]=0x84  # 缺少环境变量时也跳转到 extract-and-run
 p.write_bytes(b)
 PYRUNTIME
  chmod +x "$runtime_default"
- APPIMAGE_EXTRACT_AND_RUN=1 appimagetool --runtime-file "$runtime_default" "$APPDIR" "package/${name}.AppImage"
+ # appimagetool自身需要原始runtime解析参数；先正常生成，再在同尺寸runtime中替换分支。
+ APPIMAGE_EXTRACT_AND_RUN=1 appimagetool --runtime-file "$runtime_src" "$APPDIR" "package/${name}.AppImage"
+ python3 - "package/${name}.AppImage" "$runtime_default" <<'PYAPPIMAGE'
+from pathlib import Path
+import sys
+out=Path(sys.argv[1]); runtime=Path(sys.argv[2]); image=bytearray(out.read_bytes()); patched=runtime.read_bytes()
+needle=bytes.fromhex('0f 85 53 04 00 00'); pos=image.find(needle)
+if pos < 0: raise SystemExit('生成的AppImage中未找到runtime提取分支')
+image[pos+1]=0x84
+out.write_bytes(image)
+PYAPPIMAGE
+ chmod +x "package/${name}.AppImage"
  sha256sum "package/${name}.AppImage" > "package/${name}.AppImage.sha256"
  echo "AppImage: package/${name}.AppImage"
 else
