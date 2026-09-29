@@ -41,3 +41,31 @@ class BomImportTests(unittest.TestCase):
   with self.assertRaises(ValueError):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM')
   self.assertEqual(self.s.bom(self.ids['R','1']),[])
   self.write([['R','1','P','2',1,'']]);self.s.import_bom(self.path,sheet_name='BOM');self.assertEqual(self.s.bom(self.ids['R','1'])[0]['material_id'],self.ids['P','2'])
+ def test_root_marker_case_and_mapping(self):
+  headers=['父编码','父版本','子编码','子版本','用量','安装位置']
+  for marker in ('ROOT','root','Root'):
+   self.write([['R','1','P','2',1,''],[marker,marker,'R','1',None,None]],headers)
+   self.assertEqual(self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',header_mapping=dict(zip(self.s.BOM_HEADERS,headers))),1)
+   self.assertEqual(len(self.s.bom(self.ids['R','1'])),1)
+ def test_root_mismatch_before_any_write_and_ui_warning(self):
+  from unittest.mock import patch
+  from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
+  from ui.main_window import BomWindow
+  self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=5,unit='pcs')])
+  before=[dict(row) for row in self.s.bom(self.ids['R','1'])]
+  for code,version in [('P','1'),('R','2')]:
+   self.write([['R','1','P','2',1,''],['root','ROOT',code,version,None,None]])
+   with self.assertRaisesRegex(ValueError,'BOM选择错误'):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM')
+   self.assertEqual([dict(row) for row in self.s.bom(self.ids['R','1'])],before)
+  window=BomWindow(self.s,self.ids['R','1'])
+  try:
+   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'warning') as warning:
+    window.import_bom();self.assertIn('BOM选择错误',warning.call_args.args[2])
+  finally:window.close()
+ def test_duplicate_incomplete_and_root_only(self):
+  for rows in ([['ROOT','1','R','1',1,'']],[['ROOT','ROOT','R','1',1,''],['root','root','R','1',1,'']]):
+   self.write(rows)
+   with self.assertRaises(ValueError):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM')
+  self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=1,unit='pcs')])
+  self.write([['ROOT','root','R','1',None,None]])
+  self.assertEqual(self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM'),0);self.assertEqual(self.s.bom(self.ids['R','1']),[])

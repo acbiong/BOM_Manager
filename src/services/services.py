@@ -200,9 +200,27 @@ class Services:
    if any(headers.count(mapping[field])!=1 for field in self.BOM_HEADERS):raise ValueError('源表头名称重复，请修改文件表头后重试')
    index={field:headers.index(mapping[field]) for field in self.BOM_HEADERS}; rows=[]; pairs=set(); children={}; parents=set(); child_ids=set()
    materials={(r['base_code'],r['version']):r for r in self.materials()}
-   for no,values in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
+   records=[]; root_row=None
+   for no,values in enumerate(ws.iter_rows(values_only=True),1):
+    if no==1:continue
     data={field:str(values[i] if values[i] is not None else '').strip() for field,i in index.items()}
     if not any(data.values()):continue
+    is_root=[data[field].casefold()=='root' for field in ('父项物料编码','父项版本号')]
+    if any(is_root):
+     if not all(is_root):raise ValueError(f'第{no}行根节点标记不完整：父项物料编码和父项版本号必须同时为ROOT/root')
+     if root_row is not None:raise ValueError(f'第{no}行存在重复根节点声明，BOM只能有一个ROOT根节点')
+     root_row=no; key=(data['物料基础编码'],data['物料版本号'])
+     if root is not None:
+      current=self.material_snapshot(root)
+      if not current:raise ValueError('当前BOM根物料不存在')
+      if key!=(current['base_code'],current['version']):
+       raise ValueError(f"BOM选择错误：第{no}行ROOT物料为{key[0]}-{key[1]}，当前BOM为{current['base_code']}-{current['version']}，禁止导入")
+     else:
+      if key not in materials:raise ValueError(f'第{no}行ROOT物料不存在：{key[0]}-{key[1]}')
+      root=materials[key]['id']
+     continue  # 根声明不是父子引用，不导入数量/位置或创建自引用。
+    records.append((no,data))
+   for no,data in records:
     absent=[field for field in self.BOM_HEADERS[:-1] if not data[field]]
     if absent:raise ValueError(f'第{no}行必填项缺失：'+ '、'.join(absent))
     parent=materials.get((data['父项物料编码'],data['父项版本号'])); child=materials.get((data['物料基础编码'],data['物料版本号']))
@@ -216,7 +234,7 @@ class Services:
     if pid==mid:raise ValueError(f'第{no}行物料不能包含自身')
     pairs.add((pid,mid));parents.add(pid);child_ids.add(mid);children.setdefault(pid,[]).append(mid)
     rows.append(dict(parent_material_id=pid,material_id=mid,quantity=round(quantity,1),unit=child['unit'],position=data['位置']))
-   if not rows:raise ValueError('所选工作表没有可导入的BOM数据')
+   if not rows and root_row is None:raise ValueError('所选工作表没有可导入的BOM数据')
    if root is None:
     roots=parents-child_ids
     if len(roots)!=1:raise ValueError('BOM必须具有唯一根物料，或结构存在循环')
