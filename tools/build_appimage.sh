@@ -16,8 +16,24 @@ mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 python3 -m PyInstaller --noconfirm --clean --onefile --windowed \
  --workpath "$BUILD_DIR" --distpath "$DIST_DIR" --specpath "$SPEC_DIR" \
  --add-data "$ROOT/VERSION:." --name "$name" src/main.py
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp "$DIST_DIR/$name" "$APPDIR/usr/bin/BOM管理系统"
+python3 - "$APPDIR" <<'PYICON'
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+import sys
+root=Path(sys.argv[1])
+im=Image.new('RGB',(256,256),(29,91,160))
+draw=ImageDraw.Draw(im)
+draw.rounded_rectangle((16,16,240,240),radius=28,fill=(35,104,180),outline=(180,220,255),width=5)
+try: font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',54)
+except OSError: font=ImageFont.load_default()
+text='BOM'; box=draw.textbbox((0,0),text,font=font); x=(256-(box[2]-box[0]))//2; y=(256-(box[3]-box[1]))//2-8
+draw.text((x,y),text,font=font,fill=(255,255,255))
+# RGB PNG and ASCII basename are accepted by Deepin and AppImage icon lookup.
+for target in (root/'bom_manager.png',root/'bom管理系统.png',root/'usr/share/icons/hicolor/256x256/apps/bom_manager.png'):
+ target.parent.mkdir(parents=True,exist_ok=True); im.save(target,format='PNG',optimize=True)
+PYICON
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -32,25 +48,19 @@ cat > "$APPDIR/bom管理系统.desktop" <<EOF
 Name=BOM管理系统
 Exec=BOM管理系统
 TryExec=BOM管理系统
-Icon=bom管理系统
+Icon=bom_manager
 Type=Application
 Categories=Office;
 Terminal=false
 StartupNotify=true
 X-AppImage-Integrate=false
 EOF
-if [ ! -f "$APPDIR/bom管理系统.png" ]; then
-  python3 - <<PYICON
-from PIL import Image,ImageDraw
-im=Image.new('RGBA',(256,256),(35,104,180,255)); ImageDraw.Draw(im).text((64,100),'BOM',fill='white'); im.save('$APPDIR/bom管理系统.png')
-PYICON
-fi
 cat > "$APPDIR/usr/share/applications/bom管理系统.desktop" <<EOF
 [Desktop Entry]
 Name=BOM管理系统
 Exec=BOM管理系统
 TryExec=BOM管理系统
-Icon=bom管理系统
+Icon=bom_manager
 Type=Application
 Categories=Office;
 Terminal=false
