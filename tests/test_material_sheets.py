@@ -61,3 +61,17 @@ class MaterialSheetsTests(unittest.TestCase):
     self.assertIn('第2行：A 物料A\n原因：必填项缺失：物料制造商',dialog.details.toPlainText())
     self.assertIn('物料版本号、物料名称、单位、物料制造商',dialog.details.toPlainText());dialog.close()
     self.assertEqual(self.s.materials(),[])
+ def test_blank_code_and_name_ignored_before_validation(self):
+  for mapped in (False,True):
+   with self.subTest(mapped=mapped):
+    wb=Workbook();ws=wb.active;ws.append(self.headers if mapped else self.required)
+    ws.append([None,'99',None,'备注','非法单位',None,None])
+    ws.append(['   ',None,'  ',None,None,None,None])
+    ws.append(['ONLYCODE','1',None,'','pcs','厂商',''])
+    ws.append([None,'1','只有名称','','pcs','厂商',''])
+    ws.append([0,'1','数字编码','','pcs','厂商',''])
+    wb.save(self.path);wb.close();progress=[]
+    ok,fail=self.s.import_materials(self.path,header_mapping=dict(zip(self.required,self.headers)) if mapped else None,progress_callback=lambda n,total:progress.append((n,total)))
+    self.assertEqual([r[0] for r in fail],[4,5]);self.assertEqual(progress[-1],(5,5));self.assertEqual([r['base_code'] for r in self.s.materials()],['0'])
+    self.assertEqual(ok,['0'])
+    self.db.conn.execute('DELETE FROM materials');self.db.conn.commit()

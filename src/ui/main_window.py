@@ -68,7 +68,7 @@ class MaterialHeaderMappingDialog(QDialog):
   self.mapping_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
   layout.addWidget(self.mapping_table)
   layout.addWidget(QLabel('文件读取预览（前20行）：'))
-  self.preview=QTableWidget(); self.preview.setColumnCount(len(headers)); self.preview.setHorizontalHeaderLabels(headers); self.preview.setWordWrap(True)
+  self.preview=QTableWidget(); self.preview.setColumnCount(len(headers)); self.preview.setHorizontalHeaderLabels(headers); self.preview.setWordWrap(True); self.preview.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.preview.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
   try:
    from openpyxl import load_workbook
    wb=load_workbook(path,read_only=True,data_only=True)
@@ -128,11 +128,18 @@ class MaterialImportResultDialog(QDialog):
  def __init__(self,ok,fail,parent=None):
   super().__init__(parent); self.setWindowTitle('物料导入结果')
   available=self.screen().availableGeometry(); self.setMaximumHeight(min(640,int(available.height()*0.85))); self.resize(min(900,int(available.width()*0.9)),min(560,self.maximumHeight()))
-  layout=QVBoxLayout(self); duplicates=sum('重复物料' in row[3] for row in fail)
-  summary=QLabel(f'成功导入：{len(ok)}条    失败/未导入：{len(fail)}条    其中重复未导入：{duplicates}条'); summary.setWordWrap(True); layout.addWidget(summary)
-  self.details=QTextBrowser(); self.details.setOpenExternalLinks(False); self.details.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded); self.details.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.details.setLineWrapMode(QTextEdit.WidgetWidth)
-  self.details.setPlainText('\n\n'.join(f'第{row}行：{code or "（空编码）"} {name or "（空名称）"}\n原因：{reason}' for row,code,name,reason in fail) or '全部物料导入成功，无失败或跳过条目。')
-  layout.addWidget(self.details,1)
+  automatic=[row for row in fail if row[3]=='重复物料信息相同，自动跳过']
+  other=[row for row in fail if row[3] in ('跳过重复物料','用户取消')]
+  errors=[row for row in fail if row[3] not in ('重复物料信息相同，自动跳过','跳过重复物料','用户取消')]
+  layout=QVBoxLayout(self)
+  summary=QLabel(f'成功导入：{len(ok)}条    导入失败：{len(errors)}条    自动跳过：{len(automatic)}条    其他未导入：{len(other)}条'); summary.setWordWrap(True); layout.addWidget(summary)
+  self.tabs=QTabWidget(); self.details=QTextBrowser(); self.skipped_details=QTextBrowser(); self.other_details=QTextBrowser()
+  for title,rows,view in [('导入失败',errors,self.details),('自动跳过',automatic,self.skipped_details),('其他未导入',other,self.other_details)]:
+   view.setOpenExternalLinks(False); view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded); view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); view.setLineWrapMode(QTextEdit.WidgetWidth)
+   view.setPlainText('\n\n'.join(f'第{row}行：{code or "（空编码）"} {name or "（空名称）"}\n原因：{reason}' for row,code,name,reason in rows) or '无此类记录。')
+   self.tabs.addTab(view,f'{title}（{len(rows)}）')
+  self.tabs.setCurrentIndex(0 if errors else 1 if automatic else 2 if other else 0)
+  layout.addWidget(self.tabs,1)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok); buttons.accepted.connect(self.accept); layout.addWidget(buttons)
 
 class MainWindow(QMainWindow):

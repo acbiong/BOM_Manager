@@ -259,8 +259,9 @@ class Services:
    idx={x:headers.index(header_mapping[x]) for x in required}; ok=[]; fail=[]; total=max((ws.max_row or 1)-1,0)
    if progress_callback: progress_callback(0,total)
    for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
-    d={k:str(row[i] or '').strip() for k,i in idx.items()};
+    d={k:str(row[i] if row[i] is not None else '').strip() for k,i in idx.items()};
     if progress_callback: progress_callback(no-1,total)
+    if not d['物料基础编码'] and not d['物料名称']:continue
     missing_fields=[field for field in ('物料基础编码','物料版本号','物料名称','单位','物料制造商') if not d[field]]
     if missing_fields:
      fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue

@@ -38,3 +38,20 @@ class ImportDialogTests(unittest.TestCase):
    self.assertEqual(dialog.mapping()[dialog.required[0]],'编码')
    dialog.combos[dialog.required[-1]].setCurrentText('料号'); dialog.validate_mapping()
    self.assertEqual(dialog.result(),QDialog.Accepted); dialog.close()
+ def test_results_separate_auto_skips_and_errors(self):
+  rows=[(2,'ERR','失败物料','必填项缺失：单位'),(3,'SAME','重复物料','重复物料信息相同，自动跳过'),(4,'SKIP','手动跳过','跳过重复物料')]
+  dialog=MaterialImportResultDialog(['OK'],rows)
+  self.assertEqual([dialog.tabs.tabText(i) for i in range(3)],['导入失败（1）','自动跳过（1）','其他未导入（1）'])
+  self.assertIn('ERR 失败物料',dialog.details.toPlainText());self.assertNotIn('SAME',dialog.details.toPlainText())
+  self.assertIn('SAME 重复物料',dialog.skipped_details.toPlainText());self.assertNotIn('ERR',dialog.skipped_details.toPlainText())
+  self.assertIn('SKIP 手动跳过',dialog.other_details.toPlainText());dialog.close()
+ def test_preview_both_scrollbars_reach_overflow(self):
+  from PyQt5.QtCore import Qt
+  with tempfile.TemporaryDirectory() as tmp:
+   path=Path(tmp)/'wide.xlsx';wb=Workbook();headers=['字段'+str(i)+'较长的名称'*4 for i in range(20)];wb.active.append(headers)
+   for i in range(30):wb.active.append([str(i)+'行内容'*20]*20)
+   wb.save(path);wb.close();dialog=MaterialHeaderMappingDialog(path,headers,headers);dialog.resize(600,420);dialog.show();self.app.processEvents()
+   self.assertEqual(dialog.preview.horizontalScrollBarPolicy(),Qt.ScrollBarAlwaysOn);self.assertEqual(dialog.preview.verticalScrollBarPolicy(),Qt.ScrollBarAlwaysOn)
+   for bar in (dialog.preview.horizontalScrollBar(),dialog.preview.verticalScrollBar()):
+    self.assertGreater(bar.maximum(),0);bar.setValue(bar.maximum());self.assertEqual(bar.value(),bar.maximum())
+   dialog.close()
