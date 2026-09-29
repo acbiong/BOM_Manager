@@ -23,9 +23,9 @@ def app_base():
 def main():
  app=QApplication(sys.argv); base=app_base()
  try:
-  cfg=ConfigService(base).load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema()
+  config_service=ConfigService(base); cfg=config_service.load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema()
   if not valid: db.recreate_schema()
-  w=MainWindow(Services(db),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
+  w=MainWindow(Services(db,config_service),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
  except Exception as exc:
   log=base/'startup_error.log'
   try: log.write_text(traceback.format_exc(),encoding='utf-8')

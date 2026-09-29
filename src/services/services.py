@@ -6,9 +6,12 @@ class MaterialHeaderError(ValueError):
  def __init__(self,headers,missing):
   self.headers=headers; self.missing=missing
   super().__init__('缺少表头：'+ '、'.join(missing))
+from config.config_service import DEFAULT_MATERIAL_UNITS
+
 class Services:
- UNITS=['pcs','套','ml','L','mm','cm','m']; MP=['M','P']
- def __init__(self,db): self.db=db
+ UNITS=list(DEFAULT_MATERIAL_UNITS); MP=['M','P']
+ def __init__(self,db,config_service=None):
+  self.db=db; self.config_service=config_service; self.UNITS=config_service.material_units() if config_service else list(DEFAULT_MATERIAL_UNITS)
  def log(self,typ,obj,act,detail): self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail) VALUES(?,?,?,?)',(typ,obj,act,detail))
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；idle只检查是否为SKU或被其他BOM作为子项引用。
@@ -23,6 +26,7 @@ class Services:
   except Exception: pass
   return i
  def update_material(self,i,d):
+  if d.get('unit') not in self.UNITS:raise ValueError('单位不合规，允许：'+ '、'.join(self.UNITS))
   with self.db.transaction(): self.db.conn.execute('UPDATE materials SET name=?,description=?,unit=?,manufacturer=?,mpn=?,mp_flag=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(d['name'],d.get('description',''),d['unit'],d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'),i)); self.log('material',i,'update',d['name'])
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'material_changed','id':i})

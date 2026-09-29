@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QEvent, QSize
 from PyQt5.QtGui import QColor, QBrush, QFont
 from pathlib import Path
-from config.config_service import ConfigService
+from config.config_service import ConfigService, DEFAULT_MATERIAL_UNITS
 from database.database import Database
 from infrastructure.events import WindowRefreshBus
 from services.services import MaterialHeaderError
@@ -37,7 +37,7 @@ class MaterialDialog(QDialog):
    if k in readonly_keys: w=QLabel(str(data.get(k,'')))
    else: w=QLineEdit(str(data.get(k,'')))
    self.e[k]=w; f.addRow(l,w)
-  self.unit=QComboBox(); self.unit.addItems(['pcs','套','ml','L','mm','cm','m']); self.unit.setCurrentText(data.get('unit','pcs')); self.unit.setEnabled('unit' not in readonly_keys); f.addRow('单位',self.unit)
+  self.unit=QComboBox(); self.unit.addItems(parent.svc.UNITS if parent is not None and hasattr(parent,'svc') else list(DEFAULT_MATERIAL_UNITS)); self.unit.setCurrentIndex(self.unit.findText(data.get('unit',self.unit.itemText(0)))); self.unit.setEnabled('unit' not in readonly_keys); f.addRow('单位',self.unit)
   self.mp_flag=QComboBox(); self.mp_flag.addItems(['M','P']); self.mp_flag.setCurrentText(data.get('mp_flag','M')); self.mp_flag.setEnabled('mp_flag' not in readonly_keys); f.addRow('M/P',self.mp_flag)
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self):
@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
    old_db=self.svc.db
    self.svc.db=new_db
    old_db.close()
-   c=ConfigService().load(); c['database']['path']=str(selected); ConfigService().save(c)
+   config_service=self.svc.config_service or ConfigService(); c=config_service.load(); c['database']['path']=str(selected); config_service.save(c)
    self.refresh()
    QMessageBox.information(self,'数据库已切换',('已打开已有数据库' if existed else '已创建并打开新数据库')+'：\n'+str(selected))
   except Exception as exc:
@@ -187,10 +187,10 @@ class MainWindow(QMainWindow):
    self._materials.closed.connect(lambda:setattr(self,'_materials',None))
   self.activate_window(self._materials)
  def import_materials(self):
-  cfg=ConfigService(Path(self.svc.db.path).parent).load(); last=cfg['database'].get('last_import_dir',str(Path.home()/'Desktop')); last=last if Path(last).is_dir() else str(Path.home()/'Desktop')
+  config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent); cfg=config_service.load(); last=cfg['database'].get('last_import_dir',str(Path.home()/'Desktop')); last=last if Path(last).is_dir() else str(Path.home()/'Desktop')
   p=QFileDialog.getOpenFileName(self,'导入物料清单',last,'Excel (*.xlsx)')[0]
   if p:
-    cfg['database']['last_import_dir']=str(Path(p).parent); ConfigService(Path(self.svc.db.path).parent).save(cfg)
+    cfg['database']['last_import_dir']=str(Path(p).parent); config_service.save(cfg)
     def resolver(d,old):
      box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']}（{d['物料名称']}）已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
     progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
