@@ -49,9 +49,10 @@ class MaterialHeaderMappingDialog(QDialog):
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
    item=QTableWidgetItem(need); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
-   combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems(headers)
+   combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems(headers)
    if need not in missing and need in headers: combo.setCurrentText(need)
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
+   combo.currentTextChanged.connect(self.fit_mapping_columns)
   self.mapping_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
   layout.addWidget(self.mapping_table)
   layout.addWidget(QLabel('文件读取预览（前20行）：'))
@@ -62,11 +63,19 @@ class MaterialHeaderMappingDialog(QDialog):
    for r,row in enumerate(rows):
     for c in range(len(headers)): self.preview.setItem(r,c,QTableWidgetItem(str(row[c] or '') if c<len(row) else ''))
   except Exception as error: self.preview.setRowCount(1); self.preview.setItem(0,0,QTableWidgetItem('预览失败：'+str(error)))
-  layout.addWidget(self.preview,1); fit_columns(self.mapping_table); fit_columns(self.preview)
+  layout.addWidget(self.preview,1); self.fit_mapping_columns(); fit_columns(self.preview)
   self.mapping_table.setRowHeight(1,max(combo.sizeHint().height() for combo in self.combos.values())+8)
   self.mapping_table.setFixedHeight(sum(self.mapping_table.rowHeight(i) for i in range(2))+self.mapping_table.horizontalScrollBar().sizeHint().height()+6)
   self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def fit_mapping_columns(self):
+  # 映射控件需计入下拉箭头和样式边距，不使用普通数据列的25字宽度上限。
+  for column,need in enumerate(self.required):
+   combo=self.combos.get(need)
+   if combo is None:continue
+   width=max(self.mapping_table.fontMetrics().horizontalAdvance(need)+24,combo.sizeHint().width()+12)
+   self.mapping_table.setColumnWidth(column,width)
+  self.mapping_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
  def mapping(self): return {need:self.combos[need].currentText().strip() if self.combos[need].currentIndex()>0 else '' for need in self.required}
  def validate_mapping(self):
   values=self.mapping(); missing=[x for x in self.required if not values.get(x)]
@@ -599,11 +608,55 @@ class BomWindow(QMainWindow):
   QMessageBox.information(self,'保存','BOM已保存')
   return True
 
+class MaterialColumnFilterDialog(QDialog):
+ def __init__(self,title,values,condition=None,parent=None):
+  super().__init__(parent); self.setWindowTitle('筛选：'+title); self.resize(420,460)
+  layout=QVBoxLayout(self); self.query=QLineEdit(); self.query.setPlaceholderText('包含文字（可留空，不区分大小写）'); layout.addWidget(self.query)
+  self.values=sorted(set(values)); self.list=QListWidget(); layout.addWidget(self.list)
+  query,selected=condition or ('',None); self.query.setText(query)
+  for value in self.values:
+   item=QListWidgetItem(value or '（空白）',self.list); item.setData(Qt.UserRole,value); item.setCheckState(Qt.Checked if selected is None or value in selected else Qt.Unchecked)
+  actions=QHBoxLayout(); all_button=QPushButton('全选'); none_button=QPushButton('全不选'); actions.addWidget(all_button); actions.addWidget(none_button); layout.addLayout(actions)
+  all_button.clicked.connect(lambda:self.set_checks(Qt.Checked)); none_button.clicked.connect(lambda:self.set_checks(Qt.Unchecked))
+  buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def set_checks(self,state):
+  for index in range(self.list.count()):self.list.item(index).setCheckState(state)
+ def condition(self):
+  selected={self.list.item(i).data(Qt.UserRole) for i in range(self.list.count()) if self.list.item(i).checkState()==Qt.Checked}
+  return self.query.text().strip(),None if selected==set(self.values) else selected
+
 class MaterialWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,parent=None):
-  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
-  menu=self.menuBar(); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current); self.refresh()
+  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._filters={}; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
+  menu=self.menuBar(); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
+  self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
+  header=self.t.horizontalHeader(); header.setSectionsClickable(True); header.sectionClicked.connect(self.filter_menu); self.refresh()
+ def filter_menu(self,column):
+  menu=QMenu(self); choose=menu.addAction('筛选此列…'); clear=menu.addAction('清除此列筛选'); clear.setEnabled(column in self._filters); clear_all=menu.addAction('清除全部筛选'); clear_all.setEnabled(bool(self._filters))
+  header=self.t.horizontalHeader(); from PyQt5.QtCore import QPoint
+  action=menu.exec_(header.mapToGlobal(QPoint(header.sectionViewportPosition(column),header.height())))
+  if action==choose:
+   values=[self.t.item(row,column).text() for row in range(self.t.rowCount())]
+   dialog=MaterialColumnFilterDialog(self._column_labels[column],values,self._filters.get(column),self)
+   if dialog.exec_()==QDialog.Accepted:
+    condition=dialog.condition()
+    if condition==('',None):self._filters.pop(column,None)
+    else:self._filters[column]=condition
+    self.apply_filters()
+  elif action==clear:self._filters.pop(column,None); self.apply_filters()
+  elif action==clear_all:self._filters.clear(); self.apply_filters()
+ def apply_filters(self):
+  visible=0
+  for row in range(self.t.rowCount()):
+   match=True
+   for column,(query,selected) in self._filters.items():
+    value=self.t.item(row,column).text()
+    if query.casefold() not in value.casefold() or (selected is not None and value not in selected):match=False; break
+   self.t.setRowHidden(row,not match); visible+=int(match)
+  for column,label in enumerate(self._column_labels):
+   item=self.t.horizontalHeaderItem(column); item.setText(label+(' [筛选] ▾' if column in self._filters else ' ▾')); item.setToolTip('点击筛选；多列条件同时生效')
+  self.statusBar().showMessage(f'显示 {visible} / {self.t.rowCount()} 个物料')
  def edit_current(self,row,column):
   rs=self.svc.materials();
   if row<0 or row>=len(rs): return
@@ -687,7 +740,7 @@ class MaterialWindow(QMainWindow):
     item=QTableWidgetItem(str(v or ''))
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
     self.t.setItem(i,j,item)
-  fit_columns(self.t)
+  self.apply_filters(); fit_columns(self.t)
 
 class MaterialVersionDialog(QDialog):
  def __init__(self,material,references,parent=None):
