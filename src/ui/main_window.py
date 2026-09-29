@@ -1,7 +1,7 @@
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QEvent, QSize
-from PyQt5.QtGui import QColor, QBrush, QFont
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QEvent, QSize, QSortFilterProxyModel
+from PyQt5.QtGui import QColor, QBrush, QFont, QStandardItemModel, QStandardItem
 from pathlib import Path
 from config.config_service import ConfigService, DEFAULT_MATERIAL_UNITS
 from database.database import Database
@@ -164,6 +164,27 @@ class MaterialImportResultDialog(QDialog):
   layout.addWidget(self.tabs,1)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok); buttons.accepted.connect(self.accept); layout.addWidget(buttons)
 
+class NewSkuDialog(QDialog):
+ def __init__(self,svc,parent=None):
+  super().__init__(parent); self.svc=svc; self.material_id=None; self.setWindowTitle('新建SKU'); self.resize(650,160)
+  layout=QVBoxLayout(self); layout.addWidget(QLabel('输入基础编码、版本号或名称筛选物料；已有BOM结构的物料不可用。'))
+  self.combo=QComboBox(); self.combo.setEditable(True); self.combo.setInsertPolicy(QComboBox.NoInsert); self.combo.setMinimumWidth(500)
+  self.model=QStandardItemModel(self); skus={row['material_id'] for row in svc.skus()}
+  for row in svc.materials():
+   reason='已有BOM结构，不可用' if row['has_bom']=='Y' else '已是SKU，不可用' if row['id'] in skus else ''
+   item=QStandardItem(f"{row['base_code']}-{row['version']} {row['name']}"+('（'+reason+'）' if reason else '')); item.setData(row['id'],Qt.UserRole); item.setEnabled(not reason); self.model.appendRow(item)
+  self.combo.setModel(self.model); self.combo.setCurrentIndex(-1); self.combo.lineEdit().setPlaceholderText('输入物料编码或名称')
+  self.proxy=QSortFilterProxyModel(self); self.proxy.setSourceModel(self.model); self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
+  self.completer=QCompleter(self.proxy,self); self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion); self.combo.setCompleter(self.completer)
+  self.combo.lineEdit().textEdited.connect(self.filter_materials); layout.addWidget(self.combo)
+  buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def filter_materials(self,text):
+  self.proxy.setFilterFixedString(text); self.completer.complete()
+ def accept(self):
+  text=self.combo.currentText(); matches=[self.model.item(i) for i in range(self.model.rowCount()) if self.model.item(i).text()==text]
+  if not matches or not matches[0].isEnabled():QMessageBox.warning(self,'无法新建SKU','请选择可用的物料，不能使用任意输入文字或已有BOM结构的物料。'); return
+  self.material_id=matches[0].data(Qt.UserRole); super().accept()
+
 class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
@@ -273,10 +294,11 @@ class MainWindow(QMainWindow):
     if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
    except Exception as e: QMessageBox.warning(self,'校验失败',str(e))
  def new_sku(self):
-  rows=self.svc.materials(); items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]; x,ok=QInputDialog.getItem(self,'新建SKU','选择物料',items,0,False)
-  if ok:
-   try: mid=rows[items.index(x)]['id']; sid=self.svc.create_sku(mid); self.refresh(); self.open_bom_id(sid)
-   except Exception as e: QMessageBox.warning(self,'失败',str(e))
+  dialog=NewSkuDialog(self.svc,self)
+  if dialog.exec_()==QDialog.Accepted:
+   try:
+    sid=self.svc.create_sku(dialog.material_id,require_empty_bom=True); self.refresh(); self.open_bom_id(sid)
+   except Exception as error:QMessageBox.warning(self,'新建SKU失败',str(error))
  def change_sku_version(self,sid=None):
   r=self.table.currentRow() if sid is None else -1
   if sid is None and r<0:return

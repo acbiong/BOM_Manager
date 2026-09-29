@@ -50,14 +50,24 @@ class Services:
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
  def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,m.updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
- def create_sku(self,mid):
+ def create_sku(self,mid,require_empty_bom=False):
+  if not self.material_snapshot(mid):raise ValueError('物料不存在')
+  if require_empty_bom and self.db.conn.execute('SELECT 1 FROM material_bom_items WHERE parent_material_id=?',(mid,)).fetchone():raise ValueError('物料已有BOM结构，不可用于新建SKU')
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone(): raise ValueError('已是SKU')
   with self.db.transaction(): c=self.db.conn.execute('INSERT INTO skus(material_id) VALUES(?)',(mid,)); self.log('sku',c.lastrowid,'create','创建SKU'); sid=c.lastrowid
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'sku_changed','id':sid})
   return sid
  def delete_sku(self,sid):
-  with self.db.transaction(): r=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone(); self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(r['material_id'],)); self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,)); self.log('sku',sid,'delete','删除SKU')
+  with self.db.transaction():
+   r=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
+   if r is None:raise ValueError('SKU不存在')
+   root=r['material_id']
+   self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(root,))
+   self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(root,))
+   self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
+   self.db.conn.execute('UPDATE materials SET has_bom=0 WHERE id=?',(root,))
+   self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,)); self.log('sku',sid,'delete','删除SKU及其根BOM结构、直属替代料；保留共享子BOM和物料库记录')
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'sku_changed','id':sid})
   WindowRefreshBus.publish({'type':'bom_changed','root':r['material_id']})
