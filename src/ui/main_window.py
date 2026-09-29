@@ -46,7 +46,7 @@ class MaterialHeaderMappingDialog(QDialog):
  def __init__(self,path,headers,missing,parent=None):
   super().__init__(parent); self.setWindowTitle('物料表头映射'); self.resize(1000,620); self.required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
   layout=QVBoxLayout(self); layout.addWidget(QLabel('未能自动识别全部表头，请为每个需求字段选择文件中的对应列：'))
-  self.mapping_table=QTableWidget(len(self.required),2); self.mapping_table.setHorizontalHeaderLabels(['需求表头','文件表头映射']); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+  self.mapping_table=QTableWidget(len(self.required),2); self.mapping_table.setHorizontalHeaderLabels(['需求表头\n（系统字段）','目标表头\n（文件字段）']); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.mapping_table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter|Qt.AlignVCenter)
   for row,need in enumerate(self.required):
    self.mapping_table.setItem(row,0,QTableWidgetItem(need)); combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems(headers)
    if need not in missing and need in headers: combo.setCurrentText(need)
@@ -62,7 +62,7 @@ class MaterialHeaderMappingDialog(QDialog):
   except Exception as error: self.preview.setRowCount(1); self.preview.setItem(0,0,QTableWidgetItem('预览失败：'+str(error)))
   layout.addWidget(self.preview); fit_columns(self.mapping_table); fit_columns(self.preview)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
- def mapping(self): return {need:self.combos[need].currentData() for need in self.required}
+ def mapping(self): return {need:self.combos[need].currentText().strip() if self.combos[need].currentIndex()>0 else '' for need in self.required}
  def validate_mapping(self):
   values=self.mapping(); missing=[x for x in self.required if not values.get(x)]
   duplicates={x for x in values.values() if x and list(values.values()).count(x)>1}
