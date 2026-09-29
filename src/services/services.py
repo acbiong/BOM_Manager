@@ -12,7 +12,18 @@ class Services:
  UNITS=list(DEFAULT_MATERIAL_UNITS); MP=['M','P']
  def __init__(self,db,config_service=None):
   self.db=db; self.config_service=config_service; self.UNITS=config_service.material_units() if config_service else list(DEFAULT_MATERIAL_UNITS)
- def log(self,typ,obj,act,detail): self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail) VALUES(?,?,?,?)',(typ,obj,act,detail))
+ MATERIAL_FIELDS=[('base_code','基础编码'),('version','版本号'),('name','物料名称'),('description','规格描述'),('unit','单位'),('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P')]
+ def material_snapshot(self,i):
+  row=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
+  return dict(row) if row else {}
+ def material_detail(self,before,after):
+  def text(value):return '（空）' if value is None or value=='' else str(value)
+  return '；'.join(f'{label}：{text(before.get(key))} → {text(after.get(key))}' for key,label in self.MATERIAL_FIELDS if before.get(key)!=after.get(key))
+ def log(self,typ,obj,act,detail,snapshot=None):
+  if snapshot is None and typ=='material':snapshot=self.material_snapshot(obj)
+  snapshot=snapshot or {}
+  code=f"{snapshot['base_code']}-{snapshot['version']}" if snapshot else None
+  self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail,material_code,material_name) VALUES(?,?,?,?,?,?)',(typ,obj,act,detail,code,snapshot.get('name')))
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；idle只检查是否为SKU或被其他BOM作为子项引用。
   q=f'%{query}%'; return self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
@@ -20,21 +31,24 @@ class Services:
   if not all(d.get(k) for k in ('base_code','version','name')): raise ValueError('基础编码、版本号、名称为必填')
   if d.get('unit','pcs') not in self.UNITS: raise ValueError('单位不合规')
   with self.db.transaction():
-   c=self.db.conn.execute('INSERT INTO materials(base_code,version,name,description,unit,manufacturer,mpn,mp_flag) VALUES(?,?,?,?,?,?,?,?)',(d['base_code'],d['version'],d['name'],d.get('description',''),d.get('unit','pcs'),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'))); i=c.lastrowid; self.log('material',i,'create',d['name'])
+   c=self.db.conn.execute('INSERT INTO materials(base_code,version,name,description,unit,manufacturer,mpn,mp_flag) VALUES(?,?,?,?,?,?,?,?)',(d['base_code'],d['version'],d['name'],d.get('description',''),d.get('unit','pcs'),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'))); i=c.lastrowid; self.log('material',i,'create','新建物料；'+self.material_detail({},self.material_snapshot(i)))
   try:
    from infrastructure.events import WindowRefreshBus; WindowRefreshBus.publish({'type':'material_changed','id':i})
   except Exception: pass
   return i
  def update_material(self,i,d):
   if d.get('unit') not in self.UNITS:raise ValueError('单位不合规，允许：'+ '、'.join(self.UNITS))
-  with self.db.transaction(): self.db.conn.execute('UPDATE materials SET name=?,description=?,unit=?,manufacturer=?,mpn=?,mp_flag=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(d['name'],d.get('description',''),d['unit'],d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'),i)); self.log('material',i,'update',d['name'])
+  before=self.material_snapshot(i)
+  if not before:raise ValueError('物料不存在')
+  with self.db.transaction(): self.db.conn.execute('UPDATE materials SET name=?,description=?,unit=?,manufacturer=?,mpn=?,mp_flag=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(d['name'],d.get('description',''),d['unit'],d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'),i)); self.log('material',i,'update','修改物料；'+(self.material_detail(before,self.material_snapshot(i)) or '物料属性未发生变化'))
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'material_changed','id':i})
  def delete_material(self,i):
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(i,)).fetchone(): raise ValueError('物料是SKU，请先删除SKU引用')
   r=self.db.conn.execute('SELECT COUNT(*) n FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)).fetchone();
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
-  with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料')
+  before=self.material_snapshot(i)
+  with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
  def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,m.updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
  def create_sku(self,mid):
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone(): raise ValueError('已是SKU')
@@ -217,7 +231,7 @@ class Services:
      self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) SELECT ?,material_id,sort_no FROM alternates WHERE bom_item_id=?',(relation,child['id']))
     for parent in selected:
      self.db.conn.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,parent,i))
-   self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={sorted(selected)}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
+   self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={[str(self.material_snapshot(parent).get('base_code',''))+'-'+str(self.material_snapshot(parent).get('version',''))+' '+str(self.material_snapshot(parent).get('name','')) for parent in sorted(selected)]}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'material_changed','id':new_id})
   for parent in selected: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
@@ -273,13 +287,20 @@ class Services:
     for row in sheet.iter_rows(min_row=2): row[headers.index('用量')].number_format='0.0'
   wb.save(path)
  def export_materials(self,path):
-  wb=Workbook(); ws=wb.active; ws.title='变更记录'; ws.append(['序号','变更时间','变更详细内容','变更日期','变更时间']); ws2=wb.create_sheet('物料库'); ws2.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料']);
-  for r in self.materials(): ws2.append([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']])
-  for n,r in enumerate(self.db.conn.execute('SELECT * FROM change_logs ORDER BY id'),1): ws.append([n,r['changed_at'],r['detail'],r['changed_at'][:10],r['changed_at'][11:]])
-  for sheet in wb:
-   headers=[cell.value for cell in sheet[1]]
-   if '用量' in headers:
-    for row in sheet.iter_rows(min_row=2): row[headers.index('用量')].number_format='0.0'
+  from openpyxl.styles import Alignment
+  wb=Workbook(); ws=wb.active; ws.title='变更记录'; ws.append(['序号','变更日期','变更时间','变更物料编码','变更物料名称','变更详细内容'])
+  ws2=wb.create_sheet('物料库'); ws2.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料'])
+  for r in self.materials():ws2.append([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']])
+  for n,r in enumerate(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id"),1):
+   code=r['material_code']; name=r['material_name']; detail=r['detail'] or ''
+   if code is None:
+    # 老日志无历史快照，不能用可能已复用的ID推断历史物料，也不能伪造变更前值。
+    code='历史记录未保存'; name='历史记录未保存'; detail='历史日志（未记录字段前后值及物料快照）：'+detail
+   changed=r['changed_at'] or ''; ws.append([n,changed[:10],changed[11:],code,name,detail])
+  ws.freeze_panes='A2'; ws.auto_filter.ref=ws.dimensions
+  for column,width in [('A',8),('B',14),('C',14),('D',28),('E',32),('F',90)]:ws.column_dimensions[column].width=width
+  for row in ws.iter_rows(min_row=2):
+   for cell in row:cell.alignment=Alignment(wrap_text=True,vertical='top')
   wb.save(path)
  def export_sku(self,sid,path):
   s=self.db.conn.execute('SELECT s.*,m.* FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone(); wb=Workbook(); w=wb.active; w.title='变更记录'; w.append(['序号','变更时间','变更详细内容','变更日期','变更时间']); b=wb.create_sheet('SKU对应的BOM'); b.append(['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','用量','单位','M/P','制造商','MPN']);
