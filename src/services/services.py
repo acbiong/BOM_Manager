@@ -261,7 +261,9 @@ class Services:
    for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
     d={k:str(row[i] or '').strip() for k,i in idx.items()};
     if progress_callback: progress_callback(no-1,total)
-    if not d['物料基础编码'] or not d['物料版本号'] or not d['物料名称'] or not d['单位'] or not d['物料制造商']: fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失')); continue
+    missing_fields=[field for field in ('物料基础编码','物料版本号','物料名称','单位','物料制造商') if not d[field]]
+    if missing_fields:
+     fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue
     if d['单位'] not in self.UNITS: fail.append((no,d['物料基础编码'],d['物料名称'],'单位不合规')); continue
     old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
     if old:

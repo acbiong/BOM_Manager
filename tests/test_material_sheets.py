@@ -46,3 +46,18 @@ class MaterialSheetsTests(unittest.TestCase):
     main.import_materials();warning.assert_not_called();self.assertEqual(choose.call_args.args[3],['目录','物料数据'])
    self.assertEqual([r['base_code'] for r in self.s.materials()],['RIGHT'])
   finally:main.close()
+ def test_missing_required_fields_reported_in_result_for_standard_and_mapped_headers(self):
+  for mapped in (False,True):
+   with self.subTest(mapped=mapped):
+    wb=Workbook();ws=wb.active;ws.append(self.headers if mapped else self.required)
+    ws.append(['A','1','物料A','','pcs',None,''])
+    ws.append(['B',None,'   ','',None,'   ',''])
+    ws.append([None,'1','物料C','','pcs','厂商',''])
+    wb.save(self.path);wb.close()
+    mapping=dict(zip(self.required,self.headers)) if mapped else None
+    ok,fail=self.s.import_materials(self.path,header_mapping=mapping)
+    self.assertEqual(ok,[]);self.assertEqual([row[3] for row in fail],['必填项缺失：物料制造商','必填项缺失：物料版本号、物料名称、单位、物料制造商','必填项缺失：物料基础编码'])
+    dialog=MaterialImportResultDialog(ok,fail)
+    self.assertIn('第2行：A 物料A\n原因：必填项缺失：物料制造商',dialog.details.toPlainText())
+    self.assertIn('物料版本号、物料名称、单位、物料制造商',dialog.details.toPlainText());dialog.close()
+    self.assertEqual(self.s.materials(),[])
