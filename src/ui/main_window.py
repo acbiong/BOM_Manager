@@ -45,8 +45,8 @@ class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
  def build(self):
-  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database);  a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); sm=bar.addMenu('SKU'); a=sm.addAction('新建SKU'); a.triggered.connect(self.new_sku); a=sm.addAction('版本变更'); a.triggered.connect(self.change_sku_version); a=sm.addAction('删除SKU'); a.triggered.connect(self.delete_sku)
-  self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom)
+  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.triggered.connect(self.new_sku)
+  self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self.project_label=QLabel(); self.project_label.setAlignment(Qt.AlignCenter); self.project_label.setStyleSheet('font-size:18px;font-weight:bold;padding:8px;')
   body=QWidget(); layout=QVBoxLayout(body); layout.addWidget(self.project_label); layout.addWidget(self.table); self.setCentralWidget(body)
   self.power_label=QLabel('Power by Biong'); self.version_label=QLabel('版本 '+self.version); self.statusBar().addPermanentWidget(self.power_label); self.statusBar().addPermanentWidget(self.version_label); self.statusBar().showMessage(''); self.refresh()
@@ -131,18 +131,28 @@ class MainWindow(QMainWindow):
   if ok:
    try: mid=rows[items.index(x)]['id']; sid=self.svc.create_sku(mid); self.refresh(); self.open_bom_id(sid)
    except Exception as e: QMessageBox.warning(self,'失败',str(e))
- def change_sku_version(self):
-  r=self.table.currentRow()
-  if r<0:return
-  sid=int(self.table.item(r,5).text()); v,ok=QInputDialog.getText(self,'SKU版本变更','新版本号')
+ def change_sku_version(self,sid=None):
+  r=self.table.currentRow() if sid is None else -1
+  if sid is None and r<0:return
+  if sid is None:sid=int(self.table.item(r,5).text())
+  v,ok=QInputDialog.getText(self,'SKU版本变更','新版本号')
   if ok:
    try:self.svc.change_sku_version(sid,v.strip()); self.refresh()
    except Exception as e: QMessageBox.warning(self,'版本变更失败',str(e))
- def delete_sku(self):
-  r=self.table.currentRow()
-  if r<0:return
-  sid=int(self.table.item(r,5).text())
+ def delete_sku(self,sid=None):
+  r=self.table.currentRow() if sid is None else -1
+  if sid is None:
+   if r<0:return
+   sid=int(self.table.item(r,5).text())
   if QMessageBox.question(self,'确认','删除当前SKU及BOM？')==QMessageBox.Yes:self.svc.delete_sku(sid); self.refresh()
+ def sku_context_menu(self,pos):
+  row=self.table.rowAt(pos.y())
+  if row<0:return
+  self.table.selectRow(row); sid=int(self.table.item(row,5).text())
+  menu=QMenu(self); version=menu.addAction('版本变更'); delete=menu.addAction('删除SKU')
+  action=menu.exec_(self.table.viewport().mapToGlobal(pos))
+  if action==version:self.change_sku_version(sid)
+  elif action==delete:self.delete_sku(sid)
  def open_bom(self,row,col): self.open_bom_id(int(self.table.item(row,5).text()))
  def open_bom_id(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
