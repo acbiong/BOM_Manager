@@ -55,7 +55,25 @@ StartupNotify=true
 X-AppImage-Integrate=false
 EOF
 if command -v appimagetool >/dev/null 2>&1; then
- APPIMAGE_EXTRACT_AND_RUN=1 appimagetool --runtime-file "${APPIMAGE_RUNTIME:-$HOME/.local/bin/runtime-x86_64}" "$APPDIR" "package/${name}.AppImage"
+ # Deepin文件管理器启动时不会注入 APPIMAGE_EXTRACT_AND_RUN；在没有FUSE的机器上，
+ # 原生runtime会直接退出。复制runtime并将该分支设为默认，保证双击也能自动解压运行。
+ runtime_src="${APPIMAGE_RUNTIME:-$HOME/.local/bin/runtime-x86_64}"
+ runtime_default="$TMP_DIR/runtime-extract-x86_64"
+ cp "$runtime_src" "$runtime_default"
+ python3 - "$runtime_default" <<'PYRUNTIME'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); b=bytearray(p.read_bytes())
+# type2-runtime: test getenv("APPIMAGE_EXTRACT_AND_RUN") then JNE extract.
+needle=bytes.fromhex('0f 85 53 04 00 00')
+pos=b.find(needle)
+if pos < 0:
+    raise SystemExit('无法定位 AppImage runtime 的提取分支，拒绝生成可能无法双击运行的包')
+b[pos+1]=0x84  # 缺少环境变量时也跳转到 extract-and-run
+p.write_bytes(b)
+PYRUNTIME
+ chmod +x "$runtime_default"
+ APPIMAGE_EXTRACT_AND_RUN=1 appimagetool --runtime-file "$runtime_default" "$APPDIR" "package/${name}.AppImage"
  sha256sum "package/${name}.AppImage" > "package/${name}.AppImage.sha256"
  echo "AppImage: package/${name}.AppImage"
 else
