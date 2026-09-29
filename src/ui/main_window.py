@@ -7,6 +7,7 @@ from config.config_service import ConfigService, DEFAULT_MATERIAL_UNITS
 from database.database import Database
 from infrastructure.events import WindowRefreshBus
 from services.services import MaterialHeaderError
+from ui.theme import apply_theme, theme_icon
 
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
@@ -169,9 +170,16 @@ class MainWindow(QMainWindow):
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.triggered.connect(self.new_sku)
   self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
-  self.project_label=QLabel(); self.project_label.setAlignment(Qt.AlignRight|Qt.AlignVCenter); self.project_label.setStyleSheet('font-weight:bold;padding:0 8px;'); bar.setCornerWidget(self.project_label,Qt.TopRightCorner)
+  self.project_label=QLabel(); self.project_label.setAlignment(Qt.AlignRight|Qt.AlignVCenter); self.project_label.setStyleSheet('font-weight:bold;padding:0 8px;'); corner=QWidget(); corner_layout=QHBoxLayout(corner); corner_layout.setContentsMargins(0,0,4,0); corner_layout.addWidget(self.project_label)
+  self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
+  self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
-  self.power_label=QLabel('Power by Biong'); self.version_label=QLabel('版本 '+self.version); self.statusBar().addPermanentWidget(self.power_label); self.statusBar().addPermanentWidget(self.version_label); self.statusBar().showMessage(''); self.refresh()
+  self.power_label=QLabel('Power by Biong & BrainCo Inc.'); self.version_label=QLabel('版本 '+self.version); self.statusBar().addPermanentWidget(self.power_label); self.statusBar().addPermanentWidget(self.version_label); self.statusBar().showMessage(''); self.refresh()
+ def set_theme(self,dark):
+  apply_theme(dark); self.theme_button.setIcon(theme_icon(dark))
+  label='当前深色主题（月亮），点击切换浅色主题' if dark else '当前浅色主题（太阳），点击切换深色主题'
+  self.theme_button.setToolTip(label); self.theme_button.setAccessibleName(label)
+ def toggle_theme(self):self.set_theme(not bool(QApplication.instance().property('bom_dark_theme')))
  def refresh(self):
   project=self.svc.project(); name=(project['project_name'] or '').strip(); title=f'{name} BOM管理系统' if name and name!='请输入项目名称' else 'BOM管理系统'
   self.project_label.setText(title); self.project_label.setToolTip(title); self.setWindowTitle(title)
@@ -551,7 +559,7 @@ class BomWindow(QMainWindow):
    for column in range(self.tree.columnCount()):
     font=QFont(self.tree.font()); font.setStrikeOut(bool(deleted)); font.setBold(column in changed and not deleted)
     item.setFont(column,font)
-    color=QColor('red') if deleted else QColor('green') if added else QColor('yellow') if changed else None
+    color=QColor('red') if deleted else QColor('green') if added else QColor('#9a6700') if changed else None
     item.setForeground(column,QBrush(color) if color else QBrush(QColor('white')) if external else QBrush())
     item.setBackground(column,QBrush(QColor('#4a148c')) if external else QBrush())
    remark=data.get('remark','') if not root else ''

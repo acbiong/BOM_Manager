@@ -465,7 +465,7 @@ class BomUiTests(unittest.TestCase):
   node=self.w.root_item.child(0); self.w.show_item_info(node)
   self.w.fields['quantity'].setValue(5.4); self.w.fields['remark'].setText('真实修改备注')
   for column in range(self.w.tree.columnCount()):
-   self.assertEqual(node.foreground(column).color(),QColor('yellow'))
+   self.assertEqual(node.foreground(column).color(),QColor('#9a6700'))
    self.assertEqual(node.font(column).bold(),column in (1,4))
   self.w.fields['quantity'].setValue(1.0); self.assertFalse(node.font(1).bold())
   self.w.fields['remark'].setText('')
@@ -481,7 +481,7 @@ class BomUiTests(unittest.TestCase):
   self.w.fields['position'].setText('本地位置'); self.w.refresh_external(); self.w.refresh_external()
   node=self.w.root_item.child(0).child(0)
   self.assertIn('有其他BOM更新导入此变更',node.text(4)); self.assertEqual(node.text(3),'本地位置')
-  self.assertEqual(node.background(0).color(),QColor('#4a148c')); self.assertEqual(node.foreground(0).color(),QColor('yellow'))
+  self.assertEqual(node.background(0).color(),QColor('#4a148c')); self.assertEqual(node.foreground(0).color(),QColor('#9a6700'))
   self.assertTrue(node.font(3).bold()); self.assertFalse(node.font(4).bold())
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
   saved=self.s.bom(p)[0]; self.assertEqual(saved['remark'],'数据库真实备注'); self.assertEqual(saved['position'],'本地位置')
@@ -524,7 +524,7 @@ class BomUiTests(unittest.TestCase):
   self.assertEqual((child.text(1),child.text(3)),('7.6','本地位置'))
   for node in (added,child):
    self.assertEqual(node.foreground(0).color(),QColor('green')); self.assertEqual(node.background(0).color(),QColor('#4a148c'))
-  self.assertEqual(self.w.root_item.child(0).foreground(0).color(),QColor('yellow'))
+  self.assertEqual(self.w.root_item.child(0).foreground(0).color(),QColor('#9a6700'))
   self.w.show_item_info(child); self.assertEqual(self.w.alt_table.rowCount(),1); self.assertEqual(self.w.fields['remark'].text(),'外部真实备注')
   self.assertNotIn(o,[row['material_id'] for row in self.s.bom(r)])
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
@@ -590,7 +590,7 @@ class BomUiTests(unittest.TestCase):
   for node in (parent,child):
    self.assertEqual(node.background(0).color(),QColor('#4a148c'))
    self.assertIn('有其他BOM更新导入此变更',node.text(4))
-  self.assertEqual(child.foreground(0).color(),QColor('yellow'))
+  self.assertEqual(child.foreground(0).color(),QColor('#9a6700'))
   self.w.show_item_info(child); self.assertEqual(self.w.fields['remark'].text(),'保留本地备注')
  def test_external_highlight_does_not_spread_to_unchanged_siblings(self):
   r,p,c,o,x=self.ids
@@ -611,7 +611,7 @@ class BomUiTests(unittest.TestCase):
   for node in (parent,child):
    for column in range(self.w.tree.columnCount()):self.assertEqual(node.background(column).color(),QColor('#4a148c'))
    self.assertIn('有其他BOM更新导入此变更',node.text(4))
-  self.assertEqual(child.foreground(0).color(),QColor('yellow'))
+  self.assertEqual(child.foreground(0).color(),QColor('#9a6700'))
   for node in (self.w.root_item,self.w.root_item.child(1)):
    self.assertEqual(node.background(0).style(),Qt.NoBrush); self.assertEqual(node.text(4),'')
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
