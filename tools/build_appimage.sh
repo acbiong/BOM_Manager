@@ -21,6 +21,9 @@ cp "$DIST_DIR/$name" "$APPDIR/usr/bin/BOM管理系统"
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Deepin文件管理器可能向子进程传递dxcb等宿主专用Qt平台值；冻结包只携带xcb插件。
+# 有显示服务时明确选择兼容的xcb，避免双击启动后Qt平台插件初始化失败。
+if [ -n "${DISPLAY:-}" ]; then export QT_QPA_PLATFORM=xcb; fi
 exec "$HERE/usr/bin/BOM管理系统" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
