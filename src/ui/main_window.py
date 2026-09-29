@@ -61,7 +61,7 @@ class MaterialHeaderMappingDialog(QDialog):
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
    item=QTableWidgetItem(need); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
-   combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems(headers)
+   combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems([header for header in headers if header.strip()])
    if need not in missing and need in headers: combo.setCurrentText(need)
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
    combo.currentTextChanged.connect(self.schedule_mapping_fit)
@@ -80,6 +80,8 @@ class MaterialHeaderMappingDialog(QDialog):
    for r,row in enumerate(rows):
     for c in range(len(headers)): self.preview.setItem(r,c,QTableWidgetItem(str(row[c] or '') if c<len(row) else ''))
   except Exception as error: self.preview.setRowCount(1); self.preview.setItem(0,0,QTableWidgetItem('预览失败：'+str(error)))
+  for column,header in enumerate(headers):
+   if not header.strip():self.preview.setColumnHidden(column,True)
   layout.addWidget(self.preview,1); fit_columns(self.preview)
   self._mapping_fit_timer=QTimer(self); self._mapping_fit_timer.setSingleShot(True); self._mapping_fit_timer.timeout.connect(self.fit_mapping_columns)
   self.mapping_table.viewport().installEventFilter(self); self.mapping_table.installEventFilter(self)
@@ -347,11 +349,22 @@ class MainWindow(QMainWindow):
   p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
   if p:
    from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.save(p)
+class BomTreeWidget(QTreeWidget):
+ def drawRow(self,painter,option,index):
+  super().drawRow(painter,option,index)
+  painter.save(); painter.setPen(self.palette().mid().color())
+  rect=option.rect
+  painter.drawLine(0,rect.bottom(),self.viewport().width(),rect.bottom())
+  for column in range(self.columnCount()):
+   x=self.header().sectionViewportPosition(column)+self.columnWidth(column)-1
+   painter.drawLine(x,rect.top(),x,rect.bottom())
+  painter.restore()
+
 class BomWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,root,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
-  self.tree=QTreeWidget(); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
+  self.tree=BomTreeWidget(); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
   self.fields={}; form=QFormLayout();
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
    w=QuantityEdit() if k=='quantity' else (QLineEdit() if k in ('position','remark') else QLabel()); self.fields[k]=w; form.addRow(l,w)
@@ -673,22 +686,40 @@ class BomWindow(QMainWindow):
   self._alternate_edits[self.alternate_key(item)]=[mid for mid in self.alternate_ids(item) if mid!=material_id]
   self.mark_dirty(); self.show_item_info(item)
  def import_bom(self):
-  if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将重新加载BOM，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
+  if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将替换当前编辑缓存，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
   p=QFileDialog.getOpenFileName(self,'导入BOM','','Excel (*.xlsx)')[0]
   if not p:return
   try:
    sheet=choose_material_sheet(p,self,'BOM')
-   self._saving=True
-   try:
-    try:n=self.svc.import_bom(p,self.root,sheet_name=sheet)
-    except MaterialHeaderError as error:
-     dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet,required=self.svc.BOM_HEADERS)
-     if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
-     n=self.svc.import_bom(p,self.root,sheet_name=sheet,header_mapping=dialog.mapping())
-   finally:self._saving=False
-   self.dirty=False; self._deleted_relations.clear(); self._alternate_edits.clear(); self.load(); self.notice.clear(); self.statusBar().clearMessage()
-   QMessageBox.information(self,'导入完成',f'已校验BOM结构并导入{n}条父子关系')
+   try:nodes=self.svc.import_bom(p,self.root,sheet_name=sheet,persist=False)
+   except MaterialHeaderError as error:
+    dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet,required=self.svc.BOM_HEADERS)
+    if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
+    nodes=self.svc.import_bom(p,self.root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False)
+   self.stage_import(nodes)
+   QMessageBox.information(self,'导入完成','BOM已导入编辑缓存，请检查后点击“保存”写入数据库。')
   except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
+ def stage_import(self,nodes):
+  from copy import deepcopy
+  baseline=self.database_tree()
+  self._deleted_relations.clear(); self._alternate_edits.clear(); self._draft_baselines.clear(); self._external_paths.clear()
+  def compare(old,new,parent):
+   old_by={n['data']['material_id']:n for n in old}
+   new_ids={n['data']['material_id'] for n in new}
+   for node in new:
+    data=node['data']; previous=old_by.get(data['material_id'])
+    if previous is None:
+     data['_added']=True
+     if data['id']<0:self._draft_baselines[data['id']]=deepcopy(node)
+    compare(previous['children'] if previous else [],node['children'],data['material_id'])
+   for node in old:
+    if node['data']['material_id'] not in new_ids:
+     deleted=deepcopy(node); deleted['data']['_deleted']=True; new.append(deleted)
+     data=deleted['data']; self._deleted_relations.add((parent,data['material_id'],data.get('position','') or ''))
+  compare(baseline,nodes,self.root)
+  self._baseline_tree=deepcopy(baseline)
+  self.render_tree(nodes); self.mark_dirty()
+  self.notice.clear(); self.refresh_action.setEnabled(False); self.statusBar().clearMessage()
  def export_bom(self):
   p=QFileDialog.getSaveFileName(self,'导出BOM','SKU_BOM.xlsx','Excel (*.xlsx)')[0]
   if p:

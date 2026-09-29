@@ -69,3 +69,46 @@ class BomImportTests(unittest.TestCase):
   self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=1,unit='pcs')])
   self.write([['ROOT','root','R','1',None,None]])
   self.assertEqual(self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM'),0);self.assertEqual(self.s.bom(self.ids['R','1']),[])
+
+ def test_blank_headers_ignored_and_cannot_be_mapped(self):
+  headers=['',*self.s.BOM_HEADERS,'   ',None]
+  self.write([['ignored','R','1','P','2',1,'x','ignored','ignored']],headers)
+  nodes=self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',persist=False)
+  self.assertEqual(nodes[0]['data']['material_id'],self.ids['P','2'])
+  self.assertEqual(self.s.bom(self.ids['R','1']),[])
+  mapping={field:field for field in self.s.BOM_HEADERS};mapping['位置']=''
+  with self.assertRaises(MaterialHeaderError):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',header_mapping=mapping,persist=False)
+  dialog=MaterialHeaderMappingDialog(self.path,['',*self.s.BOM_HEADERS,'',''],['位置'],sheet_name='BOM',required=self.s.BOM_HEADERS)
+  self.assertTrue(dialog.preview.isColumnHidden(0))
+  self.assertEqual(dialog.combos['位置'].count(),7);dialog.close()
+ def test_ui_import_is_cached_until_save_and_discard_does_not_write(self):
+  from unittest.mock import patch
+  from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
+  from PyQt5.QtCore import Qt
+  from ui.main_window import BomWindow,BomTreeWidget
+  root=self.ids['R','1'];old=self.ids['C','1'];new=self.ids['P','2']
+  self.s.save_bom(root,[dict(material_id=old,quantity=5,unit='pcs')])
+  self.write([['ROOT','ROOT','R','1',None,None],['R','1','P','2',2.3,'new']])
+  before=[tuple(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items')]
+  for save in (False,True):
+   window=BomWindow(self.s,root)
+   try:
+    with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning') as warning:
+     window.import_bom();warning.assert_not_called()
+     self.assertTrue(window.dirty);self.assertTrue(window.save_action.isEnabled())
+     self.assertEqual([tuple(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items')],before)
+     self.assertEqual(window.root_item.childCount(),2)
+     self.assertTrue(window.root_item.child(0).data(0,Qt.UserRole)['_added'])
+     self.assertTrue(window.root_item.child(1).data(0,Qt.UserRole)['_deleted'])
+     self.assertIsInstance(window.tree,BomTreeWidget)
+     window.show();self.app.processEvents();self.assertFalse(window.tree.grab().isNull())
+     if save:
+      self.assertTrue(window.save());rows=self.s.bom(root)
+      self.assertEqual([(r['material_id'],r['quantity']) for r in rows],[(new,2.3)])
+      self.assertFalse(window.dirty);self.assertEqual(window.root_item.childCount(),1)
+   finally:window.dirty=False;window.close()
+ def test_preview_rejects_shared_cycles_without_writes(self):
+  self.s.save_bom(self.ids['C','1'],[dict(material_id=self.ids['R','1'],quantity=1,unit='pcs')])
+  self.write([['R','1','C','1',1,'']])
+  with self.assertRaisesRegex(ValueError,'循环'):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',persist=False)
+  self.assertEqual(self.s.bom(self.ids['R','1']),[])

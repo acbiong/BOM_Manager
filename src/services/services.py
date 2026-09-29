@@ -84,7 +84,7 @@ class Services:
     d=dict(r); d.update(material_id=r['child_material_id'],unit=r['material_unit'],level_no=level,parent_item_id=parent_item_id,bom_root_id=root,node_id=node_id,parent_node_id=parent_node_id)
     result.append(d); walk(r['child_material_id'],level+1,r['id'],node_id,ancestors)
   walk(root,1,None,None,set()); return result
- def save_bom(self,root,items):
+ def save_bom(self,root,items,preview=False):
   """把树中的重复子BOM归并为物料关系，在单个事务中保存。"""
   old_rows=self.bom(root)
   retained={root}|{row['material_id'] for row in items}
@@ -147,6 +147,20 @@ class Services:
    for child in graph.get(node,()): check(child)
    visiting.remove(node); visited.add(node)
   for parent in parents: check(parent)
+  if preview:
+   # 使用与正式保存完全相同的关系集合生成编辑树，不写库、不发送刷新通知。
+   relations={key:payload(row) for key,row in old.items() if key[0] not in parents}
+   relations.update(desired)
+   groups={}; materials={r['id']:dict(r) for r in self.materials()}
+   for number,(key,values) in enumerate(relations.items(),1):
+    parent,child,position=key; quantity,unit,remark=values
+    previous=old.get(key); relation_id=previous['id'] if previous else -number
+    data=dict(materials[child]); data.update(id=relation_id,material_id=child,parent_material_id=parent,quantity=quantity,unit=unit,position=position,remark=remark)
+    data['_db_alternates']=[r['material_id'] for r in self.alternates(relation_id)] if previous else []
+    groups.setdefault(parent,[]).append(data)
+   def expand(parent):
+    return [{'data':dict(data),'children':expand(data['material_id'])} for data in groups.get(parent,[])]
+   return expand(root)
   with self.db.transaction():
    for key,row in old.items():
     if key[0] in parents and key not in desired:
@@ -184,7 +198,7 @@ class Services:
    WindowRefreshBus.publish({'type':'bom_changed','root':r['parent_material_id']})
   except Exception: pass
  BOM_HEADERS=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
- def import_bom(self,path,root=None,sheet_name=None,header_mapping=None):
+ def import_bom(self,path,root=None,sheet_name=None,header_mapping=None,persist=True):
   import math
   wb=load_workbook(path,read_only=True,data_only=True)
   try:
@@ -194,7 +208,7 @@ class Services:
    if sheet_name not in wb.sheetnames:raise ValueError('所选工作表不存在')
    ws=wb[sheet_name]; headers=[str(x if x is not None else '').strip() for x in next(ws.iter_rows(values_only=True),())]
    mapping=header_mapping or {field:field for field in self.BOM_HEADERS}
-   missing=[field for field in self.BOM_HEADERS if mapping.get(field) not in headers]
+   missing=[field for field in self.BOM_HEADERS if not mapping.get(field) or not str(mapping[field]).strip() or mapping[field] not in headers]
    if missing:raise MaterialHeaderError(headers,missing)
    if len(set(mapping[field] for field in self.BOM_HEADERS))!=len(self.BOM_HEADERS):raise ValueError('表头映射重复')
    if any(headers.count(mapping[field])!=1 for field in self.BOM_HEADERS):raise ValueError('源表头名称重复，请修改文件表头后重试')
@@ -248,6 +262,7 @@ class Services:
     active.remove(mid);visited.add(mid)
    walk(root)
    if not (parents|child_ids)<=visited:raise ValueError('存在不属于当前根物料的孤立或循环分支，请检查父项编码和版本号')
+   if not persist:return self.save_bom(root,rows,preview=True)
    self.save_bom(root,rows)
    return len(rows)
   finally:wb.close()
