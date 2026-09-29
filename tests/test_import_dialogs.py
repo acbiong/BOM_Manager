@@ -55,3 +55,28 @@ class ImportDialogTests(unittest.TestCase):
    for bar in (dialog.preview.horizontalScrollBar(),dialog.preview.verticalScrollBar()):
     self.assertGreater(bar.maximum(),0);bar.setValue(bar.maximum());self.assertEqual(bar.value(),bar.maximum())
    dialog.close()
+ def test_conflict_two_rows_highlight_changed_fields_and_choices(self):
+  from ui.main_window import MaterialConflictDialog
+  from PyQt5.QtGui import QColor
+  incoming={'物料基础编码':'A','物料版本号':'100','物料名称':'新名称','物料规格描述':'新描述','单位':'pcs','物料制造商':'厂','物料MPN':'123'}
+  existing=dict(base_code='A',version='100',name='旧名称',description='旧描述',unit='pcs',manufacturer='厂',mpn='123')
+  dialog=MaterialConflictDialog(incoming,existing)
+  self.assertEqual(dialog.table.rowCount(),2);self.assertEqual(dialog.table.item(0,2).text(),'旧名称');self.assertEqual(dialog.table.item(1,2).text(),'新名称')
+  for row in (0,1):self.assertEqual(dialog.table.item(row,2).background().color(),QColor('#ffe082'))
+  self.assertEqual(dialog.choice,'cancel')
+  for choice in ('overwrite','skip','cancel'):dialog.finish(choice);self.assertEqual(dialog.choice,choice)
+  dialog.close()
+ def test_mapping_width_tracks_selected_column_not_longest_unselected_option(self):
+  from PyQt5.QtCore import Qt
+  long='非常长的表头名称'*20
+  dialog=MaterialHeaderMappingDialog('不存在.xlsx',['编码',long],[]);dialog.show()
+  combo=dialog.combos[dialog.required[0]];combo.setCurrentText('编码')
+  for _ in range(5):self.app.processEvents()
+  initial=dialog.mapping_table.columnWidth(0);combo.setCurrentText(long)
+  for _ in range(5):self.app.processEvents()
+  expanded=dialog.mapping_table.columnWidth(0);self.assertGreater(expanded,initial)
+  self.assertLess(dialog.mapping_table.columnWidth(1),expanded)
+  combo.setCurrentText('编码')
+  for _ in range(5):self.app.processEvents()
+  self.assertLess(dialog.mapping_table.columnWidth(0),expanded)
+  self.assertEqual(dialog.mapping_table.horizontalScrollBarPolicy(),Qt.ScrollBarAlwaysOn);dialog.close()

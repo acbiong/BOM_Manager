@@ -262,22 +262,23 @@ class Services:
     d={k:str(row[i] if row[i] is not None else '').strip() for k,i in idx.items()};
     if progress_callback: progress_callback(no-1,total)
     if not d['物料基础编码'] and not d['物料名称']:continue
+    display_code=(d['物料基础编码'] or '（空基础编码）')+'-'+(d['物料版本号'] or '（空版本号）')
     missing_fields=[field for field in ('物料基础编码','物料版本号','物料名称','单位','物料制造商') if not d[field]]
     if missing_fields:
-     fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue
-    if d['单位'] not in self.UNITS: fail.append((no,d['物料基础编码'],d['物料名称'],'单位不合规')); continue
+     fail.append((no,display_code,d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue
+    if d['单位'] not in self.UNITS: fail.append((no,display_code,d['物料名称'],'单位不合规')); continue
     old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
     if old:
      same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')])
      if same:
-      fail.append((no,d['物料基础编码'],d['物料名称'],'重复物料信息相同，自动跳过')); continue
+      fail.append((no,display_code,d['物料名称'],'重复物料信息相同，自动跳过')); continue
      choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
-     if choice=='cancel': return ok,fail+[(no,d['物料基础编码'],d['物料名称'],'用户取消')]
+     if choice=='cancel': return ok,fail+[(no,display_code,d['物料名称'],'用户取消')]
      if choice=='overwrite':
       self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
-     fail.append((no,d['物料基础编码'],d['物料名称'],'跳过重复物料')); continue
+     fail.append((no,display_code,d['物料名称'],'跳过重复物料')); continue
     try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
-    except Exception as e: fail.append((no,d['物料基础编码'],d['物料名称'],str(e)))
+    except Exception as e: fail.append((no,display_code,d['物料名称'],str(e)))
    if progress_callback: progress_callback(total,total)
    return ok,fail
   finally:wb.close()

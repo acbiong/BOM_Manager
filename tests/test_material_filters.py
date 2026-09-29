@@ -36,7 +36,8 @@ class MaterialFilterTests(unittest.TestCase):
   title='很长的源文件表头'*12
   dialog=MaterialHeaderMappingDialog('不存在.xlsx',[title],[]); dialog.show(); self.app.processEvents()
   for column,need in enumerate(dialog.required):
-   combo=dialog.combos[need]; combo.setCurrentText(title); self.app.processEvents()
+   combo=dialog.combos[need]; combo.setCurrentText(title)
+   for _ in range(5):self.app.processEvents()
    self.assertGreaterEqual(dialog.mapping_table.columnWidth(column),combo.sizeHint().width())
    self.assertGreater(combo.width(),combo.fontMetrics().horizontalAdvance(title))
   self.assertGreater(dialog.mapping_table.horizontalScrollBar().maximum(),0); dialog.close()

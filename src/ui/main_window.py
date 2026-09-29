@@ -65,7 +65,7 @@ class MaterialHeaderMappingDialog(QDialog):
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
    combo.currentTextChanged.connect(self.schedule_mapping_fit)
    combo.installEventFilter(self)
-  self.mapping_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+  self.mapping_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.mapping_table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
   layout.addWidget(self.mapping_table)
   layout.addWidget(QLabel('文件读取预览（前20行）：'))
   self.preview=QTableWidget(); self.preview.setColumnCount(len(headers)); self.preview.setHorizontalHeaderLabels(headers); self.preview.setWordWrap(True); self.preview.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.preview.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -96,10 +96,12 @@ class MaterialHeaderMappingDialog(QDialog):
   table=self.mapping_table; table.ensurePolished(); widths=[]; heights=[]
   for need in self.required:
    combo=self.combos[need]; combo.ensurePolished(); metrics=combo.fontMetrics()
-   text_width=max(metrics.horizontalAdvance(combo.itemText(i)) for i in range(combo.count()))
+   text_width=metrics.horizontalAdvance(combo.currentText())
+   combo.setToolTip(combo.currentText())
+   combo.view().setMinimumWidth(max(metrics.horizontalAdvance(combo.itemText(i)) for i in range(combo.count()))+48)
    option=QStyleOptionComboBox(); combo.initStyleOption(option)
    size=combo.style().sizeFromContents(QStyle.CT_ComboBox,option,QSize(text_width+16,metrics.height()+12),combo)
-   width=max(size.width(),combo.sizeHint().width(),table.fontMetrics().horizontalAdvance(need)+24)
+   width=max(size.width(),table.fontMetrics().horizontalAdvance(need)+24)
    height=max(size.height(),combo.sizeHint().height(),metrics.height()+16)
    # 样式可能额外占用内边距；按实际文字绘制区域补足，避免主题或缩放后被截断。
    option.rect.setRect(0,0,width,height)
@@ -124,6 +126,25 @@ class MaterialHeaderMappingDialog(QDialog):
    if duplicates: detail.append('重复映射：'+ '、'.join(sorted(duplicates)))
    QMessageBox.warning(self,'表头映射错误','；'.join(detail)+'。请继续修改映射关系。'); return
   self.accept()
+class MaterialConflictDialog(QDialog):
+ def __init__(self,incoming,existing,parent=None):
+  super().__init__(parent); self.setWindowTitle('发现重复物料'); self.resize(1000,400); self.choice='cancel'
+  layout=QVBoxLayout(self); title=QLabel('物料 '+incoming['物料基础编码']+'-'+incoming['物料版本号']+' 已存在。上行为数据库现有信息，下行为待导入信息；黄色单元格表示差异。'); title.setWordWrap(True); layout.addWidget(title)
+  fields=[('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')]
+  self.table=QTableWidget(2,len(fields)); self.table.setHorizontalHeaderLabels([label for _,label in fields]); self.table.setVerticalHeaderLabels(['现有数据库','目标导入']); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+  for column,(key,label) in enumerate(fields):
+   old=str(existing[key] or ''); new=incoming[label]
+   for row,value in enumerate((old,new)):
+    item=QTableWidgetItem(value); item.setToolTip(value)
+    if old!=new:item.setBackground(QColor('#ffe082')); item.setForeground(QColor('black'))
+    self.table.setItem(row,column,item)
+  layout.addWidget(self.table); fit_columns(self.table)
+  buttons=QDialogButtonBox()
+  for label,choice in [('覆盖','overwrite'),('跳过','skip'),('取消全部','cancel')]:
+   button=buttons.addButton(label,QDialogButtonBox.ActionRole); button.clicked.connect(lambda _,value=choice:self.finish(value))
+  layout.addWidget(buttons)
+ def finish(self,choice):self.choice=choice; self.accept()
+
 class MaterialImportResultDialog(QDialog):
  def __init__(self,ok,fail,parent=None):
   super().__init__(parent); self.setWindowTitle('物料导入结果')
@@ -217,7 +238,7 @@ class MainWindow(QMainWindow):
     try:sheet_name=choose_material_sheet(p,self)
     except Exception as error:QMessageBox.warning(self,'导入失败',str(error)); return
     def resolver(d,old):
-     box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']}（{d['物料名称']}）已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
+     dialog=MaterialConflictDialog(d,old,self); dialog.exec_(); return dialog.choice
     progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
     def update_progress(current,total):
      progress.setMaximum(max(total,1)); progress.setValue(min(current,total)); QApplication.processEvents()
