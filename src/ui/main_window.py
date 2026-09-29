@@ -142,20 +142,29 @@ class MainWindow(QMainWindow):
   cfg=ConfigService(Path(self.svc.db.path).parent).load(); last=cfg['database'].get('last_import_dir',str(Path.home()/'Desktop')); last=last if Path(last).is_dir() else str(Path.home()/'Desktop')
   p=QFileDialog.getOpenFileName(self,'导入物料清单',last,'Excel (*.xlsx)')[0]
   if p:
-   cfg['database']['last_import_dir']=str(Path(p).parent); ConfigService(Path(self.svc.db.path).parent).save(cfg)
-   def resolver(d,old):
-    box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']}（{d['物料名称']}）已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
-   try:
-    try: ok,fail=self.svc.import_materials(p,resolver)
-    except MaterialHeaderError as header_error:
-     mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self)
-     if mapping_dialog.exec_()!=QDialog.Accepted:
-      QMessageBox.warning(self,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
-     ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping())
-    self.refresh();
-    if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
-    dup=sum(1 for x in fail if '重复物料' in x[3]); QMessageBox.information(self,'导入结果',f'成功{len(ok)}条，失败{len(fail)-dup}条，发现{dup}个重复物料未导入')
-   except Exception as e: QMessageBox.warning(self,'导入失败',str(e))
+    cfg['database']['last_import_dir']=str(Path(p).parent); ConfigService(Path(self.svc.db.path).parent).save(cfg)
+    def resolver(d,old):
+     box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']}（{d['物料名称']}）已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
+    progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
+    def update_progress(current,total):
+     progress.setMaximum(max(total,1)); progress.setValue(min(current,total)); QApplication.processEvents()
+    try:
+     try: ok,fail=self.svc.import_materials(p,resolver,progress_callback=update_progress)
+     except MaterialHeaderError as header_error:
+      progress.close()
+      mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self)
+      if mapping_dialog.exec_()!=QDialog.Accepted:
+       progress.close(); QMessageBox.warning(self,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
+      progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
+      ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping(),update_progress)
+     progress.setValue(progress.maximum()); progress.close()
+     self.refresh();
+     if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
+     dup=sum(1 for x in fail if '重复物料' in x[3] or '跳过重复物料' in x[3]); summary=[f'成功导入：{len(ok)}条',f'导入失败/未导入：{len(fail)}条',f'其中重复未导入：{dup}条']
+     if fail: summary.append('\n详细条目：\n'+'\n'.join(f'{x[1] or "（空编码）"} {x[2] or "（空名称）"}：{x[3]}' for x in fail))
+     box=QMessageBox(self); box.setWindowTitle('物料导入结果'); box.setText('\n'.join(summary)); box.setDetailedText('\n'.join(f'第{x[0]}行：{x[1] or "（空编码）"} {x[2] or "（空名称）"}：{x[3]}' for x in fail) or '无失败条目'); box.exec_()
+    except Exception as e:
+     progress.close(); QMessageBox.warning(self,'导入失败',str(e))
  def new_material(self):
   d=MaterialDialog(self)
   if d.exec_():
