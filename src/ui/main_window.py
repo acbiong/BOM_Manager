@@ -42,9 +42,20 @@ class MaterialDialog(QDialog):
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self):
   d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
+def choose_material_sheet(path,parent=None):
+ from openpyxl import load_workbook
+ wb=load_workbook(path,read_only=True,data_only=True)
+ try:names=wb.sheetnames
+ finally:wb.close()
+ if len(names)==1:return names[0]
+ if not names:raise ValueError('Excel文件中没有可读取的工作表')
+ sheet,accepted=QInputDialog.getItem(parent,'选择物料库工作表','请选择物料库所在的工作表（Sheet）：',names,0,False)
+ if not accepted:raise ValueError('用户取消选择工作表，未导入任何物料')
+ return sheet
+
 class MaterialHeaderMappingDialog(QDialog):
- def __init__(self,path,headers,missing,parent=None):
-  super().__init__(parent); self.setWindowTitle('物料表头映射'); self.resize(1000,620); self.required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
+ def __init__(self,path,headers,missing,parent=None,sheet_name=None):
+  super().__init__(parent); self.setWindowTitle('物料表头映射'+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
   layout=QVBoxLayout(self); layout.addWidget(QLabel('未能自动识别全部表头，请为每个需求字段选择文件中的对应列：'))
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
@@ -60,7 +71,11 @@ class MaterialHeaderMappingDialog(QDialog):
   self.preview=QTableWidget(); self.preview.setColumnCount(len(headers)); self.preview.setHorizontalHeaderLabels(headers); self.preview.setWordWrap(True)
   try:
    from openpyxl import load_workbook
-   ws=load_workbook(path,read_only=True,data_only=True).active; rows=list(ws.iter_rows(min_row=2,max_row=21,values_only=True)); self.preview.setRowCount(len(rows))
+   wb=load_workbook(path,read_only=True,data_only=True)
+   try:
+    ws=wb[sheet_name] if sheet_name is not None else wb.active; rows=list(ws.iter_rows(min_row=2,max_row=21,values_only=True))
+   finally:wb.close()
+   self.preview.setRowCount(len(rows))
    for r,row in enumerate(rows):
     for c in range(len(headers)): self.preview.setItem(r,c,QTableWidgetItem(str(row[c] or '') if c<len(row) else ''))
   except Exception as error: self.preview.setRowCount(1); self.preview.setItem(0,0,QTableWidgetItem('预览失败：'+str(error)))
@@ -191,20 +206,22 @@ class MainWindow(QMainWindow):
   p=QFileDialog.getOpenFileName(self,'导入物料清单',last,'Excel (*.xlsx)')[0]
   if p:
     cfg['database']['last_import_dir']=str(Path(p).parent); config_service.save(cfg)
+    try:sheet_name=choose_material_sheet(p,self)
+    except Exception as error:QMessageBox.warning(self,'导入失败',str(error)); return
     def resolver(d,old):
      box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']}（{d['物料名称']}）已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
     progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
     def update_progress(current,total):
      progress.setMaximum(max(total,1)); progress.setValue(min(current,total)); QApplication.processEvents()
     try:
-     try: ok,fail=self.svc.import_materials(p,resolver,progress_callback=update_progress)
+     try: ok,fail=self.svc.import_materials(p,resolver,progress_callback=update_progress,sheet_name=sheet_name)
      except MaterialHeaderError as header_error:
       progress.close()
-      mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self)
+      mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self,sheet_name=sheet_name)
       if mapping_dialog.exec_()!=QDialog.Accepted:
        progress.close(); QMessageBox.warning(self,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
       progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
-      ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping(),update_progress)
+      ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping(),update_progress,sheet_name=sheet_name)
      progress.setValue(progress.maximum()); progress.close()
      self.refresh();
      if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
@@ -742,7 +759,16 @@ class MaterialWindow(QMainWindow):
   if d.exec_(): self.svc.create_material(d.data()); self.refresh()
  def import_materials(self):
   p=QFileDialog.getOpenFileName(self,'导入物料清单','','Excel (*.xlsx)')[0]
-  if p: self.svc.import_materials(p); self.refresh()
+  if p:
+   try:
+    sheet_name=choose_material_sheet(p,self)
+    try:ok,fail=self.svc.import_materials(p,sheet_name=sheet_name)
+    except MaterialHeaderError as error:
+     dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet_name)
+     if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消表头映射，未导入任何物料')
+     ok,fail=self.svc.import_materials(p,header_mapping=dialog.mapping(),sheet_name=sheet_name)
+    self.refresh(); MaterialImportResultDialog(ok,fail,self).exec_()
+   except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
  def export_materials(self):
   p=QFileDialog.getSaveFileName(self,'导出物料库','物料库.xlsx','Excel (*.xlsx)')[0]
   if p:self.svc.export_materials(p)

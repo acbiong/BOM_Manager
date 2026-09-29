@@ -241,36 +241,43 @@ class Services:
  def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
  def remove_alternate(self,aid):
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
- def import_materials(self,path,conflict_resolver=None,header_mapping=None,progress_callback=None):
+ def import_materials(self,path,conflict_resolver=None,header_mapping=None,progress_callback=None,sheet_name=None):
   required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']
-  wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; headers=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]
-  if header_mapping is None:
-   missing=[x for x in required if x not in headers]
+  wb=load_workbook(path,read_only=True,data_only=True)
+  try:
+   if sheet_name is None:
+    if len(wb.sheetnames)!=1:raise ValueError('文件包含多个工作表，请先选择物料库所在的工作表')
+    sheet_name=wb.sheetnames[0]
+   if sheet_name not in wb.sheetnames:raise ValueError('所选工作表不存在：'+sheet_name)
+   ws=wb[sheet_name]; headers=[str(x if x is not None else '').strip() for x in next(ws.iter_rows(values_only=True),())]
+   if header_mapping is None:
+    missing=[x for x in required if x not in headers]
+    if missing: raise MaterialHeaderError(headers,missing)
+    header_mapping={x:x for x in required}
+   missing=[x for x in required if not header_mapping.get(x) or header_mapping[x] not in headers]
    if missing: raise MaterialHeaderError(headers,missing)
-   header_mapping={x:x for x in required}
-  missing=[x for x in required if not header_mapping.get(x) or header_mapping[x] not in headers]
-  if missing: raise MaterialHeaderError(headers,missing)
-  idx={x:headers.index(header_mapping[x]) for x in required}; ok=[]; fail=[]; total=max((ws.max_row or 1)-1,0)
-  if progress_callback: progress_callback(0,total)
-  for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
-   d={k:str(row[i] or '').strip() for k,i in idx.items()};
-   if progress_callback: progress_callback(no-1,total)
-   if not d['物料基础编码'] or not d['物料版本号'] or not d['物料名称'] or not d['单位'] or not d['物料制造商']: fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失')); continue
-   if d['单位'] not in self.UNITS: fail.append((no,d['物料基础编码'],d['物料名称'],'单位不合规')); continue
-   old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
-   if old:
-    same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')])
-    if same:
-     fail.append((no,d['物料基础编码'],d['物料名称'],'重复物料信息相同，自动跳过')); continue
-    choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
-    if choice=='cancel': return ok,fail+[(no,d['物料基础编码'],d['物料名称'],'用户取消')]
-    if choice=='overwrite':
-     self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
-    fail.append((no,d['物料基础编码'],d['物料名称'],'跳过重复物料')); continue
-   try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
-   except Exception as e: fail.append((no,d['物料基础编码'],d['物料名称'],str(e)))
-  if progress_callback: progress_callback(total,total)
-  return ok,fail
+   idx={x:headers.index(header_mapping[x]) for x in required}; ok=[]; fail=[]; total=max((ws.max_row or 1)-1,0)
+   if progress_callback: progress_callback(0,total)
+   for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
+    d={k:str(row[i] or '').strip() for k,i in idx.items()};
+    if progress_callback: progress_callback(no-1,total)
+    if not d['物料基础编码'] or not d['物料版本号'] or not d['物料名称'] or not d['单位'] or not d['物料制造商']: fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失')); continue
+    if d['单位'] not in self.UNITS: fail.append((no,d['物料基础编码'],d['物料名称'],'单位不合规')); continue
+    old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
+    if old:
+     same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')])
+     if same:
+      fail.append((no,d['物料基础编码'],d['物料名称'],'重复物料信息相同，自动跳过')); continue
+     choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
+     if choice=='cancel': return ok,fail+[(no,d['物料基础编码'],d['物料名称'],'用户取消')]
+     if choice=='overwrite':
+      self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
+     fail.append((no,d['物料基础编码'],d['物料名称'],'跳过重复物料')); continue
+    try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
+    except Exception as e: fail.append((no,d['物料基础编码'],d['物料名称'],str(e)))
+   if progress_callback: progress_callback(total,total)
+   return ok,fail
+  finally:wb.close()
  def export_database(self,path):
   wb=Workbook(); ws=wb.active; ws.title='SKU清单'; ws.append(['序号','SKU编码','SKU名称','SKU描述','修改日期时间'])
   for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+'-'+r['version'],r['name'],r['description'],r['updated_at']])
