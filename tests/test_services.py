@@ -2,7 +2,7 @@ import tempfile,unittest,os,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from database.database import Database
-from services.services import Services
+from services.services import Services,MaterialHeaderError
 class TestServices(unittest.TestCase):
  def setUp(self): self.f=tempfile.NamedTemporaryFile(suffix='.db'); self.s=Services(Database(self.f.name))
  def test_material_unique_and_sku(self):
@@ -56,4 +56,11 @@ class TestServices(unittest.TestCase):
  def test_identical_duplicate_auto_skip(self):
   from openpyxl import Workbook
   p=self.f.name+'-same.xlsx'; self.s.create_material({'base_code':'S','version':'1','name':'相同','description':'','unit':'pcs','manufacturer':'厂','mpn':'M'}); w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.active.append(['S','1','相同','','pcs','厂','M']); w.save(p); ok,fail=self.s.import_materials(p,lambda d,o:'cancel'); self.assertEqual(ok,[]); self.assertEqual(len(fail),1); self.assertIn('自动跳过',fail[0][3])
+ def test_material_import_reports_headers_for_mapping(self):
+  from openpyxl import Workbook
+  p=self.f.name+'-mapping.xlsx'; w=Workbook(); w.active.append(['编码','版本','名称','描述','单位','厂家','料号']); w.active.append(['MAP','1','映射物料','','pcs','厂商','M']); w.save(p)
+  with self.assertRaises(MaterialHeaderError) as ctx:self.s.import_materials(p)
+  self.assertEqual(ctx.exception.headers,['编码','版本','名称','描述','单位','厂家','料号'])
+  required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; ok,fail=self.s.import_materials(p,header_mapping=dict(zip(required,ctx.exception.headers)))
+  self.assertEqual(ok,['MAP']); self.assertEqual(fail,[])
 if __name__=='__main__': unittest.main()

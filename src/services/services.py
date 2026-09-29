@@ -2,6 +2,10 @@
 from pathlib import Path
 from datetime import datetime
 from openpyxl import Workbook,load_workbook
+class MaterialHeaderError(ValueError):
+ def __init__(self,headers,missing):
+  self.headers=headers; self.missing=missing
+  super().__init__('缺少表头：'+ '、'.join(missing))
 class Services:
  UNITS=['pcs','套','ml','L','mm','cm','m']; MP=['M','P']
  def __init__(self,db): self.db=db
@@ -219,12 +223,16 @@ class Services:
  def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
  def remove_alternate(self,aid):
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
- def import_materials(self,path,conflict_resolver=None):
+ def import_materials(self,path,conflict_resolver=None,header_mapping=None):
   required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']
   wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; headers=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]
-  missing=[x for x in required if x not in headers]
-  if missing: raise ValueError('缺少表头：'+ '、'.join(missing))
-  idx={h:i for i,h in enumerate(headers)}; ok=[]; fail=[]
+  if header_mapping is None:
+   missing=[x for x in required if x not in headers]
+   if missing: raise MaterialHeaderError(headers,missing)
+   header_mapping={x:x for x in required}
+  missing=[x for x in required if not header_mapping.get(x) or header_mapping[x] not in headers]
+  if missing: raise MaterialHeaderError(headers,missing)
+  idx={x:headers.index(header_mapping[x]) for x in required}; ok=[]; fail=[]
   for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
    d={k:str(row[i] or '').strip() for k,i in idx.items()};
    if not d['物料基础编码'] or not d['物料版本号'] or not d['物料名称'] or not d['单位'] or not d['物料制造商']: fail.append((no,d.get('物料基础编码',''),d.get('物料名称',''),'必填项缺失')); continue

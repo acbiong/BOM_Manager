@@ -6,6 +6,7 @@ from pathlib import Path
 from config.config_service import ConfigService
 from database.database import Database
 from infrastructure.events import WindowRefreshBus
+from services.services import MaterialHeaderError
 
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
@@ -41,6 +42,36 @@ class MaterialDialog(QDialog):
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self):
   d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
+class MaterialHeaderMappingDialog(QDialog):
+ def __init__(self,path,headers,missing,parent=None):
+  super().__init__(parent); self.setWindowTitle('物料表头映射'); self.resize(1000,620); self.required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
+  layout=QVBoxLayout(self); layout.addWidget(QLabel('未能自动识别全部表头，请为每个需求字段选择文件中的对应列：'))
+  self.mapping_table=QTableWidget(len(self.required),2); self.mapping_table.setHorizontalHeaderLabels(['需求表头','文件表头映射']); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+  for row,need in enumerate(self.required):
+   self.mapping_table.setItem(row,0,QTableWidgetItem(need)); combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems(headers)
+   if need not in missing and need in headers: combo.setCurrentText(need)
+   self.combos[need]=combo; self.mapping_table.setCellWidget(row,1,combo)
+  layout.addWidget(self.mapping_table)
+  layout.addWidget(QLabel('文件读取预览（前20行）：'))
+  self.preview=QTableWidget(); self.preview.setColumnCount(len(headers)); self.preview.setHorizontalHeaderLabels(headers); self.preview.setWordWrap(True)
+  try:
+   from openpyxl import load_workbook
+   ws=load_workbook(path,read_only=True,data_only=True).active; rows=list(ws.iter_rows(min_row=2,max_row=21,values_only=True)); self.preview.setRowCount(len(rows))
+   for r,row in enumerate(rows):
+    for c in range(len(headers)): self.preview.setItem(r,c,QTableWidgetItem(str(row[c] or '') if c<len(row) else ''))
+  except Exception as error: self.preview.setRowCount(1); self.preview.setItem(0,0,QTableWidgetItem('预览失败：'+str(error)))
+  layout.addWidget(self.preview); fit_columns(self.mapping_table); fit_columns(self.preview)
+  buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def mapping(self): return {need:self.combos[need].currentData() for need in self.required}
+ def validate_mapping(self):
+  values=self.mapping(); missing=[x for x in self.required if not values.get(x)]
+  duplicates={x for x in values.values() if x and list(values.values()).count(x)>1}
+  if missing or duplicates:
+   detail=[]
+   if missing: detail.append('未映射：'+ '、'.join(missing))
+   if duplicates: detail.append('重复映射：'+ '、'.join(sorted(duplicates)))
+   QMessageBox.warning(self,'表头映射错误','；'.join(detail)+'。请继续修改映射关系。'); return
+  self.accept()
 class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
@@ -115,7 +146,13 @@ class MainWindow(QMainWindow):
    def resolver(d,old):
     box=QMessageBox(self); box.setWindowTitle('发现重复物料'); box.setText(f"物料 {d['物料基础编码']}-{d['物料版本号']}（{d['物料名称']}）已存在，是否覆盖？"); cover=box.addButton('覆盖',QMessageBox.AcceptRole); skip=box.addButton('跳过',QMessageBox.DestructiveRole); cancel=box.addButton('取消全部',QMessageBox.RejectRole); box.exec_(); return 'overwrite' if box.clickedButton()==cover else ('skip' if box.clickedButton()==skip else 'cancel')
    try:
-    ok,fail=self.svc.import_materials(p,resolver); self.refresh();
+    try: ok,fail=self.svc.import_materials(p,resolver)
+    except MaterialHeaderError as header_error:
+     mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self)
+     if mapping_dialog.exec_()!=QDialog.Accepted:
+      QMessageBox.warning(self,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
+     ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping())
+    self.refresh();
     if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
     dup=sum(1 for x in fail if '重复物料' in x[3]); QMessageBox.information(self,'导入结果',f'成功{len(ok)}条，失败{len(fail)-dup}条，发现{dup}个重复物料未导入')
    except Exception as e: QMessageBox.warning(self,'导入失败',str(e))
