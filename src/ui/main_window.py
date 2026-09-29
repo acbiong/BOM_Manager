@@ -1,6 +1,6 @@
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QEvent, QSize
 from PyQt5.QtGui import QColor, QBrush, QFont
 from pathlib import Path
 from config.config_service import ConfigService
@@ -52,7 +52,8 @@ class MaterialHeaderMappingDialog(QDialog):
    combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems(headers)
    if need not in missing and need in headers: combo.setCurrentText(need)
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
-   combo.currentTextChanged.connect(self.fit_mapping_columns)
+   combo.currentTextChanged.connect(self.schedule_mapping_fit)
+   combo.installEventFilter(self)
   self.mapping_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
   layout.addWidget(self.mapping_table)
   layout.addWidget(QLabel('文件读取预览（前20行）：'))
@@ -63,19 +64,41 @@ class MaterialHeaderMappingDialog(QDialog):
    for r,row in enumerate(rows):
     for c in range(len(headers)): self.preview.setItem(r,c,QTableWidgetItem(str(row[c] or '') if c<len(row) else ''))
   except Exception as error: self.preview.setRowCount(1); self.preview.setItem(0,0,QTableWidgetItem('预览失败：'+str(error)))
-  layout.addWidget(self.preview,1); self.fit_mapping_columns(); fit_columns(self.preview)
-  self.mapping_table.setRowHeight(1,max(combo.sizeHint().height() for combo in self.combos.values())+8)
-  self.mapping_table.setFixedHeight(sum(self.mapping_table.rowHeight(i) for i in range(2))+self.mapping_table.horizontalScrollBar().sizeHint().height()+6)
+  layout.addWidget(self.preview,1); fit_columns(self.preview)
+  self._mapping_fit_timer=QTimer(self); self._mapping_fit_timer.setSingleShot(True); self._mapping_fit_timer.timeout.connect(self.fit_mapping_columns)
+  self.mapping_table.viewport().installEventFilter(self); self.mapping_table.installEventFilter(self)
+  self.fit_mapping_columns()
   self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def schedule_mapping_fit(self,*args):
+  if hasattr(self,'_mapping_fit_timer'):self._mapping_fit_timer.start(0)
+ def eventFilter(self,obj,event):
+  if event.type() in (QEvent.Resize,QEvent.Show,QEvent.FontChange,QEvent.StyleChange,QEvent.ApplicationFontChange):self.schedule_mapping_fit()
+  return super().eventFilter(obj,event)
+ def showEvent(self,event):
+  super().showEvent(event); self.schedule_mapping_fit()
  def fit_mapping_columns(self):
-  # 映射控件需计入下拉箭头和样式边距，不使用普通数据列的25字宽度上限。
-  for column,need in enumerate(self.required):
-   combo=self.combos.get(need)
-   if combo is None:continue
-   width=max(self.mapping_table.fontMetrics().horizontalAdvance(need)+24,combo.sizeHint().width()+12)
-   self.mapping_table.setColumnWidth(column,width)
-  self.mapping_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+  table=self.mapping_table; table.ensurePolished(); widths=[]; heights=[]
+  for need in self.required:
+   combo=self.combos[need]; combo.ensurePolished(); metrics=combo.fontMetrics()
+   text_width=max(metrics.horizontalAdvance(combo.itemText(i)) for i in range(combo.count()))
+   option=QStyleOptionComboBox(); combo.initStyleOption(option)
+   size=combo.style().sizeFromContents(QStyle.CT_ComboBox,option,QSize(text_width+16,metrics.height()+12),combo)
+   width=max(size.width(),combo.sizeHint().width(),table.fontMetrics().horizontalAdvance(need)+24)
+   height=max(size.height(),combo.sizeHint().height(),metrics.height()+16)
+   # 样式可能额外占用内边距；按实际文字绘制区域补足，避免主题或缩放后被截断。
+   option.rect.setRect(0,0,width,height)
+   field=combo.style().subControlRect(QStyle.CC_ComboBox,option,QStyle.SC_ComboBoxEditField,combo)
+   width+=max(0,text_width+12-field.width()); height+=max(0,metrics.height()+8-field.height())
+   widths.append(width+4); heights.append(height+4)
+  table.verticalHeader().setFixedWidth(max(table.verticalHeader().fontMetrics().horizontalAdvance(x) for x in ('需求表头','目标表头'))+24)
+  extra=max(0,table.viewport().width()-sum(widths))
+  table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
+  for column,width in enumerate(widths):table.setColumnWidth(column,width+extra//len(widths)+(column<extra%len(widths)))
+  # 不使用ResizeToContents覆盖组合框行高；需求行、目标行都按当前字体和主题计算。
+  table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+  table.setRowHeight(0,table.fontMetrics().height()+20); table.setRowHeight(1,max(heights))
+  table.setFixedHeight(table.rowHeight(0)+table.rowHeight(1)+table.horizontalScrollBar().sizeHint().height()+2*table.frameWidth()+4)
  def mapping(self): return {need:self.combos[need].currentText().strip() if self.combos[need].currentIndex()>0 else '' for need in self.required}
  def validate_mapping(self):
   values=self.mapping(); missing=[x for x in self.required if not values.get(x)]

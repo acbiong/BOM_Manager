@@ -40,3 +40,22 @@ class MaterialFilterTests(unittest.TestCase):
    self.assertGreaterEqual(dialog.mapping_table.columnWidth(column),combo.sizeHint().width())
    self.assertGreater(combo.width(),combo.fontMetrics().horizontalAdvance(title))
   self.assertGreater(dialog.mapping_table.horizontalScrollBar().maximum(),0); dialog.close()
+ def test_mapping_reflows_after_show_theme_font_and_resize(self):
+  from PyQt5.QtWidgets import QStyleOptionComboBox,QStyle
+  dialog=MaterialHeaderMappingDialog('不存在.xlsx',['制造商字段','版本'],[]); dialog.show()
+  for _ in range(4):self.app.processEvents()
+  for combo in dialog.combos.values():
+   combo.setCurrentText('制造商字段'); combo.setStyleSheet('QComboBox { padding: 10px 24px; font-size: 24px; }')
+  dialog.resize(1300,720)
+  for _ in range(6):self.app.processEvents()
+  for column,need in enumerate(dialog.required):
+   combo=dialog.combos[need]; option=QStyleOptionComboBox(); combo.initStyleOption(option)
+   rect=combo.style().subControlRect(QStyle.CC_ComboBox,option,QStyle.SC_ComboBoxEditField,combo)
+   self.assertGreaterEqual(rect.width(),combo.fontMetrics().horizontalAdvance(combo.currentText()))
+   self.assertGreaterEqual(rect.height(),combo.fontMetrics().height())
+   self.assertGreaterEqual(dialog.mapping_table.rowHeight(1),combo.sizeHint().height())
+  dialog.resize(600,500)
+  for _ in range(6):self.app.processEvents()
+  self.assertGreater(dialog.mapping_table.horizontalScrollBar().maximum(),0)
+  self.assertEqual(dialog.mapping_table.verticalScrollBar().maximum(),0)
+  dialog.close()
