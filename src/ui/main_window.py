@@ -141,11 +141,12 @@ class MainWindow(QMainWindow):
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.triggered.connect(self.new_sku)
   self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
-  self.project_label=QLabel(); self.project_label.setAlignment(Qt.AlignCenter); self.project_label.setStyleSheet('font-size:18px;font-weight:bold;padding:8px;')
-  body=QWidget(); layout=QVBoxLayout(body); layout.addWidget(self.project_label); layout.addWidget(self.table); self.setCentralWidget(body)
+  self.project_label=QLabel(); self.project_label.setAlignment(Qt.AlignRight|Qt.AlignVCenter); self.project_label.setStyleSheet('font-weight:bold;padding:0 8px;'); bar.setCornerWidget(self.project_label,Qt.TopRightCorner)
+  self.setCentralWidget(self.table)
   self.power_label=QLabel('Power by Biong'); self.version_label=QLabel('版本 '+self.version); self.statusBar().addPermanentWidget(self.power_label); self.statusBar().addPermanentWidget(self.version_label); self.statusBar().showMessage(''); self.refresh()
  def refresh(self):
-  project=self.svc.project(); self.project_label.setText(project['project_name'] or '请输入项目名称')
+  project=self.svc.project(); name=(project['project_name'] or '').strip(); title=f'{name} BOM管理系统' if name and name!='请输入项目名称' else 'BOM管理系统'
+  self.project_label.setText(title); self.project_label.setToolTip(title); self.setWindowTitle(title)
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+'-'+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
@@ -191,7 +192,7 @@ class MainWindow(QMainWindow):
   if p:self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
  def edit_project(self):
   d=ProjectDialog(self,self.svc.project())
-  if d.exec_(): self.svc.update_project(d.data()); self.setWindowTitle(d.data().get('project_name') or 'BOM管理系统'); self.refresh()
+  if d.exec_(): self.svc.update_project(d.data()); self.refresh()
  def activate_window(self,window):
   if window.isMinimized(): window.showNormal()
   else: window.show()
