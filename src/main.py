@@ -10,9 +10,13 @@ from version import get_version
 VERSION=get_version()
 def app_base():
  if getattr(sys,'frozen',False):
-  # AppImage内容挂载在只读临时目录，配置、数据库和错误日志不能写入该目录。
-  # 使用用户配置目录，避免文件管理器直接启动时因写日志失败而静默退出。
-  root=Path(os.environ.get('XDG_CONFIG_HOME',Path.home()/'.config'))/'BOM管理系统'
+  # 可写的AppImage实际文件所在目录支持便携配置；只读挂载目录则回退到用户目录。
+  image_path=os.environ.get('APPIMAGE')
+  image_dir=Path(image_path).expanduser().resolve().parent if image_path else None
+  if image_dir and os.access(image_dir,os.W_OK):
+   root=image_dir
+  else:
+   root=Path(os.environ.get('XDG_CONFIG_HOME',Path.home()/'.config'))/'BOM管理系统'
   root.mkdir(parents=True,exist_ok=True)
   return root
  return Path(__file__).resolve().parents[1]
