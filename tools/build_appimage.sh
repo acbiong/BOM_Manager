@@ -28,9 +28,13 @@ cat > "$APPDIR/bom管理系统.desktop" <<EOF
 [Desktop Entry]
 Name=BOM管理系统
 Exec=BOM管理系统
+TryExec=BOM管理系统
 Icon=bom管理系统
 Type=Application
 Categories=Office;
+Terminal=false
+StartupNotify=true
+X-AppImage-Integrate=false
 EOF
 if [ ! -f "$APPDIR/bom管理系统.png" ]; then
   python3 - <<PYICON
@@ -42,9 +46,13 @@ cat > "$APPDIR/usr/share/applications/bom管理系统.desktop" <<EOF
 [Desktop Entry]
 Name=BOM管理系统
 Exec=BOM管理系统
+TryExec=BOM管理系统
 Icon=bom管理系统
 Type=Application
 Categories=Office;
+Terminal=false
+StartupNotify=true
+X-AppImage-Integrate=false
 EOF
 if command -v appimagetool >/dev/null 2>&1; then
  APPIMAGE_EXTRACT_AND_RUN=1 appimagetool --runtime-file "${APPIMAGE_RUNTIME:-$HOME/.local/bin/runtime-x86_64}" "$APPDIR" "package/${name}.AppImage"

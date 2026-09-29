@@ -10,9 +10,11 @@ from version import get_version
 VERSION=get_version()
 def app_base():
  if getattr(sys,'frozen',False):
-  # AppImage挂载目录只读，APPIMAGE指向用户实际启动的AppImage文件
-  image_path=os.environ.get('APPIMAGE')
-  return Path(image_path).resolve().parent if image_path else Path(sys.executable).resolve().parent
+  # AppImage内容挂载在只读临时目录，配置、数据库和错误日志不能写入该目录。
+  # 使用用户配置目录，避免文件管理器直接启动时因写日志失败而静默退出。
+  root=Path(os.environ.get('XDG_CONFIG_HOME',Path.home()/'.config'))/'BOM管理系统'
+  root.mkdir(parents=True,exist_ok=True)
+  return root
  return Path(__file__).resolve().parents[1]
 def main():
  app=QApplication(sys.argv); base=app_base()
@@ -22,7 +24,10 @@ def main():
   w=MainWindow(Services(db),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
  except Exception as exc:
   log=base/'startup_error.log'
-  log.write_text(traceback.format_exc(),encoding='utf-8')
+  try: log.write_text(traceback.format_exc(),encoding='utf-8')
+  except OSError:
+   log=Path(os.environ.get('TMPDIR','/tmp'))/'BOM管理系统_startup_error.log'
+   log.write_text(traceback.format_exc(),encoding='utf-8')
   QMessageBox.critical(None,'BOM管理系统启动失败',f'{exc}\n\n详细信息已写入：{log}')
   return 1
 if __name__=='__main__': sys.exit(main())
