@@ -20,6 +20,8 @@ tmp/
 *.manifest
 *.map
 package/BOM管理系统_*
+package/*.AppImage
+package/*.AppImage.sha256
 package/*.tar.gz
 package/*.sha256
 release/
