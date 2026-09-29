@@ -183,20 +183,56 @@ class Services:
    from infrastructure.events import WindowRefreshBus
    WindowRefreshBus.publish({'type':'bom_changed','root':r['parent_material_id']})
   except Exception: pass
- def import_bom(self,path,root=None):
-  required=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
-  wb=load_workbook(path,read_only=True,data_only=True); ws=wb.active; hs=[str(x or '').strip() for x in next(ws.iter_rows(values_only=True))]; miss=[x for x in required if x not in hs]
-  if miss: raise ValueError('缺少表头：'+ '、'.join(miss))
-  ix={h:i for i,h in enumerate(hs)}; rows=[]
-  for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
-   d={k:str(row[i] or '').strip() for k,i in ix.items()}; p=self.db.conn.execute('SELECT id FROM materials WHERE base_code=? AND version=?',(d['父项物料编码'],d['父项版本号'])).fetchone(); m=self.db.conn.execute('SELECT id,unit FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
-   if not p or not m: raise ValueError(f'第{no}行父项或物料不存在')
-   try:q=float(d['物料数量'])
-   except: raise ValueError(f'第{no}行数量不合法')
-   rows.append({'parent_item_id':None,'material_id':m['id'],'quantity':q,'unit':m['unit'],'position':d['位置'],'level_no':1})
-  if root is None and rows: root=p['id']
-  if root and rows:self.save_bom(root,rows)
-  return len(rows)
+ BOM_HEADERS=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
+ def import_bom(self,path,root=None,sheet_name=None,header_mapping=None):
+  import math
+  wb=load_workbook(path,read_only=True,data_only=True)
+  try:
+   if sheet_name is None:
+    if len(wb.sheetnames)!=1:raise ValueError('文件包含多个工作表，请选择BOM所在工作表')
+    sheet_name=wb.sheetnames[0]
+   if sheet_name not in wb.sheetnames:raise ValueError('所选工作表不存在')
+   ws=wb[sheet_name]; headers=[str(x if x is not None else '').strip() for x in next(ws.iter_rows(values_only=True),())]
+   mapping=header_mapping or {field:field for field in self.BOM_HEADERS}
+   missing=[field for field in self.BOM_HEADERS if mapping.get(field) not in headers]
+   if missing:raise MaterialHeaderError(headers,missing)
+   if len(set(mapping[field] for field in self.BOM_HEADERS))!=len(self.BOM_HEADERS):raise ValueError('表头映射重复')
+   if any(headers.count(mapping[field])!=1 for field in self.BOM_HEADERS):raise ValueError('源表头名称重复，请修改文件表头后重试')
+   index={field:headers.index(mapping[field]) for field in self.BOM_HEADERS}; rows=[]; pairs=set(); children={}; parents=set(); child_ids=set()
+   materials={(r['base_code'],r['version']):r for r in self.materials()}
+   for no,values in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
+    data={field:str(values[i] if values[i] is not None else '').strip() for field,i in index.items()}
+    if not any(data.values()):continue
+    absent=[field for field in self.BOM_HEADERS[:-1] if not data[field]]
+    if absent:raise ValueError(f'第{no}行必填项缺失：'+ '、'.join(absent))
+    parent=materials.get((data['父项物料编码'],data['父项版本号'])); child=materials.get((data['物料基础编码'],data['物料版本号']))
+    if parent is None:raise ValueError(f'第{no}行父项不存在：'+data['父项物料编码']+'-'+data['父项版本号'])
+    if child is None:raise ValueError(f'第{no}行子物料不存在：'+data['物料基础编码']+'-'+data['物料版本号'])
+    try:quantity=float(data['物料数量'])
+    except ValueError:raise ValueError(f'第{no}行数量不是有效数字')
+    if not math.isfinite(quantity) or round(quantity,1)<=0:raise ValueError(f'第{no}行数量必须至少为0.1且为有限数字')
+    pid=parent['id']; mid=child['id']
+    if (pid,mid) in pairs:raise ValueError(f'第{no}行同一父级重复包含相同物料')
+    if pid==mid:raise ValueError(f'第{no}行物料不能包含自身')
+    pairs.add((pid,mid));parents.add(pid);child_ids.add(mid);children.setdefault(pid,[]).append(mid)
+    rows.append(dict(parent_material_id=pid,material_id=mid,quantity=round(quantity,1),unit=child['unit'],position=data['位置']))
+   if not rows:raise ValueError('所选工作表没有可导入的BOM数据')
+   if root is None:
+    roots=parents-child_ids
+    if len(roots)!=1:raise ValueError('BOM必须具有唯一根物料，或结构存在循环')
+    root=next(iter(roots))
+   visited=set();active=set()
+   def walk(mid):
+    if mid in active:raise ValueError('BOM结构存在循环包含')
+    if mid in visited:return
+    active.add(mid)
+    for child in children.get(mid,[]):walk(child)
+    active.remove(mid);visited.add(mid)
+   walk(root)
+   if not (parents|child_ids)<=visited:raise ValueError('存在不属于当前根物料的孤立或循环分支，请检查父项编码和版本号')
+   self.save_bom(root,rows)
+   return len(rows)
+  finally:wb.close()
  def update_project(self,d):
   with self.db.transaction(): self.db.conn.execute('UPDATE project SET project_name=?,project_code=?,product_name=?,product_model=? WHERE id=1',(d.get('project_name',''),d.get('project_code',''),d.get('product_name',''),d.get('product_model',''))); self.log('project',1,'update',d.get('project_name',''))
  def project(self): return self.db.conn.execute('SELECT * FROM project WHERE id=1').fetchone()

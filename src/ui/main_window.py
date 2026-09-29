@@ -43,20 +43,20 @@ class MaterialDialog(QDialog):
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self):
   d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
-def choose_material_sheet(path,parent=None):
+def choose_material_sheet(path,parent=None,kind='物料库'):
  from openpyxl import load_workbook
  wb=load_workbook(path,read_only=True,data_only=True)
  try:names=wb.sheetnames
  finally:wb.close()
  if len(names)==1:return names[0]
  if not names:raise ValueError('Excel文件中没有可读取的工作表')
- sheet,accepted=QInputDialog.getItem(parent,'选择物料库工作表','请选择物料库所在的工作表（Sheet）：',names,0,False)
+ sheet,accepted=QInputDialog.getItem(parent,'选择'+kind+'工作表','请选择'+kind+'所在的工作表（Sheet）：',names,0,False)
  if not accepted:raise ValueError('用户取消选择工作表，未导入任何物料')
  return sheet
 
 class MaterialHeaderMappingDialog(QDialog):
- def __init__(self,path,headers,missing,parent=None,sheet_name=None):
-  super().__init__(parent); self.setWindowTitle('物料表头映射'+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
+ def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None):
+  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=required or ['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
   layout=QVBoxLayout(self); layout.addWidget(QLabel('未能自动识别全部表头，请为每个需求字段选择文件中的对应列：'))
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
@@ -673,10 +673,22 @@ class BomWindow(QMainWindow):
   self._alternate_edits[self.alternate_key(item)]=[mid for mid in self.alternate_ids(item) if mid!=material_id]
   self.mark_dirty(); self.show_item_info(item)
  def import_bom(self):
+  if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将重新加载BOM，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
   p=QFileDialog.getOpenFileName(self,'导入BOM','','Excel (*.xlsx)')[0]
-  if p:
-   try: n=self.svc.import_bom(p,self.root); self.load(); QMessageBox.information(self,'完成',f'导入{n}行')
-   except Exception as e: QMessageBox.warning(self,'导入失败',str(e))
+  if not p:return
+  try:
+   sheet=choose_material_sheet(p,self,'BOM')
+   self._saving=True
+   try:
+    try:n=self.svc.import_bom(p,self.root,sheet_name=sheet)
+    except MaterialHeaderError as error:
+     dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet,required=self.svc.BOM_HEADERS)
+     if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
+     n=self.svc.import_bom(p,self.root,sheet_name=sheet,header_mapping=dialog.mapping())
+   finally:self._saving=False
+   self.dirty=False; self._deleted_relations.clear(); self._alternate_edits.clear(); self.load(); self.notice.clear(); self.statusBar().clearMessage()
+   QMessageBox.information(self,'导入完成',f'已校验BOM结构并导入{n}条父子关系')
+  except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
  def export_bom(self):
   p=QFileDialog.getSaveFileName(self,'导出BOM','SKU_BOM.xlsx','Excel (*.xlsx)')[0]
   if p:
