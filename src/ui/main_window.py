@@ -46,11 +46,13 @@ class MaterialHeaderMappingDialog(QDialog):
  def __init__(self,path,headers,missing,parent=None):
   super().__init__(parent); self.setWindowTitle('物料表头映射'); self.resize(1000,620); self.required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
   layout=QVBoxLayout(self); layout.addWidget(QLabel('未能自动识别全部表头，请为每个需求字段选择文件中的对应列：'))
-  self.mapping_table=QTableWidget(len(self.required),2); self.mapping_table.setHorizontalHeaderLabels(['需求表头\n（系统字段）','目标表头\n（文件字段）']); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.mapping_table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter|Qt.AlignVCenter)
-  for row,need in enumerate(self.required):
-   self.mapping_table.setItem(row,0,QTableWidgetItem(need)); combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems(headers)
+  self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+  for column,need in enumerate(self.required):
+   item=QTableWidgetItem(need); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
+   combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems(headers)
    if need not in missing and need in headers: combo.setCurrentText(need)
-   self.combos[need]=combo; self.mapping_table.setCellWidget(row,1,combo)
+   self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
+  self.mapping_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
   layout.addWidget(self.mapping_table)
   layout.addWidget(QLabel('文件读取预览（前20行）：'))
   self.preview=QTableWidget(); self.preview.setColumnCount(len(headers)); self.preview.setHorizontalHeaderLabels(headers); self.preview.setWordWrap(True)
@@ -60,7 +62,10 @@ class MaterialHeaderMappingDialog(QDialog):
    for r,row in enumerate(rows):
     for c in range(len(headers)): self.preview.setItem(r,c,QTableWidgetItem(str(row[c] or '') if c<len(row) else ''))
   except Exception as error: self.preview.setRowCount(1); self.preview.setItem(0,0,QTableWidgetItem('预览失败：'+str(error)))
-  layout.addWidget(self.preview); fit_columns(self.mapping_table); fit_columns(self.preview)
+  layout.addWidget(self.preview,1); fit_columns(self.mapping_table); fit_columns(self.preview)
+  self.mapping_table.setRowHeight(1,max(combo.sizeHint().height() for combo in self.combos.values())+8)
+  self.mapping_table.setFixedHeight(sum(self.mapping_table.rowHeight(i) for i in range(2))+self.mapping_table.horizontalScrollBar().sizeHint().height()+6)
+  self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
  def mapping(self): return {need:self.combos[need].currentText().strip() if self.combos[need].currentIndex()>0 else '' for need in self.required}
  def validate_mapping(self):
@@ -72,6 +77,17 @@ class MaterialHeaderMappingDialog(QDialog):
    if duplicates: detail.append('重复映射：'+ '、'.join(sorted(duplicates)))
    QMessageBox.warning(self,'表头映射错误','；'.join(detail)+'。请继续修改映射关系。'); return
   self.accept()
+class MaterialImportResultDialog(QDialog):
+ def __init__(self,ok,fail,parent=None):
+  super().__init__(parent); self.setWindowTitle('物料导入结果')
+  available=self.screen().availableGeometry(); self.setMaximumHeight(min(640,int(available.height()*0.85))); self.resize(min(900,int(available.width()*0.9)),min(560,self.maximumHeight()))
+  layout=QVBoxLayout(self); duplicates=sum('重复物料' in row[3] for row in fail)
+  summary=QLabel(f'成功导入：{len(ok)}条    失败/未导入：{len(fail)}条    其中重复未导入：{duplicates}条'); summary.setWordWrap(True); layout.addWidget(summary)
+  self.details=QTextBrowser(); self.details.setOpenExternalLinks(False); self.details.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded); self.details.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.details.setLineWrapMode(QTextEdit.WidgetWidth)
+  self.details.setPlainText('\n\n'.join(f'第{row}行：{code or "（空编码）"} {name or "（空名称）"}\n原因：{reason}' for row,code,name,reason in fail) or '全部物料导入成功，无失败或跳过条目。')
+  layout.addWidget(self.details,1)
+  buttons=QDialogButtonBox(QDialogButtonBox.Ok); buttons.accepted.connect(self.accept); layout.addWidget(buttons)
+
 class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build()
@@ -160,9 +176,7 @@ class MainWindow(QMainWindow):
      progress.setValue(progress.maximum()); progress.close()
      self.refresh();
      if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
-     dup=sum(1 for x in fail if '重复物料' in x[3] or '跳过重复物料' in x[3]); summary=[f'成功导入：{len(ok)}条',f'导入失败/未导入：{len(fail)}条',f'其中重复未导入：{dup}条']
-     if fail: summary.append('\n详细条目：\n'+'\n'.join(f'{x[1] or "（空编码）"} {x[2] or "（空名称）"}：{x[3]}' for x in fail))
-     box=QMessageBox(self); box.setWindowTitle('物料导入结果'); box.setText('\n'.join(summary)); box.setDetailedText('\n'.join(f'第{x[0]}行：{x[1] or "（空编码）"} {x[2] or "（空名称）"}：{x[3]}' for x in fail) or '无失败条目'); box.exec_()
+     MaterialImportResultDialog(ok,fail,self).exec_()
     except Exception as e:
      progress.close(); QMessageBox.warning(self,'导入失败',str(e))
  def new_material(self):
