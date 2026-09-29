@@ -1,7 +1,7 @@
 """程序入口：初始化SQLite和PyQt主窗口，冻结模式下将配置写入可执行文件目录。编辑时间：2026-09-24。"""
-import sys, os, traceback
+import sys, os, traceback, sqlite3
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMessageBox, QFileDialog
 from config.config_service import ConfigService
 from database.database import Database
 from services.services import Services
@@ -20,11 +20,69 @@ def app_base():
   root.mkdir(parents=True,exist_ok=True)
   return root
  return Path(__file__).resolve().parents[1]
+def open_existing_database(path):
+ path=Path(path).expanduser().resolve()
+ if not path.is_file():raise ValueError(f'数据库文件不存在：{path}')
+ if path.stat().st_size==0:raise ValueError('数据库文件为空，无法使用')
+ # 验证阶段只读，禁止SQLite自动创建文件或修复不相关数据库。
+ connection=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
+ try:
+  result=connection.execute('PRAGMA integrity_check').fetchall()
+  if result!=[('ok',)]:raise ValueError('数据库完整性检查失败：'+str(result[:5]))
+  required={
+   'materials':'id,base_code,version,name,description,unit,manufacturer,mpn,mp_flag,has_bom,created_at,updated_at',
+   'skus':'id,material_id,updated_at',
+   'bom_items':'id,bom_root_id,parent_item_id,material_id,quantity,unit,position,level_no,remark,sort_no',
+   'alternates':'id,bom_item_id,material_id,sort_no',
+   'change_logs':'id,object_type,object_id,action,detail,changed_at',
+   'project':'id,project_name,project_code,product_name,product_model'}
+  for table,columns in required.items():connection.execute(f'SELECT {columns} FROM {table} LIMIT 0')
+  if connection.execute('SELECT 1 FROM project WHERE id=1').fetchone() is None:raise ValueError('数据库缺少项目信息')
+  tables={row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+  if 'material_bom_items' in tables:connection.execute('SELECT id,parent_material_id,child_material_id,quantity,unit,position,remark,sort_no,created_at,updated_at FROM material_bom_items LIMIT 0')
+ finally:connection.close()
+ return Database(str(path))
+
+def choose_database_recovery(reason):
+ box=QMessageBox(); box.setWindowTitle('数据库不可用'); box.setIcon(QMessageBox.Warning)
+ box.setText('数据库不存在或无法使用，请新建数据库或选择已有数据库。'); box.setInformativeText(str(reason))
+ create=box.addButton('新建数据库',QMessageBox.ActionRole); select=box.addButton('选择数据库',QMessageBox.ActionRole); box.addButton('退出',QMessageBox.RejectRole); box.exec_()
+ return 'create' if box.clickedButton()==create else 'select' if box.clickedButton()==select else None
+
+def startup_database(config_service,cfg):
+ path=Path(cfg['database'].get('path','bom.db')).expanduser()
+ if not path.is_absolute():path=config_service.base/path
+ try:return open_existing_database(path)
+ except (OSError,sqlite3.Error,ValueError) as error:reason=str(error)
+ while True:
+  choice=choose_database_recovery(reason)
+  if choice is None:return None
+  start=str(path.parent if path.parent.is_dir() else Path.home()/'Desktop')
+  if choice=='create':
+   selected=QFileDialog.getSaveFileName(None,'新建SQLite数据库（可自行命名）',str(Path(start)/'bom.db'),'SQLite数据库 (*.db *.sqlite);;所有文件 (*)',options=QFileDialog.DontConfirmOverwrite)[0]
+  else:selected=QFileDialog.getOpenFileName(None,'选择已有SQLite数据库',start,'SQLite数据库 (*.db *.sqlite);;所有文件 (*)')[0]
+  if not selected:continue
+  candidate=Path(selected).expanduser().resolve(); db=None
+  try:
+   if choice=='create':
+    # 排他创建占位文件，防止同名数据库被覆盖；只有用户选择新建才创建。
+    with candidate.open('xb'):pass
+    try:db=Database(str(candidate))
+    except Exception:
+     candidate.unlink(missing_ok=True); raise
+   else:db=open_existing_database(candidate)
+   cfg['database']['path']=str(candidate); config_service.save(cfg)
+   return db
+  except (OSError,sqlite3.Error,ValueError) as error:
+   if db is not None:db.close()
+   reason=('同名文件已存在，请选择其他名称或使用“选择数据库”。' if isinstance(error,FileExistsError) else str(error))
+   path=candidate
+
 def main():
  app=QApplication(sys.argv); base=app_base()
  try:
-  config_service=ConfigService(base); cfg=config_service.load(); db=Database(cfg['database']['path']); valid,missing=db.validate_schema()
-  if not valid: db.recreate_schema()
+  config_service=ConfigService(base); cfg=config_service.load(); db=startup_database(config_service,cfg)
+  if db is None:return 0
   w=MainWindow(Services(db,config_service),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
  except Exception as exc:
   log=base/'startup_error.log'
