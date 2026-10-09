@@ -226,11 +226,14 @@ class Services:
     if before is None:detail.append(f"新增物料；数量：{current['quantity']:.1f}；单位：{current['unit']}；备注：{current['remark']}")
     elif current is None:detail.append('删除物料（含关系属性及替代料）')
     else:
-     for field,title in [('position','位置'),('quantity','数量'),('unit','单位'),('remark','备注'),('sort_no','排序')]:
+     for field,title in [('position','位置'),('quantity','数量'),('unit','单位'),('remark','备注')]:
       if before[field]!=current[field]:detail.append(f'{title}：{before[field] or "（空）"} → {current[field] or "（空）"}')
     previous=old_alternates.get(before['id'],[]) if before else []
     following=[r['material_id'] for r in self.alternates(current['id'])] if current else []
-    if previous!=following:detail.append('替代料：'+('、'.join(label(mid) for mid in previous) or '无')+' → '+('、'.join(label(mid) for mid in following) or '无'))
+    for mid in following:
+     if mid not in previous:detail.append('增加替代料：'+label(mid))
+    for mid in previous:
+     if mid not in following:detail.append('删除替代料：'+label(mid))
     if not detail:continue
     description='父项：'+label(key[0])+'\n物料：'+label(key[1])+'\n物料位置：'+(key[2] or '（未填写）')+'\n'+'\n'.join(detail)
     self.log('bom',key[0],'update',description)
@@ -498,7 +501,17 @@ class Services:
      base_value,old,new=match.groups()
      for value in (old,new):legacy_codes[base_value+'-'+value]=base_value+value
   records=[row for row in records if not (row['object_type']=='bom' and (row['detail'] or '').startswith('父项 '))]
-  for number,row in enumerate(records,1):
+  visible=[]
+  for row in records:
+   row=dict(row)
+   if row['object_type']=='bom':
+    lines=(row['detail'] or '').split('\n')
+    filtered=[line for line in lines if not re.fullmatch(r'排序：[0-9（空）]+ → [0-9（空）]+',line)]
+    if filtered!=lines:
+     if not any(line and not line.startswith(('父项：','物料：','物料位置：')) for line in filtered):continue
+     row['detail']='\n'.join(filtered)
+   visible.append(row)
+  for number,row in enumerate(visible,1):
    code=row['material_code'];name=row['material_name'];detail=row['detail'] or ''
    # 历史快照明确记录的编码/版本可规范化，绝不按连字符盲目切分基础编码。
    code=legacy_codes.get(code,code)

@@ -56,3 +56,36 @@ class BomStateHistoryTests(unittest.TestCase):
     self.assertEqual(sum('位置：左侧 → 右侧' in str(row[-1]) for row in values),1)
     self.assertTrue(any('删除物料' in str(row[-1]) and '物料：C1 C' in str(row[-1]) for row in values))
    finally:db.close()
+
+ def test_sort_only_no_log_and_alternate_add_remove_explicit(self):
+  db=Database(':memory:');s=Services(db)
+  try:
+   root,child,other,a,b=[s.create_material(dict(base_code=code,version='1',name=code,unit='pcs')) for code in ['R','C','O','A','B']]
+   def row(mid,alts):return dict(material_id=mid,quantity=1,unit='pcs',position='左侧',alternate_material_ids=alts)
+   s.save_bom(root,[row(child,[]),row(other,[])])
+   def count():return db.conn.execute("SELECT COUNT(*) FROM change_logs WHERE object_type='bom'").fetchone()[0]
+   initial=count();s.save_bom(root,[row(other,[]),row(child,[])]);self.assertEqual(count(),initial)
+   s.save_bom(root,[row(other,[]),row(child,[a,b])]);self.assertEqual(count(),initial+1)
+   detail=db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0]
+   for text in ['父项：R1 R','物料：C1 C','物料位置：左侧','增加替代料：A1 A','增加替代料：B1 B']:self.assertIn(text,detail)
+   self.assertNotIn('排序',detail)
+   s.save_bom(root,[row(other,[]),row(child,[b,a])]);self.assertEqual(count(),initial+1)
+   s.save_bom(root,[row(other,[]),row(child,[b])]);self.assertEqual(count(),initial+2)
+   detail=db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0]
+   self.assertIn('删除替代料：A1 A',detail);self.assertNotIn('增加替代料',detail)
+   s.save_bom(root,[row(other,[])]);detail=db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0]
+   self.assertIn('删除替代料：B1 B',detail)
+  finally:db.close()
+
+ def test_export_hides_legacy_sort_only_record(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   try:
+    root=s.create_material(dict(base_code='R',version='1',name='R',unit='pcs'));sid=s.create_sku(root)
+    s.log('bom',root,'update','父项：R1 R\n物料：C1 C\n物料位置：左侧\n排序：0 → 1')
+    s.log('bom',root,'update','父项：R1 R\n物料：C1 C\n物料位置：左侧\n排序：1 → 2\n数量：1.0 → 2.0');db.conn.commit()
+    out=Path(tmp)/'out.xlsx';s.export_sku(sid,out);wb=load_workbook(out)
+    rows=[row for row in list(wb['变更记录'].values)[1:] if row[5]=='修改BOM'];wb.close()
+    self.assertEqual(len(rows),1);self.assertNotIn('排序',rows[0][-1]);self.assertIn('数量',rows[0][-1])
+    self.assertIn('排序',db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0])
+   finally:db.close()
