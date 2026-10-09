@@ -57,9 +57,12 @@ def choose_material_sheet(path,parent=None,kind='物料库'):
 
 class MaterialHeaderMappingDialog(QDialog):
  def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None):
-  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=required or ['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}; self.optional=set() if required else {'物料等级'}
+  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=list(required) if required else ['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}; self.optional=set() if required else {'物料等级'}
   if not required:self.required.insert(self.required.index('单位')+1,'物料等级')
-  layout=QVBoxLayout(self); layout.addWidget(QLabel('未能自动识别全部表头，请为每个需求字段选择文件中的对应列：'))
+  self.source_headers=headers; self.alternate_groups=[]
+  layout=QVBoxLayout(self); layout.addWidget(QLabel('请确认需求字段与文件列的映射关系：'))
+  if required:
+   button=QPushButton('增加替代料'); button.clicked.connect(self.add_alternate_mapping); layout.addWidget(button)
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
    item=QTableWidgetItem(need); item.setToolTip('可选，未映射时使用空值' if need in self.optional else '必需映射'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
@@ -90,6 +93,31 @@ class MaterialHeaderMappingDialog(QDialog):
   self.fit_mapping_columns()
   self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def add_alternate_mapping(self):
+  number=max([int(group[0].split('替代料')[1].split('编码')[0]) for group in self.alternate_groups] or [0])+1
+  group=[f'替代料{number}编码',f'替代料{number}版本号']; self.alternate_groups.append(group)
+  for field in group:
+   column=self.mapping_table.columnCount(); self.mapping_table.insertColumn(column); self.required.append(field)
+   item=QTableWidgetItem(field); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
+   combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems([h for h in self.source_headers if h.strip()]); self.combos[field]=combo
+   if field in self.source_headers:combo.setCurrentText(field)
+   combo.setContextMenuPolicy(Qt.CustomContextMenu); combo.customContextMenuRequested.connect(lambda pos,f=field,w=combo:self.alternate_mapping_menu(f,w.mapToGlobal(pos)))
+   combo.currentTextChanged.connect(self.schedule_mapping_fit); self.mapping_table.setCellWidget(1,column,combo)
+  if not getattr(self,'_mapping_menu_connected',False):
+   self.mapping_table.setContextMenuPolicy(Qt.CustomContextMenu); self.mapping_table.customContextMenuRequested.connect(self.mapping_context_menu); self._mapping_menu_connected=True
+  self.schedule_mapping_fit()
+ def mapping_context_menu(self,pos):
+  column=self.mapping_table.columnAt(pos.x())
+  if column>=0:self.alternate_mapping_menu(self.required[column],self.mapping_table.viewport().mapToGlobal(pos))
+ def alternate_mapping_menu(self,field,pos):
+  if not any(field in group for group in self.alternate_groups):return
+  menu=QMenu(self); action=menu.addAction('删除替代料')
+  if menu.exec_(pos)==action:self.remove_alternate_mapping(field)
+ def remove_alternate_mapping(self,field):
+  group=next(group for group in self.alternate_groups if field in group)
+  for name in reversed(group):
+   column=self.required.index(name); self.mapping_table.removeColumn(column); self.required.remove(name); self.combos.pop(name)
+  self.alternate_groups.remove(group); self.schedule_mapping_fit()
  def schedule_mapping_fit(self,*args):
   if hasattr(self,'_mapping_fit_timer'):self._mapping_fit_timer.start(0)
  def eventFilter(self,obj,event):
@@ -722,11 +750,13 @@ class BomWindow(QMainWindow):
   if not p:return
   try:
    sheet=choose_material_sheet(p,self,'BOM')
-   try:nodes=self.svc.import_bom(p,self.root,sheet_name=sheet,persist=False)
-   except MaterialHeaderError as error:
-    dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet,required=self.svc.BOM_HEADERS)
-    if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
-    nodes=self.svc.import_bom(p,self.root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False)
+   from openpyxl import load_workbook
+   wb=load_workbook(p,read_only=True,data_only=True)
+   try:headers=[str(value if value is not None else '').strip() for value in next(wb[sheet].iter_rows(values_only=True),())]
+   finally:wb.close()
+   dialog=MaterialHeaderMappingDialog(p,headers,[h for h in self.svc.BOM_HEADERS if h not in headers],self,sheet_name=sheet,required=self.svc.BOM_HEADERS)
+   if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
+   nodes=self.svc.import_bom(p,self.root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False)
    self.stage_import(nodes)
    QMessageBox.information(self,'导入完成','BOM已导入编辑缓存，请检查后点击“保存”写入数据库。')
   except BomImportError as error:BomImportIssuesDialog(error,self).exec_()
@@ -740,6 +770,7 @@ class BomWindow(QMainWindow):
    new_ids={n['data']['material_id'] for n in new}
    for node in new:
     data=node['data']; previous=old_by.get(data['material_id'])
+    if 'alternate_material_ids' in data:self._alternate_edits[data['id']]=list(data['alternate_material_ids'])
     if previous is None:
      data['_added']=True
      if data['id']<0:self._draft_baselines[data['id']]=deepcopy(node)

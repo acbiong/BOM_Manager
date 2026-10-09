@@ -162,6 +162,7 @@ class Services:
     previous=old.get(key); relation_id=previous['id'] if previous else -number
     data=dict(materials[child]); data.update(id=relation_id,material_id=child,parent_material_id=parent,quantity=quantity,unit=unit,position=position,remark=remark)
     data['_db_alternates']=[r['material_id'] for r in self.alternates(relation_id)] if previous else []
+    if key in alternate_updates:data['alternate_material_ids']=alternate_updates[key]
     groups.setdefault(parent,[]).append(data)
    def expand(parent):
     return [{'data':dict(data),'children':expand(data['material_id'])} for data in groups.get(parent,[])]
@@ -217,6 +218,15 @@ class Services:
    if missing:raise MaterialHeaderError(headers,missing)
    if len(set(mapping[field] for field in self.BOM_HEADERS))!=len(self.BOM_HEADERS):raise ValueError('表头映射重复')
    if any(headers.count(mapping[field])!=1 for field in self.BOM_HEADERS):raise ValueError('源表头名称重复，请修改文件表头后重试')
+   import re
+   groups=sorted({int(match.group(1)) for field in mapping for match in [re.fullmatch(r'替代料(\d+)(?:编码|版本号)',field)] if match})
+   alternate_fields=[f'替代料{number}{suffix}' for number in groups for suffix in ('编码','版本号')]
+   for field in alternate_fields:
+    if not mapping.get(field) or mapping[field] not in headers:raise ValueError('替代料映射不完整：'+field)
+   selected=[mapping[field] for field in self.BOM_HEADERS+alternate_fields]
+   if len(set(selected))!=len(selected):raise ValueError('表头映射重复')
+   if any(headers.count(name)!=1 for name in selected):raise ValueError('源表头名称重复')
+   alternate_index={field:headers.index(mapping[field]) for field in alternate_fields}
    index={field:headers.index(mapping[field]) for field in self.BOM_HEADERS}; rows=[]; pairs=set(); children={}; parents=set(); child_ids=set()
    materials={(r['base_code'],r['version']):r for r in self.materials()}
    issues=[]; records=[]; root_row=None
@@ -238,6 +248,7 @@ class Services:
       if key not in materials:issues.append(f'第{no}行ROOT物料不存在：{key[0]}{key[1]}')
       elif all(is_root):root=materials[key]['id'];current=materials[key]
      continue
+    data.update({field:str(values[i] if i<len(values) and values[i] is not None else '').strip() for field,i in alternate_index.items()})
     records.append((no,data))
    edge_lines={}
    for no,data in records:
@@ -253,13 +264,23 @@ class Services:
       quantity=float(data['物料数量'])
       if not math.isfinite(quantity) or round(quantity,1)<=0:issues.append(f'第{no}行数量必须至少为0.1且为有限数字')
      except ValueError:issues.append(f'第{no}行数量不是有效数字')
+    alternate_ids=[]
+    for number in groups:
+     code=data[f'替代料{number}编码']; version=data[f'替代料{number}版本号']
+     if not code and not version:continue
+     if not code or not version:issues.append(f'第{no}行替代料{number}编码和版本号必须同时填写');continue
+     alternate=materials.get((code,version))
+     if alternate is None:issues.append(f'第{no}行替代料{number}不存在：{code}{version}');continue
+     if child is not None and alternate['id']==child['id']:issues.append(f'第{no}行替代料不能是当前物料自身');continue
+     if alternate['id'] in alternate_ids:issues.append(f'第{no}行替代料重复：{code}{version}');continue
+     alternate_ids.append(alternate['id'])
     if parent is None or child is None:continue
     pid=parent['id']; mid=child['id']
     if (pid,mid) in pairs:issues.append(f'第{no}行同一父级重复包含相同物料（首次出现于第{edge_lines[pid,mid]}行）')
     if pid==mid:issues.append(f'第{no}行物料不能包含自身')
     pairs.add((pid,mid));edge_lines.setdefault((pid,mid),no);parents.add(pid);child_ids.add(mid)
     if mid not in children.setdefault(pid,[]):children[pid].append(mid)
-    if len(issues)==start_errors:rows.append(dict(parent_material_id=pid,material_id=mid,quantity=round(quantity,1),unit=child['unit'],position=data['位置']))
+    if len(issues)==start_errors:rows.append(dict(parent_material_id=pid,material_id=mid,quantity=round(quantity,1),unit=child['unit'],position=data['位置'],alternate_material_ids=alternate_ids))
    if not rows and root_row is None and not issues:issues.append('所选工作表没有可导入的BOM数据')
    if root is None:
     roots=parents-child_ids

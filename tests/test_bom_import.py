@@ -59,7 +59,7 @@ class BomImportTests(unittest.TestCase):
    self.assertEqual([dict(row) for row in self.s.bom(self.ids['R','1'])],before)
   window=BomWindow(self.s,self.ids['R','1']);shown=[]
   try:
-   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(BomImportIssuesDialog,'exec_',lambda dialog: shown.append(dialog)):
+   with patch.object(MaterialHeaderMappingDialog,'exec_',return_value=1),patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(BomImportIssuesDialog,'exec_',lambda dialog: shown.append(dialog)):
     window.import_bom();self.assertIn('BOM选择错误',shown[0].details.toPlainText())
   finally:window.close()
  def test_duplicate_incomplete_and_root_only(self):
@@ -93,7 +93,7 @@ class BomImportTests(unittest.TestCase):
   for save in (False,True):
    window=BomWindow(self.s,root)
    try:
-    with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning') as warning:
+    with patch.object(MaterialHeaderMappingDialog,'exec_',return_value=1),patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning') as warning:
      window.import_bom();warning.assert_not_called()
      self.assertTrue(window.dirty);self.assertTrue(window.save_action.isEnabled())
      self.assertEqual([tuple(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items')],before)
@@ -142,7 +142,7 @@ class BomImportTests(unittest.TestCase):
    window.show_item_info(window.root_item.child(0));window.fields['quantity'].setValue(3.2)
    original=window.capture_tree()
    self.write([['R','1','UNKNOWN',str(i),'invalid',''] for i in range(70)])
-   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(BomImportIssuesDialog,'exec_',lambda dialog: shown.append(dialog)):
+   with patch.object(MaterialHeaderMappingDialog,'exec_',return_value=1),patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(BomImportIssuesDialog,'exec_',lambda dialog: shown.append(dialog)):
     window.import_bom()
     dialog=shown[0];dialog.show();self.app.processEvents()
     self.assertIn('第71行',dialog.details.toPlainText())
@@ -158,3 +158,38 @@ class BomImportTests(unittest.TestCase):
    self.assertEqual(window.windowTitle(),'BC3-0000197100 测试')
    self.assertEqual(window.root_item.text(0),'BC3-0000197100 测试')
   finally:window.close()
+
+ def test_alternate_mapping_groups_cache_save_and_clear(self):
+  from ui.main_window import BomWindow
+  from PyQt5.QtWidgets import QMessageBox
+  from unittest.mock import patch
+  root=self.ids['R','1'];child=self.ids['P','2'];alt=self.ids['C','1']
+  headers=self.s.BOM_HEADERS+['替代编码','替代版本']
+  self.write([['R','1','P','2',1,'','C','1']],headers)
+  dialog=MaterialHeaderMappingDialog(self.path,headers,[],sheet_name='BOM',required=self.s.BOM_HEADERS)
+  dialog.add_alternate_mapping();dialog.add_alternate_mapping()
+  dialog.remove_alternate_mapping('替代料1版本号');self.assertEqual(dialog.mapping_table.columnCount(),8)
+  dialog.combos['替代料2编码'].setCurrentText('替代编码');dialog.combos['替代料2版本号'].setCurrentText('替代版本')
+  dialog.validate_mapping();self.assertEqual(dialog.result(),1)
+  self.assertEqual(len(self.s.BOM_HEADERS),6)
+  nodes=self.s.import_bom(self.path,root,sheet_name='BOM',header_mapping=dialog.mapping(),persist=False);dialog.close()
+  window=BomWindow(self.s,root)
+  try:
+   window.stage_import(nodes);window.show_item_info(window.root_item.child(0));self.assertEqual(window.alt_table.item(0,0).text(),'C');self.assertEqual(self.s.bom(root),[])
+   with patch.object(QMessageBox,'information'):self.assertTrue(window.save())
+   relation=self.s.bom(root)[0]['id'];self.assertEqual(self.s.alternates(relation)[0]['material_id'],alt)
+   # 无映射时明确清空当前关系的替代料，保存前数据库仍保持原值。
+   nodes=self.s.import_bom(self.path,root,sheet_name='BOM',persist=False);window.stage_import(nodes)
+   window.show_item_info(window.root_item.child(0));self.assertEqual(window.alt_table.rowCount(),0);self.assertEqual(len(self.s.alternates(relation)),1)
+   with patch.object(QMessageBox,'information'):self.assertTrue(window.save())
+   self.assertEqual(self.s.alternates(relation),[])
+  finally:window.dirty=False;window.close()
+ def test_alternate_errors_accumulate_and_blank_pair_allowed(self):
+  from services.services import BomImportError
+  headers=self.s.BOM_HEADERS+['替代料1编码','替代料1版本号'];mapping={h:h for h in headers}
+  self.write([['R','1','P','2',1,'','未知','1'],['P','2','C','1',1,'','P','']],headers)
+  with self.assertRaises(BomImportError) as error:self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',header_mapping=mapping,persist=False)
+  self.assertIn('第2行替代料1不存在',str(error.exception));self.assertIn('第3行替代料1编码和版本号',str(error.exception));self.assertEqual(self.s.bom(self.ids['R','1']),[])
+  self.write([['R','1','P','2',1,'','','']],headers)
+  nodes=self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',header_mapping=mapping,persist=False)
+  self.assertEqual(nodes[0]['data']['alternate_material_ids'],[])
