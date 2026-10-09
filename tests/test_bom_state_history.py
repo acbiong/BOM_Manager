@@ -85,7 +85,29 @@ class BomStateHistoryTests(unittest.TestCase):
     s.log('bom',root,'update','父项：R1 R\n物料：C1 C\n物料位置：左侧\n排序：0 → 1')
     s.log('bom',root,'update','父项：R1 R\n物料：C1 C\n物料位置：左侧\n排序：1 → 2\n数量：1.0 → 2.0');db.conn.commit()
     out=Path(tmp)/'out.xlsx';s.export_sku(sid,out);wb=load_workbook(out)
-    rows=[row for row in list(wb['变更记录'].values)[1:] if row[5]=='修改BOM'];wb.close()
+    rows=[row for row in list(wb['变更记录'].values)[1:] if row[5]=='修改物料'];wb.close()
     self.assertEqual(len(rows),1);self.assertNotIn('排序',rows[0][-1]);self.assertIn('数量',rows[0][-1])
     self.assertIn('排序',db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0])
+   finally:db.close()
+ def test_delete_recreate_resets_history_but_preserves_shared_owner(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   try:
+    r,p,c,o=[s.create_material(dict(base_code=code,version='1',name=code,unit='pcs')) for code in ['R','P','C','O']]
+    sid=s.create_sku(r);other=s.create_sku(o)
+    def rows(q):return [dict(material_id=p,quantity=1,unit='pcs'),dict(parent_material_id=p,material_id=c,quantity=q,unit='pcs')]
+    s.save_bom(r,rows(1));s.save_bom(o,rows(1));s.save_bom(r,rows(7.3))
+    s.delete_sku(sid)
+    self.assertEqual(db.conn.execute("SELECT COUNT(*) FROM change_logs WHERE object_type='sku' AND object_id=?",(sid,)).fetchone()[0],0)
+    self.assertEqual(db.conn.execute('SELECT COUNT(*) FROM bom_log_roots WHERE root_id=?',(r,)).fetchone()[0],0)
+    recreated=s.create_sku(r);s.save_bom(r,rows(7.3))
+    for identity,expect_old in [(other,True),(recreated,False)]:
+     path=Path(tmp)/(str(identity)+'.xlsx');s.export_sku(identity,path);wb=load_workbook(path)
+     values=list(wb['变更记录'].values)[1:];wb.close()
+     self.assertEqual(any('数量：1.0 → 7.3' in str(row[-1]) for row in values),expect_old)
+     self.assertFalse(any(row[5]=='修改BOM' for row in values))
+    # 替代料纯增加/删除分别明确分类，混合变化仍只占一行。
+    s.save_bom(r,[dict(material_id=p,quantity=1,unit='pcs',alternate_material_ids=[c]),dict(parent_material_id=p,material_id=c,quantity=7.3,unit='pcs')])
+    path=Path(tmp)/'types.xlsx';s.export_sku(recreated,path);wb=load_workbook(path)
+    self.assertTrue(any(row[5]=='新增替代料' for row in list(wb['变更记录'].values)[1:]));wb.close()
    finally:db.close()

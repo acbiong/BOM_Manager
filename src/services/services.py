@@ -63,7 +63,7 @@ class Services:
   if not self.material_snapshot(mid):raise ValueError('物料不存在')
   if require_empty_bom and self.db.conn.execute('SELECT 1 FROM material_bom_items WHERE parent_material_id=?',(mid,)).fetchone():raise ValueError('物料已有BOM结构，不可用于新建SKU')
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone(): raise ValueError('已是SKU')
-  with self.db.transaction(): c=self.db.conn.execute('INSERT INTO skus(material_id) VALUES(?)',(mid,)); self.log('sku',c.lastrowid,'create','创建SKU'); sid=c.lastrowid
+  with self.db.transaction(): c=self.db.conn.execute('INSERT INTO skus(material_id) VALUES(?)',(mid,)); self.log('sku',c.lastrowid,'create','创建SKU'); sid=c.lastrowid; self.db.conn.execute('UPDATE sku_history_reset SET start_log_id=(SELECT MAX(id) FROM change_logs) WHERE root_id=?',(mid,))
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'sku_changed','id':sid})
   return sid
@@ -76,7 +76,14 @@ class Services:
    self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(root,))
    self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
    self.db.conn.execute('UPDATE materials SET has_bom=0 WHERE id=?',(root,))
-   self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,)); self.log('sku',sid,'delete','删除SKU及其根BOM结构、直属替代料；保留共享子BOM和物料库记录')
+   owned={row[0] for row in self.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(root,))}
+   owned.update(row[0] for row in self.db.conn.execute("SELECT id FROM change_logs WHERE object_type='bom' AND object_id=?",(root,)))
+   self.db.conn.execute('DELETE FROM bom_log_roots WHERE root_id=?',(root,))
+   for log_id in owned:
+    if not self.db.conn.execute('SELECT 1 FROM bom_log_roots WHERE log_id=?',(log_id,)).fetchone():self.db.conn.execute('DELETE FROM change_logs WHERE id=?',(log_id,))
+   self.db.conn.execute("DELETE FROM change_logs WHERE object_type='sku' AND object_id=?",(sid,))
+   self.db.conn.execute('INSERT OR REPLACE INTO sku_history_reset(root_id,start_log_id) VALUES(?,0)',(root,))
+   self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,))
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'sku_changed','id':sid})
   WindowRefreshBus.publish({'type':'bom_changed','root':r['material_id']})
@@ -533,6 +540,14 @@ class Services:
    first,separator,remainder=detail.partition('\n')
    if first.strip() in prefixes:
     change_type=first.strip();detail=remainder if separator else ''
+   if row['object_type']=='bom':
+    types=[]
+    if any(line.startswith('新增物料') for line in detail.splitlines()):types.append('新增物料')
+    if any(line.startswith('删除物料') for line in detail.splitlines()):types.append('删除物料')
+    if any(line.startswith(('数量：','单位：','备注：','位置：')) and ' → ' in line for line in detail.splitlines()):types.append('修改物料')
+    if '增加替代料：' in detail:types.append('新增替代料')
+    if '删除替代料：' in detail:types.append('删除替代料')
+    change_type='、'.join(types) or ('删除物料' if row['action']=='delete' else '修改物料')
    if row['object_type']=='material' and row['action']=='create':detail=''
    changed=row['changed_at'] or ''
    sheet.append([number,changed[:10],changed[11:],code,name,change_type,detail])
@@ -594,6 +609,8 @@ class Services:
   material_ids={sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])}
   linked={row[0] for row in self.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(sku['material_id'],))}
   records=[row for row in self.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if row['id'] in linked or (row['object_type'] in ('material','bom') and row['object_id'] in material_ids) or (row['object_type']=='sku' and row['object_id']==sid)]
+  reset=self.db.conn.execute('SELECT start_log_id FROM sku_history_reset WHERE root_id=?',(sku['material_id'],)).fetchone()
+  if reset:records=[row for row in records if row['id']>=reset[0]]
   self.write_change_sheet(w,records)
   self.write_bom_sheet(wb.create_sheet('SKU对应的BOM'),sku['material_id'])
   wb.save(path)
