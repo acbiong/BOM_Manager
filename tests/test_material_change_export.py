@@ -36,3 +36,28 @@ class MaterialChangeExportTests(unittest.TestCase):
   count=self.db.conn.execute('SELECT COUNT(*) FROM change_logs').fetchone()[0]
   with self.assertRaises(ValueError):self.s.change_material_version(mid,'1')
   self.assertEqual(self.db.conn.execute('SELECT COUNT(*) FROM change_logs').fetchone()[0],count)
+
+ def test_material_sheet_format_newlines_and_legacy_codes(self):
+  mid=self.s.create_material(dict(base_code='BC3-0000197',version='100',name='长名称'*30,unit='pcs',grade='工业级'))
+  self.s.update_material(mid,dict(name='新名称',unit='pcs',description='描述',grade='A级'))
+  self.db.conn.execute("UPDATE change_logs SET material_code='BC3-0000197-100' WHERE object_type='material'");self.db.conn.commit()
+  sid=self.s.create_sku(mid)
+  for kind in ('material','database','sku'):
+   path=self.path/(kind+'.xlsx')
+   if kind=='material':self.s.export_materials(path)
+   elif kind=='database':self.s.export_database(path)
+   else:self.s.export_sku(sid,path)
+   wb=load_workbook(path)
+   try:
+    logs=wb['变更记录'];self.assertEqual(logs.cell(2,4).value,'BC3-0000197100')
+    self.assertIn('\n',logs.cell(3,6).value);self.assertNotIn('；',logs.cell(3,6).value);self.assertTrue(logs.cell(3,6).alignment.wrap_text)
+    if kind!='sku':
+     sheet=wb['物料库'];self.assertEqual(sheet.cell(1,1).value,'序号');self.assertEqual(sheet.cell(2,1).value,1)
+     self.assertTrue(all(d.width<=60 for d in sheet.column_dimensions.values()))
+     for cells in sheet:
+      for cell in cells:
+       self.assertTrue(cell.alignment.wrap_text)
+       for edge in (cell.border.left,cell.border.right,cell.border.top,cell.border.bottom):self.assertEqual(edge.color.rgb,'FF000000');self.assertEqual(edge.style,'thin')
+       if sheet.cell(1,cell.column).value in ('序号','单位','物料等级','M/P','是否存在BOM结构','是否为呆滞料'):self.assertEqual(cell.alignment.horizontal,'center')
+   finally:wb.close()
+  self.assertEqual(self.db.conn.execute("SELECT material_code FROM change_logs WHERE object_type='material' LIMIT 1").fetchone()[0],'BC3-0000197-100')

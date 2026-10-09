@@ -30,7 +30,7 @@ class BomExportLayoutTests(unittest.TestCase):
       self.assertEqual(headers[8:13],('物料位置','用量','单位','物料等级','M/P'));self.assertEqual(headers[-1],'备注')
       self.assertEqual(rows[2][8:12],('安装位置A',2.3,'pcs','工业级'));self.assertEqual(rows[2][-1],'业务备注\n第二行')
       self.assertEqual(sheet.cell(2,1).data_type,'s');self.assertEqual(sheet.cell(2,6).value,'001')
-      self.assertTrue(all(5<=dimension.width<=25 for dimension in sheet.column_dimensions.values()))
+      self.assertTrue(all(5<=dimension.width<=60 for dimension in sheet.column_dimensions.values()))
       self.assertGreater(sheet.row_dimensions[2].height,22)
       centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
       for cells in sheet:

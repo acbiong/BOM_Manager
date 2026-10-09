@@ -232,7 +232,7 @@ class BomUiTests(unittest.TestCase):
    path=Path(self.tmp.name)/'materials.xlsx'; method(path)
    wb=load_workbook(path); rows=list(wb['物料库'].values)
    self.assertEqual(rows[0][-1],'是否为呆滞料')
-   flags={row[0]:row[-1] for row in rows[1:]}
+   flags={row[1]:row[-1] for row in rows[1:]}
    self.assertEqual(flags['CHILD'],'N'); self.assertEqual(flags['OTHER'],'Y'); wb.close()
  def test_unreferenced_non_sku_bom_is_idle_and_editable(self):
   from ui.main_window import MainWindow,MaterialWindow

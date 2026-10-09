@@ -390,33 +390,48 @@ class Services:
  def export_database(self,path):
   wb=Workbook(); ws=wb.active; ws.title='SKU清单'; ws.append(['序号','SKU编码','SKU名称','SKU描述','修改日期时间'])
   for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['updated_at']])
-  w=wb.create_sheet('物料库'); w.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料'])
-  for r in self.materials(): w.append([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']])
-  c=wb.create_sheet('变更记录'); c.append(['序号','变更时间','变更详细内容','变更日期','变更时间'])
-  for n,r in enumerate(self.db.conn.execute('SELECT * FROM change_logs ORDER BY id'),1): c.append([n,r['changed_at'],r['detail'],r['changed_at'][:10],r['changed_at'][11:]])
+  self.write_material_sheet(wb.create_sheet('物料库'))
+  self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute('SELECT * FROM change_logs ORDER BY id')))
   for r in self.skus():
    self.write_bom_sheet(wb.create_sheet((r['base_code']+r['version'])[:31]),r['material_id'])
   wb.save(path)
  def export_materials(self,path):
-  from openpyxl.styles import Alignment
-  wb=Workbook(); ws=wb.active; ws.title='变更记录'; ws.append(['序号','变更日期','变更时间','变更物料编码','变更物料名称','变更详细内容'])
-  ws2=wb.create_sheet('物料库'); ws2.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料'])
-  for r in self.materials():ws2.append([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']])
-  for n,r in enumerate(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id"),1):
-   code=r['material_code']; name=r['material_name']; detail=r['detail'] or ''
-   if code is None:
-    # 老日志无历史快照，不能用可能已复用的ID推断历史物料，也不能伪造变更前值。
-    code='历史记录未保存'; name='历史记录未保存'; detail='历史日志（未记录字段前后值及物料快照）：'+detail
-   changed=r['changed_at'] or ''; ws.append([n,changed[:10],changed[11:],code,name,detail])
-  ws.freeze_panes='A2'; ws.auto_filter.ref=ws.dimensions
-  for column,width in [('A',8),('B',14),('C',14),('D',28),('E',32),('F',90)]:ws.column_dimensions[column].width=width
-  for row in ws.iter_rows(min_row=2):
-   for cell in row:cell.alignment=Alignment(wrap_text=True,vertical='top')
+  wb=Workbook(); ws=wb.active; ws.title='变更记录'
+  self.write_change_sheet(ws,list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
+  self.write_material_sheet(wb.create_sheet('物料库'))
   wb.save(path)
+ def write_material_sheet(self,sheet):
+  sheet.append(['序号','物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料'])
+  for number,row in enumerate(self.materials(),1):
+   sheet.append([number]+[row[key] for key in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag','has_bom','idle')])
+  self.format_export_sheet(sheet,{'序号','单位','物料等级','M/P','是否存在BOM结构','是否为呆滞料'})
+ def write_change_sheet(self,sheet,records):
+  import re
+  sheet.append(['序号','变更日期','变更时间','变更物料编码','变更物料名称','变更详细内容'])
+  legacy_codes={}
+  for historical in self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id"):
+   text=historical['detail'] or ''
+   base=re.search(r'基础编码：([^；\n]+)',text);version=re.search(r'版本号：([^；\n]+)',text)
+   if base and version:
+    base_value=base.group(1).split(' → ')[-1];version_value=version.group(1).split(' → ')[-1]
+    legacy_codes[base_value+'-'+version_value]=base_value+version_value
+   if historical['action']=='version':
+    match=re.match(r'(.+): ([^;\n]+)->([^;\n]+);',text)
+    if match:
+     base_value,old,new=match.groups()
+     for value in (old,new):legacy_codes[base_value+'-'+value]=base_value+value
+  for number,row in enumerate(records,1):
+   code=row['material_code'];name=row['material_name'];detail=row['detail'] or ''
+   # 历史快照明确记录的编码/版本可规范化，绝不按连字符盲目切分基础编码。
+   code=legacy_codes.get(code,code)
+   if code is None:
+    code='历史记录未保存';name=name or '历史记录未保存'
+   detail=re.sub(r'[；;][ \t]*','\n',detail)
+   changed=row['changed_at'] or ''
+   sheet.append([number,changed[:10],changed[11:],code,name,detail])
+  self.format_export_sheet(sheet,{'序号','变更日期','变更时间'})
+  sheet.auto_filter.ref=sheet.dimensions
  def write_bom_sheet(self,sheet,root):
-  from openpyxl.styles import Alignment, Border, Side, Font
-  from openpyxl.utils import get_column_letter
-  import math, unicodedata
   headers=['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','物料位置','用量','单位','物料等级','M/P','制造商','MPN','备注']
   sheet.append(headers)
   materials={row['id']:row for row in self.materials()}
@@ -431,16 +446,22 @@ class Services:
    sheet.cell(sheet.max_row,1).number_format='@'
    sheet.cell(sheet.max_row,10).number_format='0.0'
   centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
+  self.format_export_sheet(sheet,centered)
+ def format_export_sheet(self,sheet,centered):
+  from openpyxl.styles import Alignment, Border, Side, Font
+  from openpyxl.utils import get_column_letter
+  import math, unicodedata
+  headers=[cell.value for cell in sheet[1]]
   edge=Side(style='thin',color='FF000000'); border=Border(left=edge,right=edge,top=edge,bottom=edge)
   def width(text):return sum(2 if unicodedata.east_asian_width(char) in ('W','F') else 1 for char in text)
   def display(cell):
    if cell.value is None:return ''
-   if cell.column==10 and cell.row>1:return f'{cell.value:.1f}'
+   if headers[cell.column-1]=='用量' and cell.row>1:return f'{cell.value:.1f}'
    return str(cell.value)
   widths={}
   for column,header in enumerate(headers,1):
    longest=max(width(line) for cells in sheet.iter_rows(min_col=column,max_col=column) for line in (display(cells[0]).split('\n')))
-   widths[column]=min(25,max(5,longest+2))
+   widths[column]=min(60,max(5,longest+2))
    sheet.column_dimensions[get_column_letter(column)].width=widths[column]
   for cells in sheet:
    lines=1
@@ -454,6 +475,9 @@ class Services:
  def export_sku(self,sid,path):
   sku=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
   if sku is None:raise ValueError('SKU不存在')
-  wb=Workbook(); w=wb.active; w.title='变更记录'; w.append(['序号','变更时间','变更详细内容','变更日期','变更时间'])
+  wb=Workbook(); w=wb.active; w.title='变更记录'
+  material_ids={sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])}
+  records=[row for row in self.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if (row['object_type'] in ('material','bom') and row['object_id'] in material_ids) or (row['object_type']=='sku' and row['object_id']==sid)]
+  self.write_change_sheet(w,records)
   self.write_bom_sheet(wb.create_sheet('SKU对应的BOM'),sku['material_id'])
   wb.save(path)

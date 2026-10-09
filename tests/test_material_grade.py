@@ -42,7 +42,7 @@ class MaterialGradeTests(unittest.TestCase):
   self.assertIn('自动跳过',self.s.import_materials(path,header_mapping=mapping)[1][0][3])
   write();self.s.import_materials(path);self.assertEqual(self.s.materials()[0]['grade'],'医疗级')
   out=self.path/'out.xlsx';self.s.export_materials(out);wb=load_workbook(out);rows=list(wb['物料库'].values);wb.close()
-  self.assertEqual(rows[0][4:7],('单位','物料等级','物料制造商'));self.assertEqual(rows[1][5],'医疗级')
+  self.assertEqual(rows[0][5:8],('单位','物料等级','物料制造商'));self.assertEqual(rows[1][6],'医疗级')
   write('物料等级','');self.s.import_materials(path,lambda *_:'overwrite');self.assertEqual(self.s.materials()[0]['grade'],'')
  def test_edit_bom_refresh_and_alignment_after_table_refresh(self):
   parent=self.create('P');child=self.create('C','A级');self.s.save_bom(parent,[dict(material_id=child,quantity=1,unit='pcs')])
