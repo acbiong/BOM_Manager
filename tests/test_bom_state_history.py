@@ -111,3 +111,27 @@ class BomStateHistoryTests(unittest.TestCase):
     path=Path(tmp)/'types.xlsx';s.export_sku(recreated,path);wb=load_workbook(path)
     self.assertTrue(any(row[5]=='新增替代料' for row in list(wb['变更记录'].values)[1:]));wb.close()
    finally:db.close()
+
+ def test_changed_material_identity_is_child_not_parent(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   try:
+    root=s.create_material(dict(base_code='ROOT',version='1',name='父级名称',unit='pcs'))
+    child=s.create_material(dict(base_code='CHILD',version='100',name='实际变更物料 名称',unit='pcs'))
+    sid=s.create_sku(root)
+    def save(q):s.save_bom(root,[dict(material_id=child,quantity=q,unit='pcs',position='左侧')])
+    save(1);save(2)
+    logs=list(db.conn.execute("SELECT * FROM change_logs WHERE object_type='bom'"))
+    self.assertEqual(len(logs),2)
+    for row in logs:
+     self.assertEqual(row['object_id'],root)
+     self.assertEqual((row['material_code'],row['material_name']),('CHILD100','实际变更物料 名称'))
+    # 兼容旧版已将父项身份写入快照的日志，按明细的实际物料修正导出。
+    db.conn.execute("UPDATE change_logs SET material_code='ROOT1',material_name='父级名称' WHERE object_type='bom'");db.conn.commit()
+    s.save_bom(root,[])
+    out=Path(tmp)/'bom.xlsx';s.export_sku(sid,out);wb=load_workbook(out)
+    rows=[row for row in list(wb['变更记录'].values)[1:] if row[5] in ('新增物料','修改物料','删除物料')];wb.close()
+    self.assertEqual(len(rows),3)
+    for row in rows:
+     self.assertEqual(row[3:5],('CHILD100','实际变更物料 名称'));self.assertIn('父项：ROOT1 父级名称',row[-1])
+   finally:db.close()

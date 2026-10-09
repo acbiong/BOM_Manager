@@ -243,7 +243,7 @@ class Services:
      if mid not in following:detail.append('删除替代料：'+label(mid))
     if not detail:continue
     description='父项：'+label(key[0])+'\n物料：'+label(key[1])+'\n物料位置：'+(key[2] or '（未填写）')+'\n'+'\n'.join(detail)
-    self.log('bom',key[0],'update',description)
+    self.log('bom',key[0],'update',description,snapshot=self.material_snapshot(key[1]))
     log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     for affected,contained in log_roots.items():
      if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
@@ -264,7 +264,7 @@ class Services:
   with self.db.transaction():
    self.db.conn.execute('DELETE FROM material_bom_items WHERE id=?',(bom_item_id,))
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
-   self.log('bom',r['parent_material_id'],'delete',f'删除下阶物料{r["child_material_id"]}')
+   self.log('bom',r['parent_material_id'],'delete',f'删除下阶物料{r["child_material_id"]}',snapshot=self.material_snapshot(r['child_material_id']))
   try:
    from infrastructure.events import WindowRefreshBus
    WindowRefreshBus.publish({'type':'bom_changed','root':r['parent_material_id']})
@@ -520,6 +520,12 @@ class Services:
    visible.append(row)
   for number,row in enumerate(visible,1):
    code=row['material_code'];name=row['material_name'];detail=row['detail'] or ''
+   if row['object_type']=='bom':
+    changed_material=re.search(r'^物料：([^\n]+)',detail,re.MULTILINE)
+    if changed_material:
+     identity=changed_material.group(1).partition(' ')
+     code=identity[0];name=identity[2]
+
    # 历史快照明确记录的编码/版本可规范化，绝不按连字符盲目切分基础编码。
    code=legacy_codes.get(code,code)
    if code is None:
