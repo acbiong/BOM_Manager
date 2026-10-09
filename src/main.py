@@ -6,6 +6,7 @@ from config.config_service import ConfigService
 from database.database import Database
 from services.services import Services
 from ui.main_window import MainWindow
+from infrastructure.single_instance import SingleInstance
 from version import get_version
 VERSION=get_version()
 def app_base():
@@ -79,17 +80,25 @@ def startup_database(config_service,cfg):
    path=candidate
 
 def main():
- app=QApplication(sys.argv); base=app_base()
+ app=QApplication(sys.argv); guard=SingleInstance(); db=None; base=None
  try:
+  if not guard.acquire():
+   if not guard.notify_existing():QMessageBox.information(None,'软件已运行','该目录下的BOM管理系统已在运行或正在启动，请切换到已有窗口。')
+   return 0
+  base=app_base()
   config_service=ConfigService(base); cfg=config_service.load(); db=startup_database(config_service,cfg)
   if db is None:return 0
-  w=MainWindow(Services(db,config_service),VERSION); w.show(); rc=app.exec_(); db.close(); return rc
+  w=MainWindow(Services(db,config_service),VERSION); w.show(); guard.set_window(w); return app.exec_()
  except Exception as exc:
-  log=base/'startup_error.log'
+  log=(base or Path('/tmp'))/'startup_error.log'
   try: log.write_text(traceback.format_exc(),encoding='utf-8')
   except OSError:
    log=Path(os.environ.get('TMPDIR','/tmp'))/'BOM管理系统_startup_error.log'
    log.write_text(traceback.format_exc(),encoding='utf-8')
   QMessageBox.critical(None,'BOM管理系统启动失败',f'{exc}\n\n详细信息已写入：{log}')
   return 1
+ finally:
+  try:
+   if db is not None:db.close()
+  finally:guard.close()
 if __name__=='__main__': sys.exit(main())
