@@ -37,3 +37,22 @@ class BomStateHistoryTests(unittest.TestCase):
     count=db.conn.execute("SELECT COUNT(*) FROM change_logs WHERE object_type='bom'").fetchone()[0]
     s.save_bom(root,rows(4.5));self.assertEqual(db.conn.execute("SELECT COUNT(*) FROM change_logs WHERE object_type='bom'").fetchone()[0],count)
    finally:window.dirty=False;window.close();db.close()
+ def test_single_point_position_change_and_removed_history(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   root,parent,child=[s.create_material(dict(base_code=code,version='1',name=code,unit='pcs')) for code in ['R','P','C']]
+   sid=s.create_sku(root)
+   def rows(position,qty):return [dict(material_id=parent,quantity=1,unit='pcs'),dict(parent_material_id=parent,material_id=child,quantity=qty,unit='pcs',position=position)]
+   try:
+    s.save_bom(root,rows('左侧',1));before=db.conn.execute('SELECT MAX(id) FROM change_logs').fetchone()[0]
+    s.save_bom(root,rows('右侧',2))
+    logs=list(db.conn.execute('SELECT * FROM change_logs WHERE id>?',(before,)))
+    self.assertEqual(len(logs),1);detail=logs[0]['detail']
+    for text in ['父项：P1 P','物料：C1 C','位置：左侧 → 右侧','数量：1.0 → 2.0']:self.assertIn(text,detail)
+    s.save_bom(root,[])
+    # 子树已移除，历史日志通过归属索引仍可导出，且同一日志只出现一次。
+    path=Path(tmp)/'export.xlsx';s.export_sku(sid,path);wb=load_workbook(path)
+    values=list(wb['变更记录'].values);wb.close()
+    self.assertEqual(sum('位置：左侧 → 右侧' in str(row[-1]) for row in values),1)
+    self.assertTrue(any('删除物料' in str(row[-1]) and '物料：C1 C' in str(row[-1]) for row in values))
+   finally:db.close()

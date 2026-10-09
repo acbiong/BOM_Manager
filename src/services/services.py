@@ -171,6 +171,8 @@ class Services:
    def expand(parent):
     return [{'data':dict(data),'children':expand(data['material_id'])} for data in groups.get(parent,[])]
    return expand(root)
+  log_roots={sku['material_id']:{sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])} for sku in self.skus()}
+  log_roots.setdefault(root,{root}|{row['material_id'] for row in old_rows})
   old_alternates={row['id']:[r['material_id'] for r in self.alternates(row['id'])] for row in old.values()}
   with self.db.transaction():
    for key,row in old.items():
@@ -208,20 +210,33 @@ class Services:
    def label(mid):
     material=self.material_snapshot(mid)
     return material.get('base_code','')+material.get('version','')+' '+material.get('name','')
-   changes={}
-   for key in dict.fromkeys(list(old)+list(after)):
-    before=old.get(key);current=after.get(key);detail=[]
-    if before is None:detail.append('新增物料 '+label(key[1])+f"；数量：{current['quantity']:.1f}；单位：{current['unit']}；备注：{current['remark']}")
-    elif current is None:detail.append('删除物料 '+label(key[1])+'（含关系属性及替代料）')
+   # 按父项+子物料配对位置变化，避免一处位置修改被写成删除和新增两条。
+   remaining=set(after); pairs=[]
+   for key,before in old.items():
+    target=key if key in remaining else None
+    if target is None:
+     candidates=[candidate for candidate in remaining if candidate[:2]==key[:2] and candidate not in old]
+     old_candidates=[candidate for candidate in old if candidate[:2]==key[:2] and candidate not in after]
+     if len(candidates)==len(old_candidates)==1:target=candidates[0]
+    if target is not None:remaining.remove(target)
+    pairs.append((key,before,target,after.get(target)))
+   pairs.extend((key,None,key,after[key]) for key in after if key in remaining)
+   for key,before,target,current in pairs:
+    detail=[]
+    if before is None:detail.append(f"新增物料；数量：{current['quantity']:.1f}；单位：{current['unit']}；备注：{current['remark']}")
+    elif current is None:detail.append('删除物料（含关系属性及替代料）')
     else:
-     for field,title in [('quantity','数量'),('unit','单位'),('remark','备注'),('sort_no','排序')]:
-      if before[field]!=current[field]:detail.append(f'{title}：{before[field]} → {current[field]}')
+     for field,title in [('position','位置'),('quantity','数量'),('unit','单位'),('remark','备注'),('sort_no','排序')]:
+      if before[field]!=current[field]:detail.append(f'{title}：{before[field] or "（空）"} → {current[field] or "（空）"}')
     previous=old_alternates.get(before['id'],[]) if before else []
     following=[r['material_id'] for r in self.alternates(current['id'])] if current else []
     if previous!=following:detail.append('替代料：'+('、'.join(label(mid) for mid in previous) or '无')+' → '+('、'.join(label(mid) for mid in following) or '无'))
-    if detail:changes.setdefault(key[0],[]).append(label(key[1])+' [位置：'+key[2]+']\n'+'\n'.join(detail))
-   for parent,details in changes.items():self.log('bom',parent,'update','\n'.join(details))
-   if changes and root not in changes:self.log('bom',root,'update','\n'.join('父项 '+label(parent)+'\n'+'\n'.join(details) for parent,details in changes.items()))
+    if not detail:continue
+    description='父项：'+label(key[0])+'\n物料：'+label(key[1])+'\n物料位置：'+(key[2] or '（未填写）')+'\n'+'\n'.join(detail)
+    self.log('bom',key[0],'update',description)
+    log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+    for affected,contained in log_roots.items():
+     if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
   from infrastructure.events import WindowRefreshBus
   for parent in changed_parents: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
  def validate_bom_rows(self,root,rows):
@@ -482,6 +497,7 @@ class Services:
     if match:
      base_value,old,new=match.groups()
      for value in (old,new):legacy_codes[base_value+'-'+value]=base_value+value
+  records=[row for row in records if not (row['object_type']=='bom' and (row['detail'] or '').startswith('父项 '))]
   for number,row in enumerate(records,1):
    code=row['material_code'];name=row['material_name'];detail=row['detail'] or ''
    # 历史快照明确记录的编码/版本可规范化，绝不按连字符盲目切分基础编码。
@@ -563,7 +579,8 @@ class Services:
   if sku is None:raise ValueError('SKU不存在')
   wb=Workbook(); w=wb.active; w.title='变更记录'
   material_ids={sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])}
-  records=[row for row in self.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if (row['object_type'] in ('material','bom') and row['object_id'] in material_ids) or (row['object_type']=='sku' and row['object_id']==sid)]
+  linked={row[0] for row in self.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(sku['material_id'],))}
+  records=[row for row in self.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if row['id'] in linked or (row['object_type'] in ('material','bom') and row['object_id'] in material_ids) or (row['object_type']=='sku' and row['object_id']==sid)]
   self.write_change_sheet(w,records)
   self.write_bom_sheet(wb.create_sheet('SKU对应的BOM'),sku['material_id'])
   wb.save(path)
