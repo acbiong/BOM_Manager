@@ -1,6 +1,6 @@
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QEvent, QSize, QSortFilterProxyModel
+from PyQt5.QtCore import Qt, pyqtSignal, QSettings, QTimer, QEvent, QSize, QSortFilterProxyModel
 from PyQt5.QtGui import QColor, QBrush, QFont, QStandardItemModel, QStandardItem
 from pathlib import Path
 from config.config_service import ConfigService, DEFAULT_MATERIAL_UNITS
@@ -423,6 +423,15 @@ class BomWindow(QMainWindow):
  def __init__(self,svc,root,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
   self.tree=BomTreeWidget(); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
+  import hashlib
+  database_path=str(Path(self.svc.db.path).resolve())
+  self._expansion_settings=QSettings('Biong','BOMManager')
+  self._expansion_key='bom_expansion/'+hashlib.sha256(database_path.encode()).hexdigest()+'/'+str(self.root)
+  import json
+  try:self._expansion_state=json.loads(self._expansion_settings.value(self._expansion_key,'{}'))
+  except (ValueError,TypeError):self._expansion_state={}
+  self._rendering_tree=False
+  self.tree.itemExpanded.connect(self.remember_expansion);self.tree.itemCollapsed.connect(self.remember_expansion)
   self.fields={}; form=QFormLayout();
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('grade','物料等级'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
    w=QuantityEdit() if k=='quantity' else (QLineEdit() if k in ('position','remark') else QLabel()); self.fields[k]=w; form.addRow(l,w)
@@ -611,7 +620,21 @@ class BomWindow(QMainWindow):
   from copy import deepcopy
   fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
   self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+ def expansion_nodes(self):
+  if not hasattr(self,'root_item'):return
+  def walk(item,path):
+   data=item.data(0,Qt.UserRole) or {}; key=path+'/'+str(data.get('material_id'))
+   yield key,item
+   for index in range(item.childCount()):yield from walk(item.child(index),key)
+  yield from walk(self.root_item,'')
+ def remember_expansion(self,*args):
+  if self._rendering_tree:return
+  import json
+  self._expansion_state={key:item.isExpanded() for key,item in self.expansion_nodes()}
+  self._expansion_settings.setValue(self._expansion_key,json.dumps(self._expansion_state));self._expansion_settings.sync()
  def render_tree(self,nodes):
+  if hasattr(self,'root_item'):self.remember_expansion()
+  self._rendering_tree=True
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
   self.setWindowTitle(f"{root['base_code']}{root['version']} {root['name']}")
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
@@ -622,6 +645,9 @@ class BomWindow(QMainWindow):
    item=QTreeWidgetItem(parent,[f"{data['base_code']}{data['version']} {data['name']}",f"{data['quantity']:.1f}",data['unit'],data.get('position',''),data.get('remark','')]); item.setData(0,Qt.UserRole,data); self.by[node_id]=item
    for child in node['children']:append(child,item,node_id,level+1)
   for node in nodes:append(node,self.root_item,'',1)
+  for key,item in self.expansion_nodes():
+   if key in self._expansion_state:item.setExpanded(self._expansion_state[key])
+  self._rendering_tree=False
   fit_columns(self.tree); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
  def snapshot_map(self,nodes,path=()):
   result={}

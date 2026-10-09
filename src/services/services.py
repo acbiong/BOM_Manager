@@ -171,6 +171,7 @@ class Services:
    def expand(parent):
     return [{'data':dict(data),'children':expand(data['material_id'])} for data in groups.get(parent,[])]
    return expand(root)
+  old_alternates={row['id']:[r['material_id'] for r in self.alternates(row['id'])] for row in old.values()}
   with self.db.transaction():
    for key,row in old.items():
     if key[0] in parents and key not in desired:
@@ -203,7 +204,24 @@ class Services:
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(relation,))
     for order,mid in enumerate(alternates):self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',(relation,mid,order))
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
-   self.log('bom',root,'update',f'{len(desired)}条物料关系')
+   after={ (r['parent_material_id'],r['child_material_id'],r['position'] or ''):dict(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items') }
+   def label(mid):
+    material=self.material_snapshot(mid)
+    return material.get('base_code','')+material.get('version','')+' '+material.get('name','')
+   changes={}
+   for key in dict.fromkeys(list(old)+list(after)):
+    before=old.get(key);current=after.get(key);detail=[]
+    if before is None:detail.append('新增物料 '+label(key[1])+f"；数量：{current['quantity']:.1f}；单位：{current['unit']}；备注：{current['remark']}")
+    elif current is None:detail.append('删除物料 '+label(key[1])+'（含关系属性及替代料）')
+    else:
+     for field,title in [('quantity','数量'),('unit','单位'),('remark','备注'),('sort_no','排序')]:
+      if before[field]!=current[field]:detail.append(f'{title}：{before[field]} → {current[field]}')
+    previous=old_alternates.get(before['id'],[]) if before else []
+    following=[r['material_id'] for r in self.alternates(current['id'])] if current else []
+    if previous!=following:detail.append('替代料：'+('、'.join(label(mid) for mid in previous) or '无')+' → '+('、'.join(label(mid) for mid in following) or '无'))
+    if detail:changes.setdefault(key[0],[]).append(label(key[1])+' [位置：'+key[2]+']\n'+'\n'.join(detail))
+   for parent,details in changes.items():self.log('bom',parent,'update','\n'.join(details))
+   if changes and root not in changes:self.log('bom',root,'update','\n'.join('父项 '+label(parent)+'\n'+'\n'.join(details) for parent,details in changes.items()))
   from infrastructure.events import WindowRefreshBus
   for parent in changed_parents: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
  def validate_bom_rows(self,root,rows):
