@@ -44,5 +44,5 @@ class MaterialUnitsTests(unittest.TestCase):
    with self.assertRaises(ValueError):service.update_material(mid,dict(name='物料',unit='pcs'))
    with self.assertRaises(ValueError):service.create_material(dict(base_code='Z',version='1',name='物料',unit='pcs'))
    wb=Workbook();wb.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']);wb.active.append(['OK','1','物料','','箱','厂家','']);wb.active.append(['BAD','1','物料','','pcs','厂家','']);path=self.base/'custom.xlsx';wb.save(path);wb.close()
-   ok,fail=service.import_materials(path);self.assertEqual(ok,['OK']);self.assertEqual(fail[0][1],'BAD-1')
+   ok,fail=service.import_materials(path);self.assertEqual(ok,['OK']);self.assertEqual(fail[0][1],'BAD1')
   finally:material.close();main.close()

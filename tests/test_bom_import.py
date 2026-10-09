@@ -50,17 +50,17 @@ class BomImportTests(unittest.TestCase):
  def test_root_mismatch_before_any_write_and_ui_warning(self):
   from unittest.mock import patch
   from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
-  from ui.main_window import BomWindow
+  from ui.main_window import BomWindow,BomImportIssuesDialog
   self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=5,unit='pcs')])
   before=[dict(row) for row in self.s.bom(self.ids['R','1'])]
   for code,version in [('P','1'),('R','2')]:
    self.write([['R','1','P','2',1,''],['root','ROOT',code,version,None,None]])
    with self.assertRaisesRegex(ValueError,'BOM选择错误'):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM')
    self.assertEqual([dict(row) for row in self.s.bom(self.ids['R','1'])],before)
-  window=BomWindow(self.s,self.ids['R','1'])
+  window=BomWindow(self.s,self.ids['R','1']);shown=[]
   try:
-   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'warning') as warning:
-    window.import_bom();self.assertIn('BOM选择错误',warning.call_args.args[2])
+   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(BomImportIssuesDialog,'exec_',lambda dialog: shown.append(dialog)):
+    window.import_bom();self.assertIn('BOM选择错误',shown[0].details.toPlainText())
   finally:window.close()
  def test_duplicate_incomplete_and_root_only(self):
   for rows in ([['ROOT','1','R','1',1,'']],[['ROOT','ROOT','R','1',1,''],['root','root','R','1',1,'']]):
@@ -112,3 +112,49 @@ class BomImportTests(unittest.TestCase):
   self.write([['R','1','C','1',1,'']])
   with self.assertRaisesRegex(ValueError,'循环'):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',persist=False)
   self.assertEqual(self.s.bom(self.ids['R','1']),[])
+
+ def test_all_rows_and_multiple_errors_per_row_are_reported(self):
+  from services.services import BomImportError
+  self.write([
+   ['ROOT','ROOT','P','1',None,None],
+   ['MISSING','9','UNKNOWN','2','bad',''],
+   ['R','1','P','2',1,''],
+   ['R','1','P','2',2,'duplicate'],
+   ['P','2','P','2',0,''],
+   ['P','1','C','1',1,''],
+   ['R','1','','',None,''],
+  ])
+  before=self.db.conn.total_changes
+  for persist in (False,True):
+   with self.assertRaises(BomImportError) as result:self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',persist=persist)
+   message=str(result.exception)
+   for expected in ['第2行ROOT','第3行父项不存在','第3行子物料不存在','第3行数量不是','第5行同一父级重复','第6行物料不能','第6行数量必须','第7行存在','第8行必填项缺失','循环包含']:
+    self.assertIn(expected,message)
+   self.assertIn('物料基础编码、物料版本号、物料数量',message)
+   self.assertEqual(self.db.conn.total_changes,before)
+ def test_error_dialog_preserves_unsaved_cache_and_scrolls(self):
+  from unittest.mock import patch
+  from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
+  from ui.main_window import BomWindow,BomImportIssuesDialog
+  self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=1,unit='pcs')])
+  window=BomWindow(self.s,self.ids['R','1']);shown=[]
+  try:
+   window.show_item_info(window.root_item.child(0));window.fields['quantity'].setValue(3.2)
+   original=window.capture_tree()
+   self.write([['R','1','UNKNOWN',str(i),'invalid',''] for i in range(70)])
+   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(BomImportIssuesDialog,'exec_',lambda dialog: shown.append(dialog)):
+    window.import_bom()
+    dialog=shown[0];dialog.show();self.app.processEvents()
+    self.assertIn('第71行',dialog.details.toPlainText())
+    self.assertGreater(dialog.details.verticalScrollBar().maximum(),0);dialog.close()
+   self.assertEqual(window.capture_tree(),original);self.assertTrue(window.dirty)
+   self.assertEqual(self.s.bom(self.ids['R','1'])[0]['quantity'],1)
+  finally:window.dirty=False;window.close()
+ def test_combined_code_preserves_base_code_hyphens(self):
+  from ui.main_window import BomWindow,NewSkuDialog
+  mid=self.s.create_material(dict(base_code='BC3-0000197',version='100',name='测试',unit='pcs'))
+  window=BomWindow(self.s,mid)
+  try:
+   self.assertEqual(window.windowTitle(),'BC3-0000197100 测试')
+   self.assertEqual(window.root_item.text(0),'BC3-0000197100 测试')
+  finally:window.close()

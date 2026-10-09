@@ -17,9 +17,9 @@ class MaterialChangeExportTests(unittest.TestCase):
   self.s.change_material_version(mid,'2');self.s.delete_material(mid)
   self.s.create_material(dict(base_code='B',version='1',name='另一物料',unit='pcs'))
   rows=self.exported();self.assertEqual(rows[0],('序号','变更日期','变更时间','变更物料编码','变更物料名称','变更详细内容'))
-  self.assertEqual(rows[1][3:5],('A-1','旧名称'));self.assertEqual(rows[2][3:5],('A-1','新名称'))
+  self.assertEqual(rows[1][3:5],('A1','旧名称'));self.assertEqual(rows[2][3:5],('A1','新名称'))
   for change in ['物料名称：旧名称 → 新名称','单位：pcs → 米','制造商：旧厂 → 新厂','MPN：旧MPN → 新MPN','规格描述：旧描述 → （空）','M/P：M → P']:self.assertIn(change,rows[2][5])
-  self.assertEqual(rows[3][3],'A-2');self.assertIn('1->2',rows[3][5]);self.assertEqual(rows[4][3:5],('A-2','新名称'));self.assertIn('删除物料',rows[4][5])
+  self.assertEqual(rows[3][3],'A2');self.assertIn('1->2',rows[3][5]);self.assertEqual(rows[4][3:5],('A2','新名称'));self.assertIn('删除物料',rows[4][5])
   self.assertEqual(len(rows[2][1]),10);self.assertEqual(len(rows[2][2]),8)
  def test_old_schema_migrates_and_legacy_values_are_not_fabricated(self):
   other=self.path/'old.sqlite';conn=sqlite3.connect(other);conn.execute('CREATE TABLE change_logs(id INTEGER PRIMARY KEY,object_type TEXT,object_id INTEGER,action TEXT,detail TEXT,changed_at TEXT)');conn.execute("INSERT INTO change_logs VALUES(1,'material',1,'update','旧名字','2020-01-02 03:04:05')");conn.commit();conn.close()

@@ -2,6 +2,11 @@
 from pathlib import Path
 from datetime import datetime
 from openpyxl import Workbook,load_workbook
+class BomImportError(ValueError):
+ def __init__(self,issues):
+  self.issues=issues
+  super().__init__(f'BOM扫描完成，共发现{len(issues)}个问题，未导入：\n'+'\n'.join(issues))
+
 class MaterialHeaderError(ValueError):
  def __init__(self,headers,missing):
   self.headers=headers; self.missing=missing
@@ -22,7 +27,7 @@ class Services:
  def log(self,typ,obj,act,detail,snapshot=None):
   if snapshot is None and typ=='material':snapshot=self.material_snapshot(obj)
   snapshot=snapshot or {}
-  code=f"{snapshot['base_code']}-{snapshot['version']}" if snapshot else None
+  code=f"{snapshot['base_code']}{snapshot['version']}" if snapshot else None
   self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail,material_code,material_name) VALUES(?,?,?,?,?,?)',(typ,obj,act,detail,code,snapshot.get('name')))
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；idle只检查是否为SKU或被其他BOM作为子项引用。
@@ -121,7 +126,7 @@ class Services:
     if values==baseline: continue
     if desired[key]!=baseline:
      material=self.db.conn.execute('SELECT base_code,version,name FROM materials WHERE id=?',(row['material_id'],)).fetchone()
-     raise ValueError(f'共享子BOM的同一关系存在不同修改：{material[0]}-{material[1]} {material[2]}。请统一数量、位置和备注后保存。')
+     raise ValueError(f'共享子BOM的同一关系存在不同修改：{material[0]}{material[1]} {material[2]}。请统一数量、位置和备注后保存。')
    desired[key]=values
   # 替代料属于父子关系。只通知真正改变的父级BOM，不能把整棵树都当成已更新。
   changed_parents=set()
@@ -214,55 +219,72 @@ class Services:
    if any(headers.count(mapping[field])!=1 for field in self.BOM_HEADERS):raise ValueError('源表头名称重复，请修改文件表头后重试')
    index={field:headers.index(mapping[field]) for field in self.BOM_HEADERS}; rows=[]; pairs=set(); children={}; parents=set(); child_ids=set()
    materials={(r['base_code'],r['version']):r for r in self.materials()}
-   records=[]; root_row=None
+   issues=[]; records=[]; root_row=None
+   current=self.material_snapshot(root) if root is not None else None
+   if root is not None and not current:issues.append('当前BOM根物料不存在')
    for no,values in enumerate(ws.iter_rows(values_only=True),1):
     if no==1:continue
-    data={field:str(values[i] if values[i] is not None else '').strip() for field,i in index.items()}
+    data={field:str(values[i] if i<len(values) and values[i] is not None else '').strip() for field,i in index.items()}
     if not any(data.values()):continue
     is_root=[data[field].casefold()=='root' for field in ('父项物料编码','父项版本号')]
     if any(is_root):
-     if not all(is_root):raise ValueError(f'第{no}行根节点标记不完整：父项物料编码和父项版本号必须同时为ROOT/root')
-     if root_row is not None:raise ValueError(f'第{no}行存在重复根节点声明，BOM只能有一个ROOT根节点')
+     if not all(is_root):issues.append(f'第{no}行根节点标记不完整：父项物料编码和父项版本号必须同时为ROOT/root')
+     if root_row is not None:issues.append(f'第{no}行存在重复根节点声明，BOM只能有一个ROOT根节点')
      root_row=no; key=(data['物料基础编码'],data['物料版本号'])
-     if root is not None:
-      current=self.material_snapshot(root)
-      if not current:raise ValueError('当前BOM根物料不存在')
+     if current:
       if key!=(current['base_code'],current['version']):
-       raise ValueError(f"BOM选择错误：第{no}行ROOT物料为{key[0]}-{key[1]}，当前BOM为{current['base_code']}-{current['version']}，禁止导入")
-     else:
-      if key not in materials:raise ValueError(f'第{no}行ROOT物料不存在：{key[0]}-{key[1]}')
-      root=materials[key]['id']
-     continue  # 根声明不是父子引用，不导入数量/位置或创建自引用。
+       issues.append(f"BOM选择错误：第{no}行ROOT物料为{key[0]}{key[1]}，当前BOM为{current['base_code']}{current['version']}，禁止导入")
+     elif root is None:
+      if key not in materials:issues.append(f'第{no}行ROOT物料不存在：{key[0]}{key[1]}')
+      elif all(is_root):root=materials[key]['id'];current=materials[key]
+     continue
     records.append((no,data))
+   edge_lines={}
    for no,data in records:
+    start_errors=len(issues)
     absent=[field for field in self.BOM_HEADERS[:-1] if not data[field]]
-    if absent:raise ValueError(f'第{no}行必填项缺失：'+ '、'.join(absent))
+    if absent:issues.append(f'第{no}行必填项缺失：'+ '、'.join(absent))
     parent=materials.get((data['父项物料编码'],data['父项版本号'])); child=materials.get((data['物料基础编码'],data['物料版本号']))
-    if parent is None:raise ValueError(f'第{no}行父项不存在：'+data['父项物料编码']+'-'+data['父项版本号'])
-    if child is None:raise ValueError(f'第{no}行子物料不存在：'+data['物料基础编码']+'-'+data['物料版本号'])
-    try:quantity=float(data['物料数量'])
-    except ValueError:raise ValueError(f'第{no}行数量不是有效数字')
-    if not math.isfinite(quantity) or round(quantity,1)<=0:raise ValueError(f'第{no}行数量必须至少为0.1且为有限数字')
+    if parent is None and data['父项物料编码'] and data['父项版本号']:issues.append(f'第{no}行父项不存在：'+data['父项物料编码']+data['父项版本号'])
+    if child is None and data['物料基础编码'] and data['物料版本号']:issues.append(f'第{no}行子物料不存在：'+data['物料基础编码']+data['物料版本号'])
+    quantity=None
+    if data['物料数量']:
+     try:
+      quantity=float(data['物料数量'])
+      if not math.isfinite(quantity) or round(quantity,1)<=0:issues.append(f'第{no}行数量必须至少为0.1且为有限数字')
+     except ValueError:issues.append(f'第{no}行数量不是有效数字')
+    if parent is None or child is None:continue
     pid=parent['id']; mid=child['id']
-    if (pid,mid) in pairs:raise ValueError(f'第{no}行同一父级重复包含相同物料')
-    if pid==mid:raise ValueError(f'第{no}行物料不能包含自身')
-    pairs.add((pid,mid));parents.add(pid);child_ids.add(mid);children.setdefault(pid,[]).append(mid)
-    rows.append(dict(parent_material_id=pid,material_id=mid,quantity=round(quantity,1),unit=child['unit'],position=data['位置']))
-   if not rows and root_row is None:raise ValueError('所选工作表没有可导入的BOM数据')
+    if (pid,mid) in pairs:issues.append(f'第{no}行同一父级重复包含相同物料（首次出现于第{edge_lines[pid,mid]}行）')
+    if pid==mid:issues.append(f'第{no}行物料不能包含自身')
+    pairs.add((pid,mid));edge_lines.setdefault((pid,mid),no);parents.add(pid);child_ids.add(mid)
+    if mid not in children.setdefault(pid,[]):children[pid].append(mid)
+    if len(issues)==start_errors:rows.append(dict(parent_material_id=pid,material_id=mid,quantity=round(quantity,1),unit=child['unit'],position=data['位置']))
+   if not rows and root_row is None and not issues:issues.append('所选工作表没有可导入的BOM数据')
    if root is None:
     roots=parents-child_ids
-    if len(roots)!=1:raise ValueError('BOM必须具有唯一根物料，或结构存在循环')
-    root=next(iter(roots))
+    if len(roots)!=1:issues.append('BOM必须具有唯一根物料，或结构存在循环')
+    else:root=next(iter(roots))
    visited=set();active=set()
    def walk(mid):
-    if mid in active:raise ValueError('BOM结构存在循环包含')
     if mid in visited:return
     active.add(mid)
-    for child in children.get(mid,[]):walk(child)
+    for child in children.get(mid,[]):
+     if child in active:issues.append(f'第{edge_lines[mid,child]}行关系使BOM结构存在循环包含')
+     else:walk(child)
     active.remove(mid);visited.add(mid)
-   walk(root)
-   if not (parents|child_ids)<=visited:raise ValueError('存在不属于当前根物料的孤立或循环分支，请检查父项编码和版本号')
-   if not persist:return self.save_bom(root,rows,preview=True)
+   if root is not None:
+    walk(root)
+    unreachable=(parents|child_ids)-visited
+    if unreachable:
+     lines=sorted({no for (parent,child),no in edge_lines.items() if parent in unreachable or child in unreachable})
+     issues.append('第'+ '、'.join(map(str,lines))+'行存在不属于当前根物料的孤立分支，请检查父项编码和版本号')
+   for mid in sorted(parents|child_ids):walk(mid)
+   if root is not None:
+    try:preview_tree=self.save_bom(root,rows,preview=True)
+    except ValueError as error:issues.append('与数据库共享BOM结构校验失败：'+str(error))
+   if issues:raise BomImportError(issues)
+   if not persist:return preview_tree
    self.save_bom(root,rows)
    return len(rows)
   finally:wb.close()
@@ -277,14 +299,14 @@ class Services:
    usages=[]; sku_ids=[]
    for sku in self.skus():
     if any(row['material_id']==i and row['parent_material_id']==parent['id'] for row in self.bom(sku['material_id'])):
-     usages.append(f"{sku['base_code']}-{sku['version']} {sku['name']}"); sku_ids.append(sku['id'])
-   parent_label=f"{parent['base_code']}-{parent['version']} {parent['name']}"
+     usages.append(f"{sku['base_code']}{sku['version']} {sku['name']}"); sku_ids.append(sku['id'])
+   parent_label=f"{parent['base_code']}{parent['version']} {parent['name']}"
    result.append({'parent_id':parent['id'],'sku_ids':sku_ids or [None],'sku_labels':usages or ['未包含在SKU中'],'parent_label':parent_label,'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
   return result
  def material_usage(self,i):
   result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label']} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
   for sku in self.skus():
-   if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}-{sku['version']} {sku['name']}",'parent':'SKU根节点（无父级）'})
+   if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']}",'parent':'SKU根节点（无父级）'})
   return result
  def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
   new_version=new_version.strip()
@@ -310,7 +332,7 @@ class Services:
      self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) SELECT ?,material_id,sort_no FROM alternates WHERE bom_item_id=?',(relation,child['id']))
     for parent in selected:
      self.db.conn.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,parent,i))
-   self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={[str(self.material_snapshot(parent).get('base_code',''))+'-'+str(self.material_snapshot(parent).get('version',''))+' '+str(self.material_snapshot(parent).get('name','')) for parent in sorted(selected)]}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
+   self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={[str(self.material_snapshot(parent).get('base_code',''))+str(self.material_snapshot(parent).get('version',''))+' '+str(self.material_snapshot(parent).get('name','')) for parent in sorted(selected)]}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'material_changed','id':new_id})
   for parent in selected: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
@@ -341,7 +363,7 @@ class Services:
     d={k:str(row[i] if row[i] is not None else '').strip() for k,i in idx.items()};
     if progress_callback: progress_callback(no-1,total)
     if not d['物料基础编码'] and not d['物料名称']:continue
-    display_code=(d['物料基础编码'] or '（空基础编码）')+'-'+(d['物料版本号'] or '（空版本号）')
+    display_code=(d['物料基础编码'] or '（空基础编码）')+(d['物料版本号'] or '（空版本号）')
     missing_fields=[field for field in ('物料基础编码','物料版本号','物料名称','单位','物料制造商') if not d[field]]
     if missing_fields:
      fail.append((no,display_code,d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue
@@ -363,13 +385,13 @@ class Services:
   finally:wb.close()
  def export_database(self,path):
   wb=Workbook(); ws=wb.active; ws.title='SKU清单'; ws.append(['序号','SKU编码','SKU名称','SKU描述','修改日期时间'])
-  for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+'-'+r['version'],r['name'],r['description'],r['updated_at']])
+  for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['updated_at']])
   w=wb.create_sheet('物料库'); w.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料'])
   for r in self.materials(): w.append([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']])
   c=wb.create_sheet('变更记录'); c.append(['序号','变更时间','变更详细内容','变更日期','变更时间'])
   for n,r in enumerate(self.db.conn.execute('SELECT * FROM change_logs ORDER BY id'),1): c.append([n,r['changed_at'],r['detail'],r['changed_at'][:10],r['changed_at'][11:]])
   for r in self.skus():
-   b=wb.create_sheet((r['base_code']+'-'+r['version'])[:31]); b.append(['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','用量','单位','M/P','制造商','MPN'])
+   b=wb.create_sheet((r['base_code']+r['version'])[:31]); b.append(['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','用量','单位','M/P','制造商','MPN'])
    for n,x in enumerate(self.bom(r['material_id']),1): b.append([n,x['level_no'],r['base_code'],r['version'],x['base_code'],x['version'],x['name'],x['description'],x['quantity'],x['unit'],x['mp_flag'],x['manufacturer'],x['mpn']])
   for sheet in wb:
    headers=[cell.value for cell in sheet[1]]

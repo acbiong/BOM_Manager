@@ -58,7 +58,7 @@ class MaterialSheetsTests(unittest.TestCase):
     ok,fail=self.s.import_materials(self.path,header_mapping=mapping)
     self.assertEqual(ok,[]);self.assertEqual([row[3] for row in fail],['必填项缺失：物料制造商','必填项缺失：物料版本号、物料名称、单位、物料制造商','必填项缺失：物料基础编码'])
     dialog=MaterialImportResultDialog(ok,fail)
-    self.assertIn('第2行：A-1 物料A\n原因：必填项缺失：物料制造商',dialog.details.toPlainText())
+    self.assertIn('第2行：A1 物料A\n原因：必填项缺失：物料制造商',dialog.details.toPlainText())
     self.assertIn('物料版本号、物料名称、单位、物料制造商',dialog.details.toPlainText());dialog.close()
     self.assertEqual(self.s.materials(),[])
  def test_blank_code_and_name_ignored_before_validation(self):
@@ -78,8 +78,8 @@ class MaterialSheetsTests(unittest.TestCase):
  def test_duplicate_results_include_version(self):
   self.s.create_material(dict(base_code='RIGHT',version='1',name='正确物料',unit='pcs',manufacturer='厂商',mpn='MPN'))
   ok,fail=self.s.import_materials(self.path,header_mapping=dict(zip(self.required,self.headers)),sheet_name='物料数据')
-  self.assertEqual(fail[0][1],'RIGHT-1');self.assertIn('自动跳过',fail[0][3])
+  self.assertEqual(fail[0][1],'RIGHT1');self.assertIn('自动跳过',fail[0][3])
   self.s.update_material(self.s.materials()[0]['id'],dict(name='现有名称',unit='pcs',manufacturer='厂商',mpn='MPN'))
   for choice in ('skip','cancel'):
    ok,fail=self.s.import_materials(self.path,lambda *_:choice,dict(zip(self.required,self.headers)),sheet_name='物料数据')
-   self.assertEqual(fail[0][1],'RIGHT-1')
+   self.assertEqual(fail[0][1],'RIGHT1')

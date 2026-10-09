@@ -6,7 +6,7 @@ from pathlib import Path
 from config.config_service import ConfigService, DEFAULT_MATERIAL_UNITS
 from database.database import Database
 from infrastructure.events import WindowRefreshBus
-from services.services import MaterialHeaderError
+from services.services import MaterialHeaderError, BomImportError
 from ui.theme import apply_theme, theme_icon
 
 class QuantityEdit(QDoubleSpinBox):
@@ -132,7 +132,7 @@ class MaterialHeaderMappingDialog(QDialog):
 class MaterialConflictDialog(QDialog):
  def __init__(self,incoming,existing,parent=None):
   super().__init__(parent); self.setWindowTitle('发现重复物料'); self.resize(1000,400); self.choice='cancel'
-  layout=QVBoxLayout(self); title=QLabel('物料 '+incoming['物料基础编码']+'-'+incoming['物料版本号']+' 已存在。上行为数据库现有信息，下行为待导入信息；黄色单元格表示差异。'); title.setWordWrap(True); layout.addWidget(title)
+  layout=QVBoxLayout(self); title=QLabel('物料 '+incoming['物料基础编码']+incoming['物料版本号']+' 已存在。上行为数据库现有信息，下行为待导入信息；黄色单元格表示差异。'); title.setWordWrap(True); layout.addWidget(title)
   fields=[('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')]
   self.table=QTableWidget(2,len(fields)); self.table.setHorizontalHeaderLabels([label for _,label in fields]); self.table.setVerticalHeaderLabels(['现有数据库','目标导入']); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
   for column,(key,label) in enumerate(fields):
@@ -174,7 +174,7 @@ class NewSkuDialog(QDialog):
   self.model=QStandardItemModel(self); skus={row['material_id'] for row in svc.skus()}
   for row in svc.materials():
    reason='已有BOM结构，不可用' if row['has_bom']=='Y' else '已是SKU，不可用' if row['id'] in skus else ''
-   item=QStandardItem(f"{row['base_code']}-{row['version']} {row['name']}"+('（'+reason+'）' if reason else '')); item.setData(row['id'],Qt.UserRole); item.setEnabled(not reason); self.model.appendRow(item)
+   item=QStandardItem(f"{row['base_code']}{row['version']} {row['name']}"+('（'+reason+'）' if reason else '')); item.setData(row['id'],Qt.UserRole); item.setEnabled(not reason); self.model.appendRow(item)
   self.combo.setModel(self.model); self.combo.setCurrentIndex(-1); self.combo.lineEdit().setPlaceholderText('输入物料编码或名称')
   self.proxy=QSortFilterProxyModel(self); self.proxy.setSourceModel(self.model); self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
   self.completer=QCompleter(self.proxy,self); self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion); self.combo.setCompleter(self.completer)
@@ -208,7 +208,7 @@ class MainWindow(QMainWindow):
   self.project_label.setText(title); self.project_label.setToolTip(title); self.setWindowTitle(title)
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
-   btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+'-'+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
+   btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
   fit_columns(self.table)
   self.statusBar().showMessage(f'共计{len(rows)}个SKU')
  def select_database(self):
@@ -349,6 +349,15 @@ class MainWindow(QMainWindow):
   p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
   if p:
    from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.save(p)
+class BomImportIssuesDialog(QDialog):
+ def __init__(self,error,parent=None):
+  super().__init__(parent); self.setWindowTitle('BOM导入失败')
+  self.resize(800,520); self.setMaximumHeight(640)
+  layout=QVBoxLayout(self)
+  summary=QLabel(f'扫描完成，共发现{len(error.issues)}个问题。未导入，原有编辑和数据库保持不变。'); summary.setWordWrap(True); layout.addWidget(summary)
+  self.details=QTextBrowser(); self.details.setPlainText('\n\n'.join(error.issues)); layout.addWidget(self.details)
+  buttons=QDialogButtonBox(QDialogButtonBox.Close); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+
 class BomTreeWidget(QTreeWidget):
  def drawRow(self,painter,option,index):
   super().drawRow(painter,option,index)
@@ -555,13 +564,13 @@ class BomWindow(QMainWindow):
   self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
  def render_tree(self,nodes):
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
-  self.setWindowTitle(f"{root['base_code']}-{root['version']} {root['name']}")
-  self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}-{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
+  self.setWindowTitle(f"{root['base_code']}{root['version']} {root['name']}")
+  self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
   def append(node,parent,path,level):
    data=dict(node['data']); data.setdefault('_edit_base',{k:data.get(k) for k in ('quantity','position','remark')}); parent_data=parent.data(0,Qt.UserRole) or {}
    node_id=f"{path}/{data['id']}"
    data.update(node_id=node_id,parent_node_id=path or None,parent_material_id=parent_data['material_id'],parent_item_id=parent_data.get('id'),level_no=level)
-   item=QTreeWidgetItem(parent,[f"{data['base_code']}-{data['version']} {data['name']}",f"{data['quantity']:.1f}",data['unit'],data.get('position',''),data.get('remark','')]); item.setData(0,Qt.UserRole,data); self.by[node_id]=item
+   item=QTreeWidgetItem(parent,[f"{data['base_code']}{data['version']} {data['name']}",f"{data['quantity']:.1f}",data['unit'],data.get('position',''),data.get('remark','')]); item.setData(0,Qt.UserRole,data); self.by[node_id]=item
    for child in node['children']:append(child,item,node_id,level+1)
   for node in nodes:append(node,self.root_item,'',1)
   fit_columns(self.tree); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
@@ -641,11 +650,11 @@ class BomWindow(QMainWindow):
   blocked.update(ancestors)
   for candidate in self.svc.materials():
    if any(row['material_id'] in ancestors for row in self.svc.bom(candidate['id'])): blocked.add(candidate['id'])
-  rows=[r for r in self.svc.materials() if r['id'] not in blocked]; items=[f"{r['base_code']} {r['version']} {r['name']}" for r in rows]
+  rows=[r for r in self.svc.materials() if r['id'] not in blocked]; items=[f"{r['base_code']}{r['version']} {r['name']}" for r in rows]
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}-{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'_added':True,'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'_added':True,'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
   self.add_existing_children(item,r['id'],set())
   self._draft_baselines[temporary_id]=self.capture_item(item)
   fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
@@ -656,7 +665,7 @@ class BomWindow(QMainWindow):
   parent_data=parent_item.data(0,Qt.UserRole) or {}
   for row in rows:
    if row['child_material_id'] in ancestors:continue
-   child=QTreeWidgetItem(parent_item,[f"{row['base_code']}-{row['version']} {row['name']}",f"{row['quantity']:.1f}",row['material_unit'],row['position'],row['remark']]); d=dict(row); d['_added']=parent_data.get('_added',False); d['_db_alternates']=[a['material_id'] for a in self.svc.alternates(row['id'])]; d.update({'material_id':row['child_material_id'],'unit':row['material_unit'],'parent_item_id':parent_data.get('id'),'level_no':(parent_data.get('level_no') or 0)+1}); d.update(node_id=f"{parent_data.get('node_id')}/{row['id']}",parent_node_id=parent_data.get('node_id')); child.setData(0,Qt.UserRole,d); self.by[d['node_id']]=child; self.add_existing_children(child,row['child_material_id'],ancestors)
+   child=QTreeWidgetItem(parent_item,[f"{row['base_code']}{row['version']} {row['name']}",f"{row['quantity']:.1f}",row['material_unit'],row['position'],row['remark']]); d=dict(row); d['_added']=parent_data.get('_added',False); d['_db_alternates']=[a['material_id'] for a in self.svc.alternates(row['id'])]; d.update({'material_id':row['child_material_id'],'unit':row['material_unit'],'parent_item_id':parent_data.get('id'),'level_no':(parent_data.get('level_no') or 0)+1}); d.update(node_id=f"{parent_data.get('node_id')}/{row['id']}",parent_node_id=parent_data.get('node_id')); child.setData(0,Qt.UserRole,d); self.by[d['node_id']]=child; self.add_existing_children(child,row['child_material_id'],ancestors)
   parent_item.setExpanded(True)
  def alternate_key(self,item):
   data=item.data(0,Qt.UserRole) or {}
@@ -671,7 +680,7 @@ class BomWindow(QMainWindow):
   existing=self.alternate_ids(item); data=item.data(0,Qt.UserRole) or {}
   rows=[row for row in self.svc.materials() if row['id']!=data.get('material_id') and row['id'] not in existing]
   if not rows: QMessageBox.information(self,'增加替代料','没有可选替代料'); return
-  choices=[f"{row['base_code']}-{row['version']} {row['name']}" for row in rows]
+  choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
   choice,ok=QInputDialog.getItem(self,'增加替代料','选择物料',choices,0,False)
   if not ok:return
   self._alternate_edits[self.alternate_key(item)]=existing+[rows[choices.index(choice)]['id']]
@@ -698,6 +707,7 @@ class BomWindow(QMainWindow):
     nodes=self.svc.import_bom(p,self.root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False)
    self.stage_import(nodes)
    QMessageBox.information(self,'导入完成','BOM已导入编辑缓存，请检查后点击“保存”写入数据库。')
+  except BomImportError as error:BomImportIssuesDialog(error,self).exec_()
   except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
  def stage_import(self,nodes):
   from copy import deepcopy
@@ -897,7 +907,7 @@ class MaterialVersionDialog(QDialog):
  def __init__(self,material,references,parent=None):
   super().__init__(parent); self.setWindowTitle('物料版本变更'); self.resize(720,430)
   layout=QVBoxLayout(self)
-  label=QLabel(f"{material['base_code']}-{material['version']} {material['name']}"); label.setWordWrap(True); layout.addWidget(label)
+  label=QLabel(f"{material['base_code']}{material['version']} {material['name']}"); label.setWordWrap(True); layout.addWidget(label)
   form=QFormLayout(); self.version=QLineEdit(material['version']); form.addRow('新版本号',self.version); layout.addLayout(form)
   text=QLabel('该物料被如下BOM所使用，请勾选需要同步使用新版本的BOM。'); text.setWordWrap(True); layout.addWidget(text)
   self.references=QTreeWidget(); self.references.setHeaderLabels(['','SKU','父项物料']); self.references.setRootIsDecorated(False); self.references.setWordWrap(True)
@@ -917,7 +927,7 @@ class MaterialVersionDialog(QDialog):
 class MaterialUsageDialog(QDialog):
  def __init__(self,material,usages,parent=None):
   super().__init__(parent); self.setWindowTitle('物料反查'); self.resize(720,430)
-  layout=QVBoxLayout(self); title=QLabel(f"{material['base_code']}-{material['version']} {material['name']}"); title.setWordWrap(True); layout.addWidget(title)
+  layout=QVBoxLayout(self); title=QLabel(f"{material['base_code']}{material['version']} {material['name']}"); title.setWordWrap(True); layout.addWidget(title)
   self.table=QTableWidget(len(usages),1); self.table.setHorizontalHeaderLabels(['包含此物料的SKU / 父级物料']); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.setWordWrap(True)
   for index,usage in enumerate(usages):
    item=QTableWidgetItem(f"SKU：{usage['sku']}\n父级物料：{usage['parent']}"); item.setData(Qt.UserRole,usage.get('sku_id')); self.table.setItem(index,0,item)

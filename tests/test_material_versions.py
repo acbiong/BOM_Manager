@@ -25,8 +25,8 @@ class MaterialVersionTests(unittest.TestCase):
  def test_references_include_all_shared_skus_and_independent_boms(self):
   a=self.ids; refs={r['parent_id']:r for r in self.s.material_version_references(a['PART'])}
   self.assertEqual(len(refs[a['P1']]['labels']),2)
-  self.assertIn('SKU1-100 SKU1名称/P1-100 P1名称',refs[a['P1']]['labels'])
-  self.assertIn('SKU2-100 SKU2名称/P1-100 P1名称',refs[a['P1']]['labels'])
+  self.assertIn('SKU1100 SKU1名称/P1100 P1名称',refs[a['P1']]['labels'])
+  self.assertIn('SKU2100 SKU2名称/P1100 P1名称',refs[a['P1']]['labels'])
   self.assertEqual(len(refs[a['P2']]['labels']),1)
   self.s.create_material(dict(base_code='UNUSED',version='1',name='未使用',unit='pcs'))
  def test_all_selected_updates_original_without_duplicate(self):
@@ -89,7 +89,7 @@ class MaterialVersionTests(unittest.TestCase):
   a=self.ids; parent=self.s.create_material(dict(base_code='INDEPENDENT',version='100',name='独立BOM',unit='pcs'))
   self.s.save_bom(parent,[dict(material_id=a['PART'],quantity=1,unit='pcs')])
   refs={r['parent_id']:r for r in self.s.material_version_references(a['PART'])}
-  self.assertEqual(refs[parent]['labels'],['未包含在SKU中/INDEPENDENT-100 独立BOM'])
+  self.assertEqual(refs[parent]['labels'],['未包含在SKU中/INDEPENDENT100 独立BOM'])
   new=self.s.change_material_version(a['PART'],'101',{a['P1'],a['P2']})
   self.assertNotEqual(new,a['PART']); self.assertEqual(self.s.bom(parent)[0]['material_id'],a['PART'])
  def test_unused_ui_only_requests_version(self):
@@ -106,8 +106,8 @@ class MaterialVersionTests(unittest.TestCase):
    self.assertFalse(dialog.references.rootIsDecorated())
    item=dialog.references.topLevelItem(0)
    self.assertEqual(item.checkState(0),Qt.Checked)
-   self.assertEqual(item.text(0),''); self.assertIn('SKU1-100 SKU1名称',item.text(1)); self.assertIn('SKU2-100 SKU2名称',item.text(1))
-   self.assertEqual(item.text(2),'P1-100 P1名称')
+   self.assertEqual(item.text(0),''); self.assertIn('SKU1100 SKU1名称',item.text(1)); self.assertIn('SKU2100 SKU2名称',item.text(1))
+   self.assertEqual(item.text(2),'P1100 P1名称')
    self.assertEqual([dialog.references.headerItem().text(n) for n in range(3)],['','SKU','父项物料'])
    self.assertLess(dialog.note.font().pointSizeF(),dialog.font().pointSizeF())
    self.assertGreater(dialog.layout().indexOf(dialog.note),dialog.layout().indexOf(dialog.references))
@@ -118,7 +118,7 @@ class MaterialVersionTests(unittest.TestCase):
   self.s.save_bom(parent,[dict(material_id=a['PART'],quantity=1,unit='pcs')])
   usages=self.s.material_usage(a['PART'])
   self.assertEqual(len(usages),4)
-  self.assertIn({'sku_id':None,'sku':'未包含在SKU中','parent':'LOOSE-1 独立'},usages)
+  self.assertIn({'sku_id':None,'sku':'未包含在SKU中','parent':'LOOSE1 独立'},usages)
   dialog=MaterialUsageDialog(self.material(a['PART']),usages)
   try:
    for i,usage in enumerate(usages):
