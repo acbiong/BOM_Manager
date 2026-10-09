@@ -25,7 +25,10 @@ class Services:
   def text(value):return '（空）' if value is None or value=='' else str(value)
   return '；'.join(f'{label}：{text(before.get(key))} → {text(after.get(key))}' for key,label in self.MATERIAL_FIELDS if before.get(key)!=after.get(key))
  def log(self,typ,obj,act,detail,snapshot=None):
-  if snapshot is None and typ=='material':snapshot=self.material_snapshot(obj)
+  if snapshot is None and typ in ('material','bom'):snapshot=self.material_snapshot(obj)
+  if snapshot is None and typ=='sku':
+   sku=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(obj,)).fetchone()
+   if sku:snapshot=self.material_snapshot(sku['material_id'])
   snapshot=snapshot or {}
   code=f"{snapshot['base_code']}{snapshot['version']}" if snapshot else None
   self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail,material_code,material_name) VALUES(?,?,?,?,?,?)',(typ,obj,act,detail,code,snapshot.get('name')))
@@ -175,6 +178,25 @@ class Services:
    for order,(key,values) in enumerate(desired.items()):
     parent,child,position=key; quantity,unit,remark=values
     self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?) ON CONFLICT(parent_material_id,child_material_id,position) DO UPDATE SET quantity=excluded.quantity,unit=excluded.unit,remark=excluded.remark,sort_no=excluded.sort_no,updated_at=CURRENT_TIMESTAMP',(parent,child,quantity,unit,position,remark,order))
+   # 只清理本次移除分支中不再被外部BOM或SKU使用的父物料结构。
+   candidates={row['material_id'] for row in old_rows}-retained
+   protected={r[0] for r in self.db.conn.execute('SELECT material_id FROM skus')}
+   remaining=list(self.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items'))
+   protected.update(row[1] for row in remaining if row[0] not in candidates)
+   pending=list(protected)
+   graph={}
+   for parent,child in remaining:graph.setdefault(parent,[]).append(child)
+   while pending:
+    parent=pending.pop()
+    for child in graph.get(parent,[]):
+     if child not in protected:protected.add(child);pending.append(child)
+   for parent in candidates-protected:
+    self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(parent,))
+    self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(parent,))
+    self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(parent,))
+    changed_parents.add(parent)
+   self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
+   self.db.conn.execute('DELETE FROM alternates WHERE NOT EXISTS (SELECT 1 FROM material_bom_items b WHERE b.id=alternates.bom_item_id)')
    for key,alternates in alternate_updates.items():
     relation=self.db.conn.execute('SELECT id FROM material_bom_items WHERE parent_material_id=? AND child_material_id=? AND position=?',key).fetchone()[0]
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(relation,))
@@ -446,7 +468,15 @@ class Services:
    # 历史快照明确记录的编码/版本可规范化，绝不按连字符盲目切分基础编码。
    code=legacy_codes.get(code,code)
    if code is None:
-    code='历史记录未保存';name=name or '历史记录未保存'
+    if row['object_type'] in ('bom','sku'):
+     # 旧BOM日志没有快照，仅显示当前可定位对象；已删除对象明确标识。
+     material_id=row['object_id']
+     if row['object_type']=='sku':
+      sku=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(material_id,)).fetchone();material_id=sku[0] if sku else None
+     current=self.material_snapshot(material_id) if material_id is not None else {}
+     code=current['base_code']+current['version'] if current else '已删除对象'
+     name=current.get('name','已删除对象')
+    else:code='历史记录未保存';name=name or '历史记录未保存'
    detail=re.sub(r'[；;][ \t]*','\n',detail)
    object_name={'material':'物料','bom':'BOM','sku':'SKU','project':'项目'}.get(row['object_type'],row['object_type'] or '')
    action_name={'create':'新建','update':'修改','delete':'删除','version':'版本变更'}.get(row['action'],row['action'] or '')
@@ -455,6 +485,7 @@ class Services:
    first,separator,remainder=detail.partition('\n')
    if first.strip() in prefixes:
     change_type=first.strip();detail=remainder if separator else ''
+   if row['object_type']=='material' and row['action']=='create':detail=''
    changed=row['changed_at'] or ''
    sheet.append([number,changed[:10],changed[11:],code,name,change_type,detail])
   self.format_export_sheet(sheet,{'序号','变更日期','变更时间'})

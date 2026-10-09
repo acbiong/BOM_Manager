@@ -37,7 +37,7 @@ class ExportSelectionTests(unittest.TestCase):
      self.assertEqual(sheet.cell(2,26).value,'备注内容');self.assertIsNone(sheet.cell(3,16).value)
      self.assertTrue(sheet.cell(2,25).alignment.wrap_text);self.assertEqual(sheet.cell(2,25).border.left.style,'thin')
      logs=list(wb['变更记录'].values);self.assertEqual(logs[0][-2:],('变更类型','变更详细内容'))
-     created=next(row for row in logs[1:] if row[5]=='新建物料');self.assertNotIn('新建物料',created[6]);self.assertIn('\n',created[6])
+     created=next(row for row in logs[1:] if row[5]=='新建物料');self.assertIsNone(created[6])
     finally:wb.close()
     bom=BomWindow(s,root);materials=MaterialWindow(s)
     try:
