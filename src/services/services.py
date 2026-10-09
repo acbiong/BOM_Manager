@@ -33,8 +33,8 @@ class Services:
   code=f"{snapshot['base_code']}{snapshot['version']}" if snapshot else None
   self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail,material_code,material_name) VALUES(?,?,?,?,?,?)',(typ,obj,act,detail,code,snapshot.get('name')))
  def materials(self,query=''):
-  # 自身有下阶仅决定has_bom；idle只检查是否为SKU或被其他BOM作为子项引用。
-  q=f'%{query}%'; return self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
+  # 自身有下阶仅决定has_bom；SKU、有效BOM主料或替代料引用均为非呆滞。
+  q=f'%{query}%'; return self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
  def create_material(self,d):
   if not all(d.get(k) for k in ('base_code','version','name')): raise ValueError('基础编码、版本号、名称为必填')
   if d.get('unit','pcs') not in self.UNITS: raise ValueError('单位不合规')
@@ -55,6 +55,7 @@ class Services:
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(i,)).fetchone(): raise ValueError('物料是SKU，请先删除SKU引用')
   r=self.db.conn.execute('SELECT COUNT(*) n FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)).fetchone();
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
+  if self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=?',(i,)).fetchone():raise ValueError('物料仍被BOM作为替代料引用，请先删除引用')
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
  def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,m.updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
