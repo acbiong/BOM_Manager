@@ -407,7 +407,7 @@ class Services:
   self.format_export_sheet(sheet,{'序号','单位','物料等级','M/P','是否存在BOM结构','是否为呆滞料'})
  def write_change_sheet(self,sheet,records):
   import re
-  sheet.append(['序号','变更日期','变更时间','变更物料编码','变更物料名称','变更详细内容'])
+  sheet.append(['序号','变更日期','变更时间','变更物料编码','变更物料名称','变更类型','变更详细内容'])
   legacy_codes={}
   for historical in self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id"):
    text=historical['detail'] or ''
@@ -427,25 +427,40 @@ class Services:
    if code is None:
     code='历史记录未保存';name=name or '历史记录未保存'
    detail=re.sub(r'[；;][ \t]*','\n',detail)
+   object_name={'material':'物料','bom':'BOM','sku':'SKU','project':'项目'}.get(row['object_type'],row['object_type'] or '')
+   action_name={'create':'新建','update':'修改','delete':'删除','version':'版本变更'}.get(row['action'],row['action'] or '')
+   change_type=action_name+object_name if row['action']!='version' else object_name+action_name
+   prefixes={'新建物料','修改物料','删除物料','创建SKU','新建SKU','修改BOM','删除SKU','创建物料'}
+   first,separator,remainder=detail.partition('\n')
+   if first.strip() in prefixes:
+    change_type=first.strip();detail=remainder if separator else ''
    changed=row['changed_at'] or ''
-   sheet.append([number,changed[:10],changed[11:],code,name,detail])
+   sheet.append([number,changed[:10],changed[11:],code,name,change_type,detail])
   self.format_export_sheet(sheet,{'序号','变更日期','变更时间'})
   sheet.auto_filter.ref=sheet.dimensions
  def write_bom_sheet(self,sheet,root):
   headers=['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','物料位置','用量','单位','物料等级','M/P','制造商','MPN','备注']
+  rows=self.bom(root)
+  alternates={row['id']:list(self.alternates(row['id'])) for row in rows}
+  count=max((len(values) for values in alternates.values()),default=0)
+  alternate_headers=[f'替代料{number}{field}' for number in range(1,count+1) for field in ('物料编码','版本号','名称','供应商','MPN')]
+  headers=headers[:-1]+alternate_headers+['备注']
   sheet.append(headers)
   materials={row['id']:row for row in self.materials()}
   counters={}; numbers={}
-  for row in self.bom(root):
+  for row in rows:
    parent_path=row['parent_node_id']
    counters[parent_path]=counters.get(parent_path,0)+1
    number=(numbers[parent_path]+'.' if parent_path else '')+str(counters[parent_path])
    numbers[row['node_id']]=number
    parent=materials[row['parent_material_id']]
-   sheet.append([number,row['level_no'],parent['base_code'],parent['version'],row['base_code'],row['version'],row['name'],row['description'],row['position'],row['quantity'],row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn'],row['remark']])
+   alternate_values=[value for alternate in alternates[row['id']] for value in (alternate['base_code'],alternate['version'],alternate['name'],alternate['manufacturer'],alternate['mpn'])]
+   alternate_values+=['']*(count*5-len(alternate_values))
+   sheet.append([number,row['level_no'],parent['base_code'],parent['version'],row['base_code'],row['version'],row['name'],row['description'],row['position'],row['quantity'],row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn']]+alternate_values+[row['remark']])
    sheet.cell(sheet.max_row,1).number_format='@'
    sheet.cell(sheet.max_row,10).number_format='0.0'
   centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
+  centered.update(f'替代料{number}版本号' for number in range(1,count+1))
   self.format_export_sheet(sheet,centered)
  def format_export_sheet(self,sheet,centered):
   from openpyxl.styles import Alignment, Border, Side, Font

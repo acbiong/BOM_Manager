@@ -11,6 +11,7 @@ from services.services import Services
 from ui.main_window import BomWindow
 from infrastructure.events import WindowRefreshBus
 
+from ui.main_window import MaterialSelectionDialog
 class BomUiTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls): cls.app=QApplication.instance() or QApplication([])
@@ -39,13 +40,13 @@ class BomUiTests(unittest.TestCase):
  def test_sibling_and_child_candidates_block_cycles(self):
   parent=self.w.root_item.child(0); child=parent.child(0)
   for selected,is_child in [(child,False),(parent,True)]:
-   with patch.object(QInputDialog,'getItem',return_value=('',False)) as dialog:
+   with patch.object(MaterialSelectionDialog,'getItem',return_value=('',False)) as dialog:
     self.w.add_relative(selected.data(0,Qt.UserRole),is_child)
     options=dialog.call_args.args[3]
     self.assertEqual([s.split()[0] for s in options],['OTHER1'])
  def test_new_child_quantity_and_export(self):
   parent=self.w.root_item.child(0)
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):
    self.w.add_relative(parent.data(0,Qt.UserRole),True)
   self.assertEqual(self.w.tree.currentItem().text(1),'1.0'); self.assertEqual(self.w.fields['quantity'].text(),'1.0')
   self.w.fields['quantity'].setValue(3.27)
@@ -60,7 +61,7 @@ class BomUiTests(unittest.TestCase):
   # CHILD已有下阶物料，添加为ROOT的另一个子项时再次展开同一关系。
   r,p,c,o,x=self.ids
   self.s.save_bom(c,[dict(material_id=o,quantity=1,unit='pcs')]); self.w.load()
-  with patch.object(QInputDialog,'getItem',return_value=('CHILD1 CHILD',True)):
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('CHILD1 CHILD',True)):
    self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   self.assertEqual(self.w.tree.currentItem().childCount(),1)
   with patch.object(QMessageBox,'information'), patch.object(QMessageBox,'warning') as warning:
@@ -114,7 +115,7 @@ class BomUiTests(unittest.TestCase):
  def test_shared_branches_have_distinct_nodes_and_full_children(self):
   r,p,c,o,x=self.ids
   self.s.save_bom(c,[dict(material_id=o,quantity=1,unit='pcs')]); self.w.load()
-  with patch.object(QInputDialog,'getItem',return_value=('CHILD1 CHILD',True)):
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('CHILD1 CHILD',True)):
    self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
   first=self.w.root_item.child(0).child(0); second=self.w.root_item.child(1)
@@ -161,7 +162,7 @@ class BomUiTests(unittest.TestCase):
   from ui.main_window import MaterialWindow
   r,p,c,o,x=self.ids
   self.s.save_bom(c,[dict(material_id=o,quantity=1,unit='pcs')]); self.w.load()
-  with patch.object(QInputDialog,'getItem',return_value=('CHILD1 CHILD',True)):
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('CHILD1 CHILD',True)):
    self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())
   other=BomWindow(self.s,x); materials=MaterialWindow(self.s)
@@ -282,7 +283,7 @@ class BomUiTests(unittest.TestCase):
   from PyQt5.QtCore import QPoint
   r,p,c,o,x=self.ids; node=self.w.root_item.child(0); relation=node.data(0,Qt.UserRole)['id']
   self.w.tree.setCurrentItem(node); self.w.show_item_info(node)
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
   self.assertEqual(self.w.alt_table.rowCount(),1); self.assertTrue(self.w.dirty)
   self.assertEqual(self.s.alternates(relation),[])
   self.w.show_item_info(self.w.root_item); self.w.show_item_info(node)
@@ -300,8 +301,8 @@ class BomUiTests(unittest.TestCase):
   self.assertEqual(self.s.alternates(relation),[])
  def test_new_unsaved_node_alternates_persist_transactionally(self):
   r,p,c,o,x=self.ids
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
-  with patch.object(QInputDialog,'getItem',return_value=('CHILD1 CHILD',True)):self.w.add_alternate()
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('CHILD1 CHILD',True)):self.w.add_alternate()
   self.assertEqual(self.w.alt_table.rowCount(),1)
   self.db.conn.execute("CREATE TEMP TRIGGER fail_alt BEFORE INSERT ON alternates BEGIN SELECT RAISE(ABORT,'替代料保存失败'); END")
   with patch.object(QMessageBox,'warning'):self.assertFalse(self.w.save())
@@ -336,7 +337,7 @@ class BomUiTests(unittest.TestCase):
   other=BomWindow(self.s,x); events=[]; WindowRefreshBus.subscribe(events.append)
   try:
    node=self.w.root_item.child(0); self.w.tree.setCurrentItem(node); self.w.show_item_info(node)
-   with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
+   with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
    with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
    self.assertEqual({e['root'] for e in events if e['type']=='bom_changed'},{r})
    self.assertFalse(other.refresh_action.isEnabled()); self.assertEqual(other.notice.text(),'')
@@ -344,7 +345,7 @@ class BomUiTests(unittest.TestCase):
    self.assertEqual(self.s.alternates(self.s.bom(r)[0]['id'])[0]['material_id'],o)
    # 修改共享PARENT下CHILD的替代料，真正变更的是PARENT的BOM。
    events.clear(); leaf=self.w.root_item.child(0).child(0); self.w.tree.setCurrentItem(leaf); self.w.show_item_info(leaf)
-   with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
+   with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
    with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
    self.assertEqual({e['root'] for e in events if e['type']=='bom_changed'},{p})
    self.assertTrue(other.refresh_action.isEnabled()); other.refresh_external()
@@ -385,11 +386,11 @@ class BomUiTests(unittest.TestCase):
   saved=self.s.bom(r); self.assertEqual(saved[0]['position'],'本地位置'); self.assertEqual(saved[1]['quantity'],6.7)
  def test_refresh_keeps_unsaved_nodes_descendants_and_alternates(self):
   r,p,c,o,x=self.ids
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   self.w.fields['position'].setText('新增位置')
-  with patch.object(QInputDialog,'getItem',return_value=('CHILD1 CHILD',True)):self.w.add_alternate()
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('CHILD1 CHILD',True)):self.w.add_alternate()
   added=self.w.tree.currentItem()
-  with patch.object(QInputDialog,'getItem',return_value=('CHILD1 CHILD',True)):self.w.add_relative(added.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('CHILD1 CHILD',True)):self.w.add_relative(added.data(0,Qt.UserRole),True)
   self.w.fields['quantity'].setValue(3.2)
   rows=[dict(row) for row in self.s.bom(p)]; rows[0]['quantity']=8.1; self.s.save_bom(p,rows)
   self.w.refresh_external(); self.w.refresh_external()
@@ -430,7 +431,7 @@ class BomUiTests(unittest.TestCase):
  def test_refresh_retains_descendant_alternate_when_parent_removed_externally(self):
   r,p,c,o,x=self.ids; leaf=self.w.root_item.child(0).child(0)
   self.w.tree.setCurrentItem(leaf); self.w.show_item_info(leaf)
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_alternate()
   self.s.save_bom(r,[]); self.w.refresh_external()
   leaf=self.w.root_item.child(0).child(0); self.w.show_item_info(leaf)
   self.assertEqual(self.w.alt_table.rowCount(),1); self.assertIn('冲突',self.w.statusBar().currentMessage())
@@ -439,7 +440,7 @@ class BomUiTests(unittest.TestCase):
   r,p,c,o,x=self.ids
   # 新增有子BOM的物料：自身和递归子孙全部绿色。
   self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   added=self.w.tree.currentItem()
   for node in [added,added.child(0)]:
    for column in range(self.w.tree.columnCount()):self.assertEqual(node.foreground(column).color(),QColor('green'))
@@ -510,7 +511,7 @@ class BomUiTests(unittest.TestCase):
   from PyQt5.QtGui import QColor
   r,p,c,o,x=self.ids
   self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   added=self.w.tree.currentItem(); self.w.fields['quantity'].setValue(4.2)
   child=added.child(0); self.w.show_item_info(child); self.w.fields['position'].setText('本地位置')
   self.w.show_item_info(self.w.root_item.child(0)); self.w.fields['quantity'].setValue(8.7)
@@ -535,7 +536,7 @@ class BomUiTests(unittest.TestCase):
   from PyQt5.QtGui import QColor
   r,p,c,o,x=self.ids
   self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   self.w.refresh_external()
   self.assertEqual(self.w.root_item.child(1).background(0).style(),Qt.NoBrush)
   self.assertEqual(self.w.root_item.child(1).child(0).background(0).style(),Qt.NoBrush)
@@ -553,7 +554,7 @@ class BomUiTests(unittest.TestCase):
   from PyQt5.QtGui import QColor
   r,p,c,o,x=self.ids
   self.s.save_bom(o,[dict(material_id=c,quantity=1,unit='pcs')])
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   self.w.remove_relation(self.w.tree.currentItem().child(0))
   rows=[dict(row) for row in self.s.bom(o)]; rows[0]['quantity']=6.3; self.s.save_bom(o,rows)
   self.w.refresh_external(); deleted=self.w.root_item.child(1).child(0)
@@ -564,7 +565,7 @@ class BomUiTests(unittest.TestCase):
   from PyQt5.QtGui import QColor
   r,p,c,o,x=self.ids
   self.s.save_bom(o,[dict(material_id=p,quantity=1,unit='pcs')]+[dict(row) for row in self.s.bom(p)])
-  with patch.object(QInputDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
+  with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):self.w.add_relative(self.w.root_item.data(0,Qt.UserRole),True)
   rows=[dict(row) for row in self.s.bom(p)]; rows[0]['quantity']=7.4; self.s.save_bom(p,rows)
   self.w.refresh_external(); self.w.refresh_external()
   saved_parent=self.w.root_item.child(0); draft=self.w.root_item.child(1)

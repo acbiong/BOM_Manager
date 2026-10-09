@@ -168,6 +168,25 @@ class MaterialImportResultDialog(QDialog):
   layout.addWidget(self.tabs,1)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok); buttons.accepted.connect(self.accept); layout.addWidget(buttons)
 
+def export_filename(text):
+ import re
+ return re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', text).strip().rstrip('.')+'.xlsx'
+
+class MaterialSelectionDialog(QInputDialog):
+ @staticmethod
+ def getItem(parent,title,label,items,current=0,editable=True):
+  dialog=MaterialSelectionDialog(parent); dialog.setWindowTitle(title); dialog.setLabelText(label)
+  dialog.setComboBoxItems(items); dialog.setComboBoxEditable(True); dialog.resize(650,160)
+  combo=dialog.findChild(QComboBox); combo.setInsertPolicy(QComboBox.NoInsert)
+  completer=QCompleter(items,dialog); completer.setCaseSensitivity(Qt.CaseInsensitive); completer.setFilterMode(Qt.MatchContains); completer.setCompletionMode(QCompleter.PopupCompletion); combo.setCompleter(completer)
+  combo.setCurrentIndex(-1); combo.lineEdit().setPlaceholderText('输入物料编码、版本或名称筛选')
+  dialog._valid_choices=set(items)
+  return (dialog.textValue(),True) if dialog.exec_()==QDialog.Accepted else ('',False)
+ def accept(self):
+  if self.textValue() not in self._valid_choices:
+   QMessageBox.warning(self,'请选择物料','请从筛选结果中选择物料，不能使用任意输入文字。');return
+  super().accept()
+
 class NewSkuDialog(QDialog):
  def __init__(self,svc,parent=None):
   super().__init__(parent); self.svc=svc; self.material_id=None; self.setWindowTitle('新建SKU'); self.resize(650,160)
@@ -345,7 +364,7 @@ class MainWindow(QMainWindow):
   self.activate_window(window)
   return window
  def export_materials(self):
-  p=QFileDialog.getSaveFileName(self,'导出物料库','物料库.xlsx','Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出物料库',export_filename(self.svc.project()['project_name']+' 物料库'),'Excel (*.xlsx)')[0]
   if p:self.svc.export_materials(p); QMessageBox.information(self,'完成','导出成功')
  def template(self):
   p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
@@ -655,7 +674,7 @@ class BomWindow(QMainWindow):
    if any(row['material_id'] in ancestors for row in self.svc.bom(candidate['id'])): blocked.add(candidate['id'])
   rows=[r for r in self.svc.materials() if r['id'] not in blocked]; items=[f"{r['base_code']}{r['version']} {r['name']}" for r in rows]
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
-  x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
+  x,ok=MaterialSelectionDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
   r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'_added':True,'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'grade':r['grade'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
   self.add_existing_children(item,r['id'],set())
@@ -684,7 +703,7 @@ class BomWindow(QMainWindow):
   rows=[row for row in self.svc.materials() if row['id']!=data.get('material_id') and row['id'] not in existing]
   if not rows: QMessageBox.information(self,'增加替代料','没有可选替代料'); return
   choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
-  choice,ok=QInputDialog.getItem(self,'增加替代料','选择物料',choices,0,False)
+  choice,ok=MaterialSelectionDialog.getItem(self,'增加替代料','选择物料',choices,0,False)
   if not ok:return
   self._alternate_edits[self.alternate_key(item)]=existing+[rows[choices.index(choice)]['id']]
   self.mark_dirty(); self.show_item_info(item)
@@ -734,7 +753,8 @@ class BomWindow(QMainWindow):
   self.render_tree(nodes); self.mark_dirty()
   self.notice.clear(); self.refresh_action.setEnabled(False); self.statusBar().clearMessage()
  def export_bom(self):
-  p=QFileDialog.getSaveFileName(self,'导出BOM','SKU_BOM.xlsx','Excel (*.xlsx)')[0]
+  material=self.svc.material_snapshot(self.root)
+  p=QFileDialog.getSaveFileName(self,'导出BOM',export_filename(material['base_code']+material['version']+' '+material['name']),'Excel (*.xlsx)')[0]
   if p:
    r=self.svc.db.conn.execute('SELECT id FROM skus WHERE material_id=?',(self.root,)).fetchone()
    if r:self.svc.export_sku(r['id'],p); QMessageBox.information(self,'完成','导出成功')
@@ -885,7 +905,7 @@ class MaterialWindow(QMainWindow):
     self.refresh(); MaterialImportResultDialog(ok,fail,self).exec_()
    except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
  def export_materials(self):
-  p=QFileDialog.getSaveFileName(self,'导出物料库','物料库.xlsx','Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出物料库',export_filename(self.svc.project()['project_name']+' 物料库'),'Excel (*.xlsx)')[0]
   if p:self.svc.export_materials(p)
  def template(self):
   p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
