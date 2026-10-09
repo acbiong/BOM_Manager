@@ -20,7 +20,7 @@ class MaterialFilterTests(unittest.TestCase):
  def tearDown(self):self.w.close(); self.db.close(); self.tmp.cleanup()
  def visible(self):return [self.w.t.item(i,0).text() for i in range(self.w.t.rowCount()) if not self.w.t.isRowHidden(i)]
  def test_combined_filters_refresh_empty_and_clear(self):
-  self.w._filters={4:('',{'pcs'}),5:('ALP',None)}; self.w.apply_filters(); self.assertEqual(self.visible(),['A'])
+  self.w._filters={4:('',{'pcs'}),6:('ALP',None)}; self.w.apply_filters(); self.assertEqual(self.visible(),['A'])
   self.s.create_material(dict(base_code='D',version='1',name='D',unit='pcs',manufacturer='Alpha')); self.assertEqual(self.visible(),['A','D'])
   self.w._filters[4]=('',set()); self.w.apply_filters(); self.assertEqual(self.visible(),[])
   self.w._filters.clear(); self.w.apply_filters(); self.assertEqual(self.visible(),['A','B','C','D'])

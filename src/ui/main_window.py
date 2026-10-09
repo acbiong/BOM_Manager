@@ -39,6 +39,7 @@ class MaterialDialog(QDialog):
    else: w=QLineEdit(str(data.get(k,'')))
    self.e[k]=w; f.addRow(l,w)
   self.unit=QComboBox(); self.unit.addItems(parent.svc.UNITS if parent is not None and hasattr(parent,'svc') else list(DEFAULT_MATERIAL_UNITS)); self.unit.setCurrentIndex(self.unit.findText(data.get('unit',self.unit.itemText(0)))); self.unit.setEnabled('unit' not in readonly_keys); f.addRow('单位',self.unit)
+  self.e['grade']=QLabel(str(data.get('grade',''))) if 'grade' in readonly_keys else QLineEdit(str(data.get('grade',''))); f.addRow('物料等级',self.e['grade'])
   self.mp_flag=QComboBox(); self.mp_flag.addItems(['M','P']); self.mp_flag.setCurrentText(data.get('mp_flag','M')); self.mp_flag.setEnabled('mp_flag' not in readonly_keys); f.addRow('M/P',self.mp_flag)
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self):
@@ -56,11 +57,12 @@ def choose_material_sheet(path,parent=None,kind='物料库'):
 
 class MaterialHeaderMappingDialog(QDialog):
  def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None):
-  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=required or ['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}
+  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=required or ['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}; self.optional=set() if required else {'物料等级'}
+  if not required:self.required.insert(self.required.index('单位')+1,'物料等级')
   layout=QVBoxLayout(self); layout.addWidget(QLabel('未能自动识别全部表头，请为每个需求字段选择文件中的对应列：'))
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
-   item=QTableWidgetItem(need); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
+   item=QTableWidgetItem(need); item.setToolTip('可选，未映射时使用空值' if need in self.optional else '必需映射'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
    combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems([header for header in headers if header.strip()])
    if need not in missing and need in headers: combo.setCurrentText(need)
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
@@ -121,7 +123,7 @@ class MaterialHeaderMappingDialog(QDialog):
   table.setFixedHeight(table.rowHeight(0)+table.rowHeight(1)+table.horizontalScrollBar().sizeHint().height()+2*table.frameWidth()+4)
  def mapping(self): return {need:self.combos[need].currentText().strip() if self.combos[need].currentIndex()>0 else '' for need in self.required}
  def validate_mapping(self):
-  values=self.mapping(); missing=[x for x in self.required if not values.get(x)]
+  values=self.mapping(); missing=[x for x in self.required if x not in self.optional and not values.get(x)]
   duplicates={x for x in values.values() if x and list(values.values()).count(x)>1}
   if missing or duplicates:
    detail=[]
@@ -133,10 +135,10 @@ class MaterialConflictDialog(QDialog):
  def __init__(self,incoming,existing,parent=None):
   super().__init__(parent); self.setWindowTitle('发现重复物料'); self.resize(1000,400); self.choice='cancel'
   layout=QVBoxLayout(self); title=QLabel('物料 '+incoming['物料基础编码']+incoming['物料版本号']+' 已存在。上行为数据库现有信息，下行为待导入信息；黄色单元格表示差异。'); title.setWordWrap(True); layout.addWidget(title)
-  fields=[('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('unit','单位'),('manufacturer','物料制造商'),('mpn','物料MPN')]
+  fields=[('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('manufacturer','物料制造商'),('mpn','物料MPN')]
   self.table=QTableWidget(2,len(fields)); self.table.setHorizontalHeaderLabels([label for _,label in fields]); self.table.setVerticalHeaderLabels(['现有数据库','目标导入']); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
   for column,(key,label) in enumerate(fields):
-   old=str(existing[key] or ''); new=incoming[label]
+   old=str(dict(existing).get(key,'') or ''); new=incoming.get(label,'')
    for row,value in enumerate((old,new)):
     item=QTableWidgetItem(value); item.setToolTip(value)
     if old!=new:item.setBackground(QColor('#ffe082')); item.setForeground(QColor('black'))
@@ -348,7 +350,7 @@ class MainWindow(QMainWindow):
  def template(self):
   p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
   if p:
-   from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.save(p)
+   from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN']); w.save(p)
 class BomImportIssuesDialog(QDialog):
  def __init__(self,error,parent=None):
   super().__init__(parent); self.setWindowTitle('BOM导入失败')
@@ -375,7 +377,7 @@ class BomWindow(QMainWindow):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
   self.tree=BomTreeWidget(); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
   self.fields={}; form=QFormLayout();
-  for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
+  for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('grade','物料等级'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
    w=QuantityEdit() if k=='quantity' else (QLineEdit() if k in ('position','remark') else QLabel()); self.fields[k]=w; form.addRow(l,w)
   self.fields['quantity'].valueChanged.connect(lambda value:self.update_tree_field('quantity',value))
   for key in ('position','remark'): self.fields[key].textChanged.connect(lambda value,k=key:self.update_tree_field(k,value))
@@ -482,7 +484,7 @@ class BomWindow(QMainWindow):
    if baseline is not None and not data.get('_deleted'):
     fresh=deepcopy(baseline); material=materials.get(data['material_id'])
     if material is not None:
-     for field in ('base_code','version','name','description','unit','manufacturer','mpn','mp_flag'):fresh['data'][field]=material[field]
+     for field in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag'):fresh['data'][field]=material[field]
      fresh['children']=self.database_tree(data['material_id'])
      def added(nodes):
       for child in nodes:
@@ -543,7 +545,7 @@ class BomWindow(QMainWindow):
   from copy import deepcopy
   fresh=self.database_tree(); conflicts=[]
   root=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone())
-  if any(root.get(k)!=self._root_baseline.get(k) for k in ('base_code','version','name','description','unit','manufacturer','mpn','mp_flag')):self._external_paths.add(())
+  if any(root.get(k)!=self._root_baseline.get(k) for k in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag')):self._external_paths.add(())
   self._root_baseline=root
   self.mark_external_differences(self._baseline_tree,fresh)
   local=self.refresh_drafts(self.capture_tree(),conflicts) if self.dirty else []
@@ -581,7 +583,7 @@ class BomWindow(QMainWindow):
    result.update(self.snapshot_map(node['children'],key))
   return result
  def remote_signature(self,node):
-  fields=('material_id','quantity','position','remark','base_code','version','name','description','unit','manufacturer','mpn','mp_flag','_db_alternates')
+  fields=('material_id','quantity','position','remark','base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag','_db_alternates')
   return [node['data'].get(k) for k in fields]
  def refresh_styles(self):
   if not hasattr(self,'root_item'):return
@@ -601,6 +603,7 @@ class BomWindow(QMainWindow):
    alternate_changed=self.alternate_key(item) in self._alternate_edits and self.alternate_ids(item)!=original.get('_db_alternates',[])
    if alternate_changed:changed.add(0)
    for column in range(self.tree.columnCount()):
+    if column==2:item.setTextAlignment(column,Qt.AlignCenter)
     font=QFont(self.tree.font()); font.setStrikeOut(bool(deleted)); font.setBold(column in changed and not deleted)
     item.setFont(column,font)
     color=QColor('red') if deleted else QColor('green') if added else QColor('#9a6700') if changed else None
@@ -654,14 +657,14 @@ class BomWindow(QMainWindow):
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=QInputDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'_added':True,'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'_added':True,'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'grade':r['grade'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
   self.add_existing_children(item,r['id'],set())
   self._draft_baselines[temporary_id]=self.capture_item(item)
   fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
  def add_existing_children(self,parent_item,material_id,ancestors):
   if material_id in ancestors:return
   ancestors=set(ancestors); ancestors.add(material_id)
-  rows=self.svc.db.conn.execute('SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN materials m ON m.id=b.child_material_id WHERE b.parent_material_id=? ORDER BY b.sort_no,b.id',(material_id,)).fetchall()
+  rows=self.svc.db.conn.execute('SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.grade,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN materials m ON m.id=b.child_material_id WHERE b.parent_material_id=? ORDER BY b.sort_no,b.id',(material_id,)).fetchall()
   parent_data=parent_item.data(0,Qt.UserRole) or {}
   for row in rows:
    if row['child_material_id'] in ancestors:continue
@@ -781,7 +784,7 @@ class MaterialWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._filters={}; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
-  menu=self.menuBar(); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(10); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
+  menu=self.menuBar(); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
   header=self.t.horizontalHeader(); header.setSectionsClickable(True); header.sectionClicked.connect(self.filter_menu); self.refresh()
  def filter_menu(self,column):
@@ -812,7 +815,7 @@ class MaterialWindow(QMainWindow):
  def edit_current(self,row,column):
   rs=self.svc.materials();
   if row<0 or row>=len(rs): return
-  r=rs[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
+  r=rs[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
   if dlg.exec_():
    try:self.svc.update_material(r['id'],dlg.data()); self.refresh()
    except Exception as e: QMessageBox.warning(self,'保存失败',str(e))
@@ -832,7 +835,7 @@ class MaterialWindow(QMainWindow):
   if a==v and v.isEnabled():
    self.change_version(rid)
   elif a==e:
-   r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
+   r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
    if dlg.exec_(): self.svc.update_material(rid,dlg.data()); self.refresh()
   elif a==d and d.isEnabled() and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
    try:self.svc.delete_material(rid); self.refresh()
@@ -887,7 +890,7 @@ class MaterialWindow(QMainWindow):
  def template(self):
   p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
   if p:
-   from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']); w.save(p)
+   from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN']); w.save(p)
  def on_event(self,event):
   if event.get('type') in ('material_changed','bom_changed','sku_changed'): self.refresh()
  def closeEvent(self,event):
@@ -897,8 +900,9 @@ class MaterialWindow(QMainWindow):
  def refresh(self):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
-   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]):
+   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]):
     item=QTableWidgetItem(str(v or ''))
+    if self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
     self.t.setItem(i,j,item)
   self.apply_filters(); fit_columns(self.t)

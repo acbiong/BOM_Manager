@@ -178,7 +178,7 @@ class BomUiTests(unittest.TestCase):
    self.assertEqual(self.s.bom(c),[])
    self.assertTrue(other.refresh_action.isEnabled()); other.refresh_external()
    self.assertFalse(any(row['material_id']==o for row in self.s.bom(x)))
-   flags={materials.t.item(i,0).text():materials.t.item(i,8).text() for i in range(materials.t.rowCount())}
+   flags={materials.t.item(i,0).text():materials.t.item(i,9).text() for i in range(materials.t.rowCount())}
    self.assertEqual(flags['CHILD'],'N')
    self.w.load(); self.assertEqual(self.w.root_item.child(1).childCount(),0)
   finally:
@@ -199,7 +199,7 @@ class BomUiTests(unittest.TestCase):
   def flags(): return {row['id']:row['idle'] for row in self.s.materials()}
   def assert_color(code,idle):
    index=next(i for i in range(materials.t.rowCount()) if materials.t.item(i,0).text()==code)
-   self.assertEqual(materials.t.item(index,9).text(),idle)
+   self.assertEqual(materials.t.item(index,10).text(),idle)
    for col in range(materials.t.columnCount()):
     self.assertEqual(materials.t.item(index,col).background().color()==QColor('red'),idle=='Y')
   try:
@@ -245,7 +245,7 @@ class BomUiTests(unittest.TestCase):
    flags={row['id']:row for row in self.s.materials()}
    self.assertEqual(flags[x]['has_bom'],'Y'); self.assertEqual(flags[x]['idle'],'Y')
    row=next(i for i,m in enumerate(self.s.materials()) if m['id']==x)
-   self.assertEqual(materials.t.item(row,9).text(),'Y')
+   self.assertEqual(materials.t.item(row,10).text(),'Y')
    for col in range(materials.t.columnCount()):self.assertEqual(materials.t.item(row,col).background().color(),QColor('red'))
    def choose(menu,pos):return next(action for action in menu.actions() if action.text()=='编辑物料BOM结构')
    with patch.object(materials.t,'rowAt',return_value=row),patch.object(QMenu,'exec_',choose):materials.menu(QPoint())
