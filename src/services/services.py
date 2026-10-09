@@ -395,12 +395,7 @@ class Services:
   c=wb.create_sheet('变更记录'); c.append(['序号','变更时间','变更详细内容','变更日期','变更时间'])
   for n,r in enumerate(self.db.conn.execute('SELECT * FROM change_logs ORDER BY id'),1): c.append([n,r['changed_at'],r['detail'],r['changed_at'][:10],r['changed_at'][11:]])
   for r in self.skus():
-   b=wb.create_sheet((r['base_code']+r['version'])[:31]); b.append(['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','用量','单位','M/P','制造商','MPN'])
-   for n,x in enumerate(self.bom(r['material_id']),1): b.append([n,x['level_no'],r['base_code'],r['version'],x['base_code'],x['version'],x['name'],x['description'],x['quantity'],x['unit'],x['mp_flag'],x['manufacturer'],x['mpn']])
-  for sheet in wb:
-   headers=[cell.value for cell in sheet[1]]
-   if '用量' in headers:
-    for row in sheet.iter_rows(min_row=2): row[headers.index('用量')].number_format='0.0'
+   self.write_bom_sheet(wb.create_sheet((r['base_code']+r['version'])[:31]),r['material_id'])
   wb.save(path)
  def export_materials(self,path):
   from openpyxl.styles import Alignment
@@ -418,11 +413,47 @@ class Services:
   for row in ws.iter_rows(min_row=2):
    for cell in row:cell.alignment=Alignment(wrap_text=True,vertical='top')
   wb.save(path)
+ def write_bom_sheet(self,sheet,root):
+  from openpyxl.styles import Alignment, Border, Side, Font
+  from openpyxl.utils import get_column_letter
+  import math, unicodedata
+  headers=['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','物料位置','用量','单位','物料等级','M/P','制造商','MPN','备注']
+  sheet.append(headers)
+  materials={row['id']:row for row in self.materials()}
+  counters={}; numbers={}
+  for row in self.bom(root):
+   parent_path=row['parent_node_id']
+   counters[parent_path]=counters.get(parent_path,0)+1
+   number=(numbers[parent_path]+'.' if parent_path else '')+str(counters[parent_path])
+   numbers[row['node_id']]=number
+   parent=materials[row['parent_material_id']]
+   sheet.append([number,row['level_no'],parent['base_code'],parent['version'],row['base_code'],row['version'],row['name'],row['description'],row['position'],row['quantity'],row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn'],row['remark']])
+   sheet.cell(sheet.max_row,1).number_format='@'
+   sheet.cell(sheet.max_row,10).number_format='0.0'
+  centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
+  edge=Side(style='thin',color='FF000000'); border=Border(left=edge,right=edge,top=edge,bottom=edge)
+  def width(text):return sum(2 if unicodedata.east_asian_width(char) in ('W','F') else 1 for char in text)
+  def display(cell):
+   if cell.value is None:return ''
+   if cell.column==10 and cell.row>1:return f'{cell.value:.1f}'
+   return str(cell.value)
+  widths={}
+  for column,header in enumerate(headers,1):
+   longest=max(width(line) for cells in sheet.iter_rows(min_col=column,max_col=column) for line in (display(cells[0]).split('\n')))
+   widths[column]=min(25,max(5,longest+2))
+   sheet.column_dimensions[get_column_letter(column)].width=widths[column]
+  for cells in sheet:
+   lines=1
+   for cell in cells:
+    cell.border=border
+    cell.alignment=Alignment(horizontal='center' if headers[cell.column-1] in centered else 'left',vertical='center',wrap_text=True)
+    if cell.row==1:cell.font=Font(bold=True)
+    lines=max(lines,sum(max(1,math.ceil(width(line)/max(1,widths[cell.column]-2))) for line in display(cell).split('\n')))
+   sheet.row_dimensions[cells[0].row].height=min(409,lines*16+6)
+  sheet.freeze_panes='A2'
  def export_sku(self,sid,path):
-  s=self.db.conn.execute('SELECT s.*,m.* FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone(); wb=Workbook(); w=wb.active; w.title='变更记录'; w.append(['序号','变更时间','变更详细内容','变更日期','变更时间']); b=wb.create_sheet('SKU对应的BOM'); b.append(['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','用量','单位','M/P','制造商','MPN']);
-  for n,r in enumerate(self.bom(s['material_id']),1): b.append([n,r['level_no'],s['base_code'],s['version'],r['base_code'],r['version'],r['name'],r['description'],r['quantity'],r['unit'],r['mp_flag'],r['manufacturer'],r['mpn']])
-  for sheet in wb:
-   headers=[cell.value for cell in sheet[1]]
-   if '用量' in headers:
-    for row in sheet.iter_rows(min_row=2): row[headers.index('用量')].number_format='0.0'
+  sku=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
+  if sku is None:raise ValueError('SKU不存在')
+  wb=Workbook(); w=wb.active; w.title='变更记录'; w.append(['序号','变更时间','变更详细内容','变更日期','变更时间'])
+  self.write_bom_sheet(wb.create_sheet('SKU对应的BOM'),sku['material_id'])
   wb.save(path)

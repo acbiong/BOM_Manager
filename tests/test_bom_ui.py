@@ -55,7 +55,7 @@ class BomUiTests(unittest.TestCase):
   self.w.load(); self.assertEqual(self.w.root_item.child(0).child(1).text(1),'3.3')
   from openpyxl import load_workbook
   sid=self.s.create_sku(self.ids[0]); path=Path(self.tmp.name)/'bom.xlsx'; self.s.export_sku(sid,path)
-  wb=load_workbook(path); self.assertEqual(wb['SKU对应的BOM'].cell(2,9).number_format,'0.0'); wb.close()
+  wb=load_workbook(path); self.assertEqual(wb['SKU对应的BOM'].cell(2,10).number_format,'0.0'); wb.close()
  def test_shared_sub_bom_save_twice_and_edit(self):
   # CHILD已有下阶物料，添加为ROOT的另一个子项时再次展开同一关系。
   r,p,c,o,x=self.ids
