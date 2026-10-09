@@ -242,7 +242,7 @@ class MainWindow(QMainWindow):
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.triggered.connect(self.new_sku)
   self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
-  self.project_label=QLabel(); self.project_label.setAlignment(Qt.AlignRight|Qt.AlignVCenter); self.project_label.setStyleSheet('font-weight:bold;padding:0 8px;'); corner=QWidget(); corner_layout=QHBoxLayout(corner); corner_layout.setContentsMargins(0,0,4,0); corner_layout.addWidget(self.project_label)
+  corner=QWidget(); corner_layout=QHBoxLayout(corner); corner_layout.setContentsMargins(0,0,4,0)
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
@@ -254,7 +254,7 @@ class MainWindow(QMainWindow):
  def toggle_theme(self):self.set_theme(not bool(QApplication.instance().property('bom_dark_theme')))
  def refresh(self):
   project=self.svc.project(); name=(project['project_name'] or '').strip(); title=f'{name} BOM管理系统' if name and name!='请输入项目名称' else 'BOM管理系统'
-  self.project_label.setText(title); self.project_label.setToolTip(title); self.setWindowTitle(title)
+  self.setWindowTitle(title)
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
