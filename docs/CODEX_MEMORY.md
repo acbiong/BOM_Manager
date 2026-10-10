@@ -83,3 +83,4 @@
 - 新增.github/workflows/build-desktop.yml，可手动/标签触发Ubuntu24.04与Windows Server2022构建。未自动push或远程执行工作流。
 - 收尾支持BOM_RELEASE_VERSION指定准确版本，本轮请求0.5.0；默认仍补丁递增。
 - 当前机器没有Windows原生构建环境，Windows EXE生成及Windows10/11、Ubuntu桌面验收是明确待完成事项，不要宣称已经验证。实际Linux本轮验证看test_reports和最终产物。
+- 0.5.0收尾进一步使用.tmp/package_success_commit匹配HEAD确认打包成功；post-commit失败不影响git commit返回码，必须额外检查标记。Linux ldd审计模拟bootloader的_internal库搜索路径。

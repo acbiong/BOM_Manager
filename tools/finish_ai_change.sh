@@ -39,4 +39,8 @@ fi
 mkdir -p .tmp
 printf '%s\n' "$requested_message" > .tmp/ai_commit_message.txt
 git commit --file .tmp/ai_commit_message.txt
-echo '[ai-finish] 已完成测试、版本升级和Git提交；post-commit将继续生成AppImage。'
+if [ "$(cat .tmp/package_success_commit 2>/dev/null || true)" != "$(git rev-parse HEAD)" ]; then
+ echo '[ai-finish] Git提交已完成，但未确认本次打包成功。请检查构建日志；不得将其视为发布完成。' >&2
+ exit 1
+fi
+echo '[ai-finish] 已完成测试、版本升级、Git提交及平台打包。'
