@@ -1,19 +1,184 @@
 # BOM管理系统
 
-规格书见 [`docs/软件开发规格书.md`](docs/软件开发规格书.md)。当前阶段完成需求梳理和开发规格定义，当前版本由 `VERSION` 文件管理，采用三段式版本号。
+Python + PyQt5 桌面 BOM 管理工具，使用本地 SQLite，无需 MySQL 服务。支持 SKU、共享物料子 BOM、替代料、Excel 导入导出、物料查找、版本和变更记录管理。
 
-项目计划使用 Python + PyQt + SQLite 开发，源代码、打包、文档、测试和测试报告分别位于对应目录。后续实现应先按规格书第 8 节接口和第 9 节追踪矩阵建立测试，再进行模块开发。
+- 源码仓库：<https://github.com/acbiong/BOM_Manager>
+- 软件版本以 [`VERSION`](VERSION) 为准；关于窗口显示随包保存的 Git 提交信息。
+- 开发要求：[软件开发规格书](docs/软件开发规格书.md)、[需求追踪审计](docs/需求追踪审计报告.md)。
+- 继续开发前必读：[Codex项目记忆](docs/CODEX_MEMORY.md)。这是可迁移的项目交接记录，不是 Codex 内部状态或完整聊天记录。
 
-当前开发审计见 [`docs/需求追踪审计报告.md`](docs/需求追踪审计报告.md)。每次实现或修复必须同步更新追踪表、测试和审计报告。
+## 1. 获取源码与适用环境
 
-构建和编译产生的临时文件统一位于项目根目录 `.tmp/`，包括 PyInstaller 的 `build`、`dist`、`spec` 和 AppImage 的 `AppDir`；该目录已加入 `.gitignore`。`package/` 仅保留最终发布包及校验文件。
+推荐在 **deepin 25 x86_64、Python 3.12** 上运行和构建。当前源码含 Python 3.12 的语法，Python 3.11 及更早版本不适用。AppImage 脚本面向 Linux x86_64；不承诺跨架构或在更旧 glibc 系统上运行。
 
-## 自动编译打包
+```bash
+git clone https://github.com/acbiong/BOM_Manager.git
+cd BOM_Manager
+```
 
-每次功能修改或修复完成后，在项目根目录执行 `tools/release.sh`。脚本会自动递增补丁版本号、执行需求追踪审计、运行全部测试、编译检查、PyInstaller 打包、动态库可迁移性检查并生成 SHA256 文件。每次测试都会在 `test_reports/` 生成带时间戳的完整报告。可传入 `minor` 或 `major` 进行对应版本升级。
+也可复制完整源码目录或解压源码 ZIP，路径可自行选择，包含中文和空格时需加引号。不要复制旧电脑的 `.venv`、`.tmp`；应重新安装依赖。建议 clone 保留提交历史。ZIP 不含 `.git` 时可直接运行/手动构建，但关于窗口无法提供原提交详情，自动提交流程需先初始化仓库：
 
-AI 编程完成后执行 `tools/finish_ai_change.sh`，脚本会一次性完成测试、需求审计、编译校验、补丁版本升级和 Git 提交，提交钩子随后生成新的 AppImage。可将准确的提交描述作为第一个参数传入，例如 `tools/finish_ai_change.sh '修复：调整BOM窗口按钮状态'`；未传入时会根据实际变更文件自动生成变更类型和内容。该流程不运行常驻监视进程，不增加系统后台负担。
+```bash
+git init
+git config user.name "你的姓名"
+git config user.email "你的邮箱"
+git add .
+git commit -m "初始化导入的BOM管理系统源码"
+```
 
-AI每次修改完成后，应在 `.tmp/` 写入提交说明文件（标题、具体变更、验证结果），执行 `tools/finish_ai_change.sh --message-file .tmp/change_message.txt`。脚本不再生成泛化提交描述，仍自动测试、升级版本、提交和打包。测试报告保存在 `test_reports/`。
+## 2. 安装系统和 Python 依赖
 
-测试报告仍输出到 `test_reports/`，该目录已被 Git 忽略，仅保存在本地，不参与提交。物料库“是否为呆滞料”按任意BOM的引用判断（含独立BOM）；被引用的物料及SKU根物料显示N，其余显示Y并标红。非呆滞料禁止从物料库删除，支持右键“物料反查”。
+以下命令适用于 deepin/Debian 系列，需 sudo 权限和网络。其他发行版需安装同类 Qt/X11 动态库。
+
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates python3 python3-venv python3-pip \
+  build-essential binutils file squashfs-tools patchelf fonts-dejavu-core \
+  libgl1 libegl1 libxkbcommon-x11-0 libxcb-xinerama0 libxcb-cursor0 \
+  libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+  libxcb-randr0 libxcb-shape0 libxcb-xfixes0 libdbus-1-3 libfontconfig1
+python3 --version
+```
+
+确认 Python 为 3.12 或更新的兼容版本，再创建独立环境：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+python3 -m pip check
+```
+
+依赖含 PyQt5（界面）、openpyxl（Excel）、PyInstaller（打包）、Pillow（生成打包图标）；SQLite 属于 Python 标准库。当前开发环境已使用 PyQt5 5.15.10、openpyxl 3.1.5、PyInstaller 6.22.3、Pillow 11.3.0。`requirements.txt` 使用最低版本约束，并非锁定环境；升级依赖后须重新测试。
+
+每次开启新终端先进入项目并执行 `. .venv/bin/activate`。所有脚本调用 `python3`，因此 Git 提交钩子也必须继承已激活的虚拟环境。
+
+## 3. 运行源码
+
+在有桌面显示服务的终端中执行：
+
+```bash
+python3 src/main.py
+```
+
+首次启动选择“新建数据库”并指定文件名，或选用现有本软件 SQLite 数据库。源码模式的 `config.ini` 位于项目根目录，数据库位置保存在其中；复制旧配置时需重新选择新电脑上的数据库路径。同一软件目录只能运行一个实例。
+
+配置与业务数据库被 Git 忽略，不随 clone 迁移。需要迁移业务数据时，先关闭软件，再单独复制数据库和配置，并在新机核对路径。界面主题、导出路径等部分偏好保存在 Qt 的 `Biong/BOMManager` 用户设置中，不属于源码。
+
+## 4. 测试和检查
+
+```bash
+mkdir -p test_reports .tmp package
+tools/run_tests.sh
+```
+
+流程包含 137 项需求追踪编号审计、unittest 回归、源码编译校验。报告写入 `test_reports/`，编译临时文件在 `.tmp/`；两者均不提交 Git。Qt 测试使用离屏模式，无需真实桌面，但单实例测试需要本地 socket 权限；若 Codex 沙箱阻止 QLocalServer，允许该测试命令使用适当权限重跑，不要删掉测试。
+
+回归通过不等于真实桌面验收：仍需在目标电脑双击 AppImage，检查数据库选择、Excel 导入导出和窗口交互。
+
+## 5. 安装 AppImage 打包工具
+
+```bash
+mkdir -p "$HOME/.local/bin"
+curl -fL https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+  -o "$HOME/.local/bin/appimagetool"
+curl -fL https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64 \
+  -o "$HOME/.local/bin/runtime-x86_64"
+chmod +x "$HOME/.local/bin/appimagetool" "$HOME/.local/bin/runtime-x86_64"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+下载的是官方 continuous 构建，会随上游更新。2026-10-10 校验的 runtime SHA256 为 `156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074`，与当前脚本所需提取分支匹配。脚本会检查该分支；若提示“无法定位 AppImage runtime 的提取分支”，须适配或使用已验证的 runtime，不能跳过校验。可用 `APPIMAGE_RUNTIME` 指定其他路径，保留已验证工具和 SHA256 有助于后续复现。
+
+当前包默认采用解压运行策略，目标机器通常不需要 FUSE；工具本身通过 `APPIMAGE_EXTRACT_AND_RUN=1` 运行。仍需要同架构 Linux 的基础图形系统及可写临时目录。
+
+## 6. 手动构建 AppImage（不提交、不升版）
+
+```bash
+. .venv/bin/activate
+export PATH="$HOME/.local/bin:$PATH"
+APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE_RUNTIME="$HOME/.local/bin/runtime-x86_64" \
+  tools/build_appimage.sh
+```
+
+脚本执行测试、生成 Git 构建信息、PyInstaller 编译、图标和 AppDir 构建，输出：
+
+- `package/BOM_Manager_<版本>_<日期时间>.AppImage`
+- 同名 `.AppImage.sha256`
+- 临时目录 `.tmp/build`、`.tmp/dist`、`.tmp/spec`、`.tmp/AppDir` 及 `.tmp/build_info.json`
+
+检查并运行生成的具体文件（替换示例路径）：
+
+```bash
+sha256sum -c package/BOM_Manager_版本_日期时间.AppImage.sha256
+chmod +x package/BOM_Manager_版本_日期时间.AppImage
+./package/BOM_Manager_版本_日期时间.AppImage
+```
+
+AppImage 可复制到另一台 deepin 25 x86_64 电脑，目标机无需安装 Python。可写的 AppImage 所在目录用于便携配置，否则回退用户配置目录。建议先从终端运行一次检查输出，再验证双击。
+
+`tools/build.sh`、`tools/release.sh` 是旧的独立 ELF 构建入口，不能替代当前 AppImage 流程。不要使用 `watch_source.sh` 启动常驻源码监控。
+
+## 7. 开发收尾：测试、升版、提交、打包
+
+首次 clone/复制后需重新启用钩子，Git 配置不会随源码自动安装：
+
+```bash
+git config user.name "你的姓名"
+git config user.email "你的邮箱"
+sh tools/enable_auto_packaging.sh
+```
+
+若复制丢失执行权限，可执行 `chmod +x tools/*.sh .githooks/*`。源码每次修改完成后，先检查 `git diff`，确认没有混入无关修改，再填写本次实际变更说明：
+
+```bash
+mkdir -p .tmp
+cat > .tmp/change_message.txt <<'MESSAGE'
+修复(模块)：具体问题及修复行为
+
+- 本次变更点。
+- 测试内容及验证结果。
+MESSAGE
+tools/finish_ai_change.sh --message-file .tmp/change_message.txt
+```
+
+流程：测试/审计/编译 → 补丁版本自动升级 → `git add -A` → Git 提交 → post-commit 生成 AppImage。不要再单独升版或重复提交；不要只填“AI自动完成更新”等泛化描述。Git 提交不会自动 push。
+
+若提交后打包失败，提交可能已经完成；先看 `git log -1`、日志和 `package/`，修复构建环境后运行手动 AppImage 构建，不要为了重试打包再次升版。缺少 appimagetool/runtime 时钩子可能跳过打包，须确认实际产物，不能仅凭提交成功宣称已打包。
+
+## 8. 在另一台电脑继续使用 Codex
+
+先完成源码、虚拟环境和构建工具安装。按 [OpenAI 官方 Codex CLI 文档](https://developers.openai.com/codex/cli/) 安装和登录（核对日期：2026-10-10）：
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/codex-install.sh
+# 阅读安装脚本后执行：
+sh /tmp/codex-install.sh
+```
+
+按安装输出配置 PATH，重新打开终端后进入项目：
+
+```bash
+cd /你的路径/BOM_Manager
+. .venv/bin/activate
+export PATH="$HOME/.local/bin:$PATH"
+codex
+```
+
+首次启动按提示登录自己的 ChatGPT 账户或其他可用认证方式。Codex 账户、登录凭证、权限审批与旧机器的聊天记录不会随 Git 仓库迁移；不要将密钥、登录文件提交到项目。`codex resume` 用于恢复当前机器已有会话，不会自动恢复另一台机器的历史。
+
+给新会话发送以下交接提示，并附上你的新需求：
+
+> 请先阅读 docs/CODEX_MEMORY.md、README.md、docs/软件开发规格书.md、docs/需求追踪审计报告.md，检查 git status、VERSION 和最近提交。按照项目约定继续开发：SQLite/PyQt5、保留未保存的BOM缓存、修改后执行测试与需求审计，使用详细提交说明运行 tools/finish_ai_change.sh，核验 AppImage 和 SHA256；不得启动常驻监控。将本轮重要结论和未完成事项更新到 docs/CODEX_MEMORY.md。我的新需求是：……
+
+跨机恢复以项目文件和当前 Git 状态为准，不依赖旧会话隐藏状态。无需为本项目迁移旧电脑的 Codex 私有配置或技能；遇到环境和权限差异应根据本机实际状态处理。
+
+## 9. 常见问题
+
+- `SyntaxError`：检查 Python 是否为 3.12+，虚拟环境是否激活。
+- `No module named PIL/PyQt5/...`：使用当前虚拟环境的 `python3 -m pip install -r requirements.txt`。
+- Qt `xcb` 插件无法加载：确认图形桌面及上述系统库，必要时用 `QT_DEBUG_PLUGINS=1 python3 src/main.py` 查看缺失库。不要把 `QT_QPA_PLATFORM=offscreen` 用于正常桌面运行。
+- 新电脑测试路径错误：测试应使用仓库相对路径，禁止写死旧机器 `/home/biong` 路径。
+- 打包慢：PyInstaller 和 AppImage 压缩耗时正常；临时文件均在 `.tmp/`，构建期间不要删除。
+- Git 不自动打包：检查 `git config core.hooksPath` 是否为 `.githooks`、工具是否安装、虚拟环境和 PATH 是否正确；无常驻监控进程。

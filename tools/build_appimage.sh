@@ -7,7 +7,7 @@ BUILD_DIR="$TMP_DIR/build"
 DIST_DIR="$TMP_DIR/dist"
 SPEC_DIR="$TMP_DIR/spec"
 APPDIR="$TMP_DIR/AppDir"
-mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
+mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR" "$ROOT/package"
 tools/run_tests.sh
 rm -rf "$APPDIR"
 ver=$(cat VERSION); stamp=$(date +%Y%m%d_%H%M%S); name="BOM_Manager_${ver}_${stamp}"

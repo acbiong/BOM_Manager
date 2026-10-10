@@ -43,7 +43,7 @@ class ExportSelectionTests(unittest.TestCase):
     bom=BomWindow(s,root);materials=MaterialWindow(s)
     try:
      with patch.object(QFileDialog,'getSaveFileName',return_value=('','')) as chooser:
-      bom.export_bom();self.assertEqual(chooser.call_args.args[2],'/home/biong/Documents/code/BOM管理系统/BC-100 SKU名称.xlsx')
-      materials.export_materials();self.assertEqual(chooser.call_args.args[2],'/home/biong/Documents/code/BOM管理系统/项目甲 物料库.xlsx')
+      bom.export_bom();self.assertEqual(chooser.call_args.args[2],str(Path(__file__).resolve().parents[1]/'BC-100 SKU名称.xlsx'))
+      materials.export_materials();self.assertEqual(chooser.call_args.args[2],str(Path(__file__).resolve().parents[1]/'项目甲 物料库.xlsx'))
     finally:bom.close();materials.close()
    finally:db.close()
