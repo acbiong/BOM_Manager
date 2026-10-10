@@ -29,3 +29,6 @@ AppDir/
 
 # 测试报告仅在本地保存，不纳入版本控制
 /test_reports/
+
+# Windows单文件发布产物
+package/*.exe

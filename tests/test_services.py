@@ -4,7 +4,9 @@ sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from database.database import Database
 from services.services import Services,MaterialHeaderError
 class TestServices(unittest.TestCase):
- def setUp(self): self.f=tempfile.NamedTemporaryFile(suffix='.db'); self.s=Services(Database(self.f.name))
+ def setUp(self):
+  from types import SimpleNamespace
+  self.tmp=tempfile.TemporaryDirectory(); self.f=SimpleNamespace(name=str(Path(self.tmp.name)/'bom.db')); self.s=Services(Database(self.f.name)); self.addCleanup(self.tmp.cleanup); self.addCleanup(self.s.db.close)
  def test_material_unique_and_sku(self):
   i=self.s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'})
   with self.assertRaises(Exception): self.s.create_material({'base_code':'A','version':'1','name':'dup','unit':'pcs'})

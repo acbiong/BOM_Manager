@@ -61,7 +61,7 @@
 
 ## 构建和迁移注意
 
-- PyInstaller采用onefile；构建后复制进入AppDir生成AppImage，程序资源经_MEIPASS读取。
+- 0.5.0起Linux采用onedir放入AppDir，外部仍为单个AppImage；Windows原生构建onefile EXE。程序资源经_MEIPASS读取。
 - build_info.json在post-commit构建阶段生成，避免显示上次提交；VERSION也随包嵌入。不要把生成的JSON提交到源码。
 - AppImage runtime有默认解压分支补丁；上游二进制更新可能不兼容，脚本会拒绝不识别的runtime，禁止盲目去掉校验。
 - AppImage配置优先可写的软件目录，否则用户配置目录；不要写只读挂载目录。业务数据库/INI需单独备份迁移。
@@ -74,3 +74,12 @@
 - 查看diff，完成相关测试，更新规格/审计及本文重大事实，写详细提交说明，再执行收尾。
 - 核对VERSION、git log、git status、package产物和SHA256；失败要如实报告，并区分已提交但打包失败。
 - 当前无被确认但尚未实现的用户功能请求；目标新电脑上的全新系统安装、图形双击和人工业务验收仍需在该电脑执行。不要把本机隔离路径测试宣称为真实新机器验证。
+
+
+## 0.5.0平台改造交接
+
+- Windows单实例改用msvcrt非阻塞文件锁；Linux继续fcntl。Windows配置优先可写exe目录，回退LOCALAPPDATA，错误日志采用系统临时目录。
+- tools/build_windows.py为Windows x64原生EXE构建；tools/run_tests.py为跨平台测试入口；Linux增加ELF/glibc<=2.38检查和发布自检。
+- 新增.github/workflows/build-desktop.yml，可手动/标签触发Ubuntu24.04与Windows Server2022构建。未自动push或远程执行工作流。
+- 收尾支持BOM_RELEASE_VERSION指定准确版本，本轮请求0.5.0；默认仍补丁递增。
+- 当前机器没有Windows原生构建环境，Windows EXE生成及Windows10/11、Ubuntu桌面验收是明确待完成事项，不要宣称已经验证。实际Linux本轮验证看test_reports和最终产物。

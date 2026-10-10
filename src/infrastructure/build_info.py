@@ -12,7 +12,7 @@ def collect_build_info(root):
     def git(*args):
         try:
             return subprocess.check_output(['git', '-C', str(root), *args],
-                stderr=subprocess.DEVNULL, text=True, timeout=3).strip()
+                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=3).strip()
         except (OSError, subprocess.SubprocessError):
             return ''
     remote = git('remote', 'get-url', 'origin')

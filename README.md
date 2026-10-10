@@ -9,7 +9,7 @@ Python + PyQt5 桌面 BOM 管理工具，使用本地 SQLite，无需 MySQL 服�
 
 ## 1. 获取源码与适用环境
 
-推荐在 **deepin 25 x86_64、Python 3.12** 上运行和构建。当前源码含 Python 3.12 的语法，Python 3.11 及更早版本不适用。AppImage 脚本面向 Linux x86_64；不承诺跨架构或在更旧 glibc 系统上运行。
+Linux 推荐在 **deepin 25 / Ubuntu 24.04 x86_64、Python 3.12** 上构建；新增 Windows 10/11 x64 原生构建入口。当前源码含 Python 3.12 的语法，Python 3.11 及更早版本不适用。AppImage 脚本面向 Linux x86_64；不承诺跨架构或在更旧 glibc 系统上运行。
 
 ```bash
 git clone https://github.com/acbiong/BOM_Manager.git
@@ -143,7 +143,9 @@ MESSAGE
 tools/finish_ai_change.sh --message-file .tmp/change_message.txt
 ```
 
-流程：测试/审计/编译 → 补丁版本自动升级 → `git add -A` → Git 提交 → post-commit 生成 AppImage。不要再单独升版或重复提交；不要只填“AI自动完成更新”等泛化描述。Git 提交不会自动 push。
+可用 `BOM_RELEASE_VERSION=0.5.0 tools/finish_ai_change.sh --message-file .tmp/change_message.txt` 指定本次准确版本；不指定时仍自动升补丁号。
+
+流程：测试/审计/编译 → 版本升级 → `git add -A` → Git 提交 → post-commit 生成 AppImage。不要再单独升版或重复提交；不要只填“AI自动完成更新”等泛化描述。Git 提交不会自动 push。
 
 若提交后打包失败，提交可能已经完成；先看 `git log -1`、日志和 `package/`，修复构建环境后运行手动 AppImage 构建，不要为了重试打包再次升版。缺少 appimagetool/runtime 时钩子可能跳过打包，须确认实际产物，不能仅凭提交成功宣称已打包。
 
@@ -182,3 +184,41 @@ codex
 - 新电脑测试路径错误：测试应使用仓库相对路径，禁止写死旧机器 `/home/biong` 路径。
 - 打包慢：PyInstaller 和 AppImage 压缩耗时正常；临时文件均在 `.tmp/`，构建期间不要删除。
 - Git 不自动打包：检查 `git config core.hooksPath` 是否为 `.githooks`、工具是否安装、虚拟环境和 PATH 是否正确；无常驻监控进程。
+
+
+## 10. 0.5.0 跨平台发布
+
+### Linux：deepin 25 / Ubuntu 24.04 及更新系统（x86_64）
+
+AppImage内部改用PyInstaller目录模式，外部仍只有一个AppImage文件，避免AppImage与onefile双重解压。构建会检查所有ELF的x86_64架构、缺失动态库及所需glibc符号不高于2.38（deepin25基线；Ubuntu24.04为2.39）。这不是对所有未来Ubuntu版本/驱动组合的保证。Ubuntu Wayland桌面通常通过XWayland运行Qt xcb；需保留系统图形栈，不在包内替换glibc和图形驱动。
+
+新增 `test_reports/linux_bundle_audit.json` 和包自检报告。自检使用临时数据库，检查Qt主窗口/物料库/BOM/关于、SQLite、Excel及单实例。构建结束会自动运行离屏自检；目标桌面仍需验收。
+
+### Windows：生成单个EXE
+
+须在 **Windows 10/11 x64 + 64位Python 3.12** 原生构建，Linux上的PyInstaller不能直接生成Windows EXE。安装Python时启用PATH，在PowerShell中：
+
+```powershell
+cd C:\你的路径\BOM_Manager
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe tools\build_windows.py
+```
+
+脚本执行全量测试、版本/提交信息嵌入、ICO图标生成、`--onefile --windowed`编译、EXE启动自检和SHA256生成。产物为`package/BOM_Manager_版本_日期时间_windows_x64.exe`，无需目标机安装Python，相关Qt/VC运行库由PyInstaller依赖收集处理。构建失败或自检失败不能作为有效发布。
+
+```powershell
+Get-FileHash .\package\BOM_Manager_版本_日期时间_windows_x64.exe -Algorithm SHA256
+.\package\BOM_Manager_版本_日期时间_windows_x64.exe
+```
+
+EXE优先使用可写同目录配置；安装目录不可写时回退`%LOCALAPPDATA%\BOM管理系统`。单实例使用Windows文件锁和Qt本地通信；无需管理员身份运行。发行EXE暂未配置代码签名证书，下载文件可能触发Windows SmartScreen/杀毒软件信誉提示，不能保证所有设备均无提示双击启动，不应关闭系统防护规避。
+
+### CI及目标系统验证状态
+
+`.github/workflows/build-desktop.yml`提供Ubuntu24.04与Windows Server2022构建任务，可在GitHub Actions手动触发，或推送`v*`标签触发。运行结束下载各job的artifact包和测试报告；workflow本身不发布Release、不自动push源码。Windows Server构建自检不能替代Windows10/11的人工桌面验证。
+
+当前开发主机为deepin，无Windows原生构建器。本轮本机可交付AppImage；Windows EXE及Ubuntu/Windows目标系统验收需在相应构建器执行后确认，不能把新增脚本/工作流误认为已经生成并验收EXE。
+
+发布前在deepin25、Ubuntu24.04、Windows10、Windows11逐项确认：新用户无Python环境双击、中文/空格安装路径、只读安装目录回退、首次新建/选择数据库、重复启动激活、Excel导入导出、共享BOM保存刷新、退出重开及关于中的版本/提交匹配。验收记录保存test_reports，不提交业务数据库。

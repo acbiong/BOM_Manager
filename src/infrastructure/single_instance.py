@@ -1,8 +1,12 @@
 """按软件实际目录互斥启动；内核锁随进程退出释放，本地套接字负责激活窗口。"""
 import errno
-import fcntl
-import hashlib
 import os
+import tempfile
+if os.name == "nt":
+ import msvcrt
+else:
+ import fcntl
+import hashlib
 import sys
 from pathlib import Path
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
@@ -19,9 +23,9 @@ def installation_directory():
 class SingleInstance:
  def __init__(self, directory=None, lock_directory=None):
   self.directory = Path(directory or installation_directory()).resolve()
-  self.key = hashlib.sha256(os.fsencode(str(self.directory))).hexdigest()
+  self.key = hashlib.sha256(os.fsencode(os.path.normcase(str(self.directory)))).hexdigest()
   # 不依赖cwd、版本、挂载点、配置路径或TMPDIR，避免不同启动方式绕过锁。
-  self.lock_path = Path(lock_directory or '/tmp') / ('bom-manager-' + self.key + '.lock')
+  self.lock_path = Path(lock_directory or (tempfile.gettempdir() if os.name=='nt' else '/tmp')) / ('bom-manager-' + self.key + '.lock')
   self.server_name = 'bom-manager-' + self.key
   self.fd = None
   self.server = None
@@ -29,9 +33,12 @@ class SingleInstance:
   self.pending_activation = False
 
  def acquire(self):
-  fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+  fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR | getattr(os,'O_NOFOLLOW',0) | getattr(os,'O_CLOEXEC',0), 0o600)
   try:
-   fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+   if os.name=='nt':
+    if os.fstat(fd).st_size==0:os.write(fd,b'0')
+    os.lseek(fd,0,os.SEEK_SET); msvcrt.locking(fd,msvcrt.LK_NBLCK,1)
+   else:fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
   except OSError as error:
    os.close(fd)
    if error.errno in (errno.EACCES, errno.EAGAIN):return False
@@ -81,5 +88,8 @@ class SingleInstance:
   if self.server is not None:
    self.server.close(); self.server.deleteLater(); self.server = None
   if self.fd is not None:
-   fcntl.flock(self.fd, fcntl.LOCK_UN); os.close(self.fd); self.fd = None
+   if os.name=='nt':
+    os.lseek(self.fd,0,os.SEEK_SET); msvcrt.locking(self.fd,msvcrt.LK_UNLCK,1)
+   else:fcntl.flock(self.fd, fcntl.LOCK_UN)
+   os.close(self.fd); self.fd = None
   # 文件保留，避免等待方持有旧inode时另一个进程创建新文件造成双锁。

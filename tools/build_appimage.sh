@@ -1,6 +1,7 @@
 #!/bin/sh
 # 构建AppImage：自动测试、编译、生成AppDir和AppImage。
 set -eu
+[ "$(uname -m)" = x86_64 ] || { echo '当前AppImage构建仅支持Linux x86_64' >&2; exit 1; }
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd); cd "$ROOT"
 TMP_DIR="$ROOT/.tmp"
 BUILD_DIR="$TMP_DIR/build"
@@ -14,11 +15,13 @@ ver=$(cat VERSION); stamp=$(date +%Y%m%d_%H%M%S); name="BOM_Manager_${ver}_${sta
 rm -rf "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 python3 tools/write_build_info.py
-python3 -m PyInstaller --noconfirm --clean --onefile --windowed \
+python3 -m PyInstaller --noconfirm --clean --onedir --windowed --noupx \
  --workpath "$BUILD_DIR" --distpath "$DIST_DIR" --specpath "$SPEC_DIR" \
  --add-data "$ROOT/VERSION:." --add-data "$TMP_DIR/build_info.json:." --name "$name" src/main.py
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-cp "$DIST_DIR/$name" "$APPDIR/usr/bin/BOM管理系统"
+cp -a "$DIST_DIR/$name/." "$APPDIR/usr/bin/"
+mv "$APPDIR/usr/bin/$name" "$APPDIR/usr/bin/BOM管理系统"
+python3 tools/audit_linux_bundle.py "$APPDIR/usr/bin"
 python3 - "$APPDIR" <<'PYICON'
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -40,7 +43,7 @@ cat > "$APPDIR/AppRun" <<'EOF'
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # Deepin文件管理器可能向子进程传递dxcb等宿主专用Qt平台值；冻结包只携带xcb插件。
 # 有显示服务时明确选择兼容的xcb，避免双击启动后Qt平台插件初始化失败。
-if [ -n "${DISPLAY:-}" ]; then export QT_QPA_PLATFORM=xcb; fi
+if [ -n "${DISPLAY:-}" ] && [ "${QT_QPA_PLATFORM:-}" != offscreen ]; then export QT_QPA_PLATFORM=xcb; fi
 exec "$HERE/usr/bin/BOM管理系统" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
@@ -99,6 +102,7 @@ image[pos+1]=0x84
 out.write_bytes(image)
 PYAPPIMAGE
  chmod +x "package/${name}.AppImage"
+ QT_QPA_PLATFORM=offscreen "package/${name}.AppImage" --smoke-test-report "$ROOT/test_reports/${name}_smoke.json"
  sha256sum "package/${name}.AppImage" > "package/${name}.AppImage.sha256"
  echo "AppImage: package/${name}.AppImage"
 else

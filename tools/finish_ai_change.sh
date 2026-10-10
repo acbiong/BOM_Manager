@@ -20,7 +20,17 @@ if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --other
 fi
 
 tools/run_tests.sh
-python3 tools_bump_version.py patch
+if [ "${BOM_RELEASE_VERSION:-}" ]; then
+ python3 - "$BOM_RELEASE_VERSION" <<'PYVERSION'
+import re,sys
+from pathlib import Path
+value=sys.argv[1]
+if not re.fullmatch(r'\d+\.\d+\.\d+',value):raise SystemExit('版本号必须为三段数字')
+Path('VERSION').write_text(value+'\n',encoding='utf-8')
+PYVERSION
+else
+ python3 tools_bump_version.py patch
+fi
 git add -A
 if git diff --cached --quiet; then
  echo '[ai-finish] 暂存区没有可提交内容。'

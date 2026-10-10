@@ -13,7 +13,9 @@ class SingleInstanceTests(unittest.TestCase):
  def setUp(self):self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name)
  def tearDown(self):self.tmp.cleanup()
  def test_same_directory_alias_and_activation(self):
-  directory=self.path/'软件';directory.mkdir();alias=self.path/'链接';alias.symlink_to(directory,target_is_directory=True)
+  directory=self.path/'软件';directory.mkdir();alias=self.path/'链接'
+  if os.name=='nt':alias=directory/'.'
+  else:alias.symlink_to(directory,target_is_directory=True)
   first=SingleInstance(directory,self.path);second=SingleInstance(alias,self.path);window=QWidget()
   try:
    self.assertTrue(first.acquire());first.set_window(window)
@@ -45,7 +47,7 @@ guard.close()
 """
   env=dict(os.environ,PYTHONPATH=str(source),QT_QPA_PLATFORM='offscreen')
   args=[sys.executable,'-c',code,str(self.path/'app'),str(self.path)]
-  owner=subprocess.Popen(args+['hold'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env,cwd='/tmp')
+  owner=subprocess.Popen(args+['hold'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env,cwd=tempfile.gettempdir())
   try:
    self.assertEqual(owner.stdout.readline().strip(),'owner')
    result=subprocess.run(args+['exit'],capture_output=True,text=True,env=env,timeout=10)
