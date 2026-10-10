@@ -485,11 +485,11 @@ class BomWindow(QMainWindow):
   d=it.data(0,Qt.UserRole) or {}
   if d.get('_deleted'):return
   if it is getattr(self,'root_item',None):
-   m=QMenu(self); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+   m=QMenu(self); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(self.root)) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
    if act==child:self.add_relative(d,True)
    elif act==imp:self.import_bom(it)
    return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
   if act==imp:self.import_bom(it); return
   if act==alternate:
    self.tree.setCurrentItem(it); self.show_item_info(it); self.add_alternate(); return
