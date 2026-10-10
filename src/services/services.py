@@ -213,6 +213,13 @@ class Services:
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(relation,))
     for order,mid in enumerate(alternates):self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',(relation,mid,order))
    self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
+   # 使用保存前后包含的父物料判断影响范围，覆盖新增和删除共享分支。
+   # 在同一事务内更新时间，保证界面收到通知时读取的是已提交数据。
+   for sku in self.skus():
+    sku_root=sku['material_id']
+    contained=log_roots.get(sku_root,{sku_root})|{sku_root}|{row['material_id'] for row in self.bom(sku_root)}
+    if contained & changed_parents:
+     self.db.conn.execute('UPDATE materials SET updated_at=CURRENT_TIMESTAMP WHERE id=?',(sku_root,))
    after={ (r['parent_material_id'],r['child_material_id'],r['position'] or ''):dict(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items') }
    def label(mid):
     material=self.material_snapshot(mid)
