@@ -9,6 +9,7 @@ from database.database import Database
 from infrastructure.events import WindowRefreshBus
 from services.services import MaterialHeaderError, BomImportError
 from ui.theme import apply_theme, theme_icon
+from ui.material_clipboard import copy_material, clipboard_material
 
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
@@ -490,17 +491,67 @@ class BomWindow(QMainWindow):
   d=it.data(0,Qt.UserRole) or {}
   if d.get('_deleted'):return
   if it is getattr(self,'root_item',None):
-   m=QMenu(self); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(self.root)) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+   m=QMenu(self); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(self.root)) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+   if self.handle_clipboard_action(act,clipboard_actions,it):return
    if act==child:self.add_relative(d,True)
    elif act==imp:self.import_bom(it)
    return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  if self.handle_clipboard_action(act,clipboard_actions,it):return
   if act==imp:self.import_bom(it); return
   if act==alternate:
    self.tree.setCurrentItem(it); self.show_item_info(it); self.add_alternate(); return
   if act in (same,child): self.add_relative(d, act==child); return
   if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    self.remove_relation(it)
+ def clipboard_actions(self,menu,item):
+  actions={'copy':menu.addAction('复制物料')}
+  material=clipboard_material(self.svc)
+  if material:
+   for key,label,child in [('same','粘贴为同级物料',False),('child','粘贴为子级物料',True)]:
+    action=menu.addAction(label); reason=self.paste_block_reason(item,child,material['id'])
+    action.setEnabled(not reason); action.setToolTip(reason or label); actions[key]=action
+  return actions
+ def handle_clipboard_action(self,action,actions,item):
+  if action is None:return False
+  if action==actions['copy']:
+   copy_material(self.svc,(item.data(0,Qt.UserRole) or {})['material_id']); return True
+  for key,child in [('same',False),('child',True)]:
+   if key in actions and action==actions[key]:
+    if actions[key].isEnabled():self.paste_material(item,child)
+    return True
+  return False
+ def paste_block_reason(self,item,child,material_id):
+  target=item if child else item.parent()
+  if target is None:return 'SKU根节点不能增加同级物料'
+  if (item.data(0,Qt.UserRole) or {}).get('_deleted'):return '待删除物料不能粘贴'
+  if any((target.child(i).data(0,Qt.UserRole) or {}).get('material_id')==material_id for i in range(target.childCount())):return '目标父级下已存在相同物料'
+  # 合并数据库和当前编辑树的关系，检查跨分支、未保存关系导致的循环。
+  graph={}
+  for row in self.svc.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items'):
+   graph.setdefault(row[0],set()).add(row[1])
+  for _,node in self.expansion_nodes():
+   if node.parent() is not None:
+    parent_id=(node.parent().data(0,Qt.UserRole) or {}).get('material_id')
+    graph.setdefault(parent_id,set()).add((node.data(0,Qt.UserRole) or {}).get('material_id'))
+  target_id=(target.data(0,Qt.UserRole) or {}).get('material_id'); pending=[material_id]; visited=set()
+  while pending:
+   mid=pending.pop()
+   if mid==target_id:return '粘贴会造成循环引用'
+   if mid in visited:continue
+   visited.add(mid); pending.extend(graph.get(mid,()))
+  return ''
+ def paste_material(self,item,child):
+  material=clipboard_material(self.svc)
+  if material is None:return
+  reason=self.paste_block_reason(item,child,material['id'])
+  if reason:return
+  target=item if child else item.parent()
+  added=self.insert_material(target,material)
+  if not child:
+   target.takeChild(target.indexOfChild(added)); target.insertChild(target.indexOfChild(item)+1,added)
+  self.tree.setCurrentItem(added); self.show_item_info(added); self.tree.scrollToItem(added)
+  return added
  def relation_key(self,item):
   data=item.data(0,Qt.UserRole) or {}; parent=item.parent()
   parent_data=parent.data(0,Qt.UserRole) if parent else {}
@@ -773,10 +824,18 @@ class BomWindow(QMainWindow):
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=MaterialSelectionDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  r=rows[items.index(x)]; self._deleted_relations.discard(((target.data(0,Qt.UserRole) or {}).get('material_id'),r['id'],'')); item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'','']); temporary_id=-id(item); data={'_added':True,'id':temporary_id,'material_id':r['id'],'base_code':r['base_code'],'version':r['version'],'name':r['name'],'description':r['description'],'quantity':1,'unit':r['unit'],'grade':r['grade'],'position':'','manufacturer':r['manufacturer'],'mpn':r['mpn'],'mp_flag':r['mp_flag'],'remark':'','level_no':(parent.get('level_no') or 1)+(1 if child else 0),'parent_item_id':parent.get('id') if child else parent.get('parent_item_id')}; data.update(node_id=str(temporary_id),parent_node_id=(target.data(0,Qt.UserRole) or {}).get('node_id')); item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True); fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  self.insert_material(target,rows[items.index(x)])
+ def insert_material(self,target,r):
+  parent=target.data(0,Qt.UserRole) or {}
+  self._deleted_relations.discard((parent.get('material_id'),r['id'],''))
+  item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'',''])
+  temporary_id=-id(item); data=dict(r)
+  data.update(_added=True,id=temporary_id,material_id=r['id'],quantity=1.0,position='',remark='',level_no=(parent.get('level_no') or 0)+1,parent_item_id=parent.get('id'),parent_material_id=parent.get('material_id'),node_id=str(temporary_id),parent_node_id=parent.get('node_id'))
+  item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True)
   self.add_existing_children(item,r['id'],set())
   self._draft_baselines[temporary_id]=self.capture_item(item)
   fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  return item
  def add_existing_children(self,parent_item,material_id,ancestors):
   if material_id in ancestors:return
   ancestors=set(ancestors); ancestors.add(material_id)
@@ -959,7 +1018,9 @@ class MaterialWindow(QMainWindow):
   m=QMenu(self); e=m.addAction('编辑物料'); v=m.addAction('物料版本变更'); v.setEnabled(not any(sku['material_id']==rid for sku in self.svc.skus())); d=m.addAction('删除物料'); d.setEnabled(material['idle']=='Y')
   edit_bom=m.addAction('编辑物料BOM结构') if material['has_bom']=='Y' else None
   reverse=m.addAction('物料反查') if material['idle']=='N' else None
+  copy=m.addAction('复制物料')
   a=m.exec_(self.t.viewport().mapToGlobal(pos))
+  if a==copy:copy_material(self.svc,rid); return
   if a is None:return
   if edit_bom is not None and a==edit_bom:
    self.open_material_bom(rid); return
