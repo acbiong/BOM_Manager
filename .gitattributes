@@ -1,0 +1,3 @@
+# Git Bash and Linux must both receive executable shell scripts with LF endings.
+*.sh text eol=lf
+.githooks/* text eol=lf

@@ -1,8 +1,9 @@
 #!/bin/sh
-# AI 编程收尾流程：测试、审计、编译、版本升级、提交；提交钩子随后自动打包 AppImage。
+# AI 编程收尾流程：测试、审计、编译、版本升级、提交；提交钩子随后执行平台打包。
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
+. "$ROOT/tools/python_env.sh"
 requested_message=${1:-}
 if [ "$requested_message" = '--message-file' ]; then
  [ -n "${2:-}" ] && [ -s "$2" ] || { echo '请提供包含变更标题、具体变更和验证结果的提交说明文件。' >&2; exit 2; }
@@ -21,7 +22,7 @@ fi
 
 tools/run_tests.sh
 if [ "${BOM_RELEASE_VERSION:-}" ]; then
- python3 - "$BOM_RELEASE_VERSION" <<'PYVERSION'
+ "$BOM_PYTHON" - "$BOM_RELEASE_VERSION" <<'PYVERSION'
 import re,sys
 from pathlib import Path
 value=sys.argv[1]
@@ -29,7 +30,7 @@ if not re.fullmatch(r'\d+\.\d+\.\d+',value):raise SystemExit('版本号必须为
 Path('VERSION').write_text(value+'\n',encoding='utf-8')
 PYVERSION
 else
- python3 tools_bump_version.py patch
+ "$BOM_PYTHON" tools_bump_version.py patch
 fi
 git add -A
 if git diff --cached --quiet; then

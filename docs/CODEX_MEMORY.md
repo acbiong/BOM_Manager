@@ -84,3 +84,14 @@
 - 收尾支持BOM_RELEASE_VERSION指定准确版本，本轮请求0.5.0；默认仍补丁递增。
 - 当前机器没有Windows原生构建环境，Windows EXE生成及Windows10/11、Ubuntu桌面验收是明确待完成事项，不要宣称已经验证。实际Linux本轮验证看test_reports和最终产物。
 - 0.5.0收尾进一步使用.tmp/package_success_commit匹配HEAD确认打包成功；post-commit失败不影响git commit返回码，必须额外检查标记。Linux ldd审计模拟bootloader的_internal库搜索路径。
+
+## Windows10本机初始化交接（2026-10-10）
+
+- 本轮实际机器为Windows10 x64 build19045，工作目录D:\git\BOM_Manager；接手基线c905eaf、0.5.0，工作区干净。此前“本机为deepin/无Windows构建环境”仅描述旧机器。
+- 已有Python3.12.10 x64和Git for Windows，复用.venv；核验PyQt5 5.15.11、Qt5 5.15.2、openpyxl3.1.5、PyInstaller6.22.3、Pillow12.3.0，pip check通过。Git用户身份沿用本机配置，未push。
+- tools/windows.ps1提供init/run/test/build/finish；README第11节有完整命令。脚本定位默认安装目录中的Git/Python，只临时配置环境，init启用本仓库.githooks。没有启动watch_source.sh或其他常驻监控。
+- .gitattributes固定Shell/钩子为LF。tools/python_env.sh让测试、收尾、Windows钩子使用同一虚拟环境，避开Windows python3商店别名；run_tests.sh转交跨平台run_tests.py。
+- 单实例激活测试现用有限Qt事件等待，Windows命名管道连接成功不代表一次processEvents已完成回调；六项专项通过。Qt展开状态/导出路径在沙箱内因用户注册表权限失败，获准沙箱外运行后179项测试、137/137追踪和编译均通过（test_reports/test_20261010_183317.txt）。不可跳过失败断言。
+- 用户明确本轮先完成Windows环境与EXE，**不安装WSL/Linux**；AppImage构建和SHA256核验留待Linux环境。Windows11、Ubuntu/deepin跨机验收及人工完整业务验收仍待执行。
+- 最终版本/提交以VERSION和git log为准；收尾调用tools/finish_ai_change.sh，报告放test_reports、EXE及SHA256放package，必须核对.tmp/package_success_commit与HEAD、EXE自检中的版本/提交信息。Windows打包自检使用临时SQLite/Excel，不覆盖业务数据库；自动化窗口自检不等同人工双击验收。
+- 正式收尾前已原生构建0.5.0验证包BOM_Manager_0.5.0_20261010_183439_windows_x64.exe；SHA256复算一致，自检passed=true、qt_platform=windows，七类检查通过。其元数据为收尾前c905eaf，仅作环境验证；正式交付使用收尾后新版本/新提交的包。证据：test_reports/windows_build_initial.txt及同名_smoke.json。

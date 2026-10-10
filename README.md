@@ -52,7 +52,7 @@ python3 -m pip check
 
 依赖含 PyQt5（界面）、openpyxl（Excel）、PyInstaller（打包）、Pillow（生成打包图标）；SQLite 属于 Python 标准库。当前开发环境已使用 PyQt5 5.15.10、openpyxl 3.1.5、PyInstaller 6.22.3、Pillow 11.3.0。`requirements.txt` 使用最低版本约束，并非锁定环境；升级依赖后须重新测试。
 
-每次开启新终端先进入项目并执行 `. .venv/bin/activate`。所有脚本调用 `python3`，因此 Git 提交钩子也必须继承已激活的虚拟环境。
+Linux每次开启新终端可先进入项目并执行 `. .venv/bin/activate`。测试与收尾脚本优先使用项目 `.venv`，也可通过 `BOM_PYTHON` 指定解释器；Windows统一入口见第11节。
 
 ## 3. 运行源码
 
@@ -145,7 +145,7 @@ tools/finish_ai_change.sh --message-file .tmp/change_message.txt
 
 可用 `BOM_RELEASE_VERSION=0.5.0 tools/finish_ai_change.sh --message-file .tmp/change_message.txt` 指定本次准确版本；不指定时仍自动升补丁号。
 
-流程：测试/审计/编译 → 版本升级 → `git add -A` → Git 提交 → post-commit 生成 AppImage。不要再单独升版或重复提交；不要只填“AI自动完成更新”等泛化描述。Git 提交不会自动 push。
+流程：测试/审计/编译 → 版本升级 → `git add -A` → Git 提交 → post-commit 按平台生成AppImage或Windows EXE。不要再单独升版或重复提交；不要只填“AI自动完成更新”等泛化描述。Git 提交不会自动 push。
 
 若提交后打包失败，提交可能已经完成；先看 `git log -1`、日志和 `package/`，修复构建环境后运行手动 AppImage 构建，不要为了重试打包再次升版。缺少 appimagetool/runtime 时钩子可能跳过打包，须确认实际产物，不能仅凭提交成功宣称已打包。
 
@@ -219,6 +219,27 @@ EXE优先使用可写同目录配置；安装目录不可写时回退`%LOCALAPPD
 
 `.github/workflows/build-desktop.yml`提供Ubuntu24.04与Windows Server2022构建任务，可在GitHub Actions手动触发，或推送`v*`标签触发。运行结束下载各job的artifact包和测试报告；workflow本身不发布Release、不自动push源码。Windows Server构建自检不能替代Windows10/11的人工桌面验证。
 
-当前开发主机为deepin，无Windows原生构建器。本轮本机可交付AppImage；Windows EXE及Ubuntu/Windows目标系统验收需在相应构建器执行后确认，不能把新增脚本/工作流误认为已经生成并验收EXE。
+0.5.0原始开发主机为deepin；2026-10-10已迁移到Windows10 x64并初始化原生构建环境。各轮实际测试与产物以test_reports、package及CODEX_MEMORY为准；不能把新增脚本/工作流误认为已经完成所有目标系统验收。
 
 发布前在deepin25、Ubuntu24.04、Windows10、Windows11逐项确认：新用户无Python环境双击、中文/空格安装路径、只读安装目录回退、首次新建/选择数据库、重复启动激活、Excel导入导出、共享BOM保存刷新、退出重开及关于中的版本/提交匹配。验收记录保存test_reports，不提交业务数据库。
+
+## 11. Windows本机开发入口
+
+安装Git for Windows及64位Python 3.12后，在项目根目录用PowerShell执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 init
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 run
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 test
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 build
+# 编写本轮详细提交说明后执行，自动升补丁版、提交和打包：
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 finish -MessageFile .tmp/change_message.txt
+```
+
+`init`复用或新建`.venv`，安装requirements、检查依赖，配置本仓库`.githooks`并执行全量测试。可用`-PythonPath C:\路径\python.exe`指定新建虚拟环境的解释器。脚本能发现默认目录中已安装但尚未出现在当前PATH的Git/Python；只调整本次调用的环境，不修改全局PATH，不启动监控，也不改变全局PowerShell执行策略。
+
+`run`打开正常桌面软件，首次启动由用户新建或选择SQLite数据库。`build`手动生成EXE及SHA256，不升版、不提交；`finish`通过Git Bash调用既定的`tools/finish_ai_change.sh`并核对当前提交打包成功标记。Shell脚本和Git钩子由`.gitattributes`固定为LF，避免Windows检出CRLF导致无法执行。Git提交身份沿用现有配置。
+
+Qt在Windows通过用户注册表保存设置，沙箱禁止写入时，展开状态和导出目录测试可能失败；按权限流程在沙箱外复核，不能跳过测试或将权限失败误判为业务缺陷。完整测试会写入测试用的Qt偏好，建议在专用测试账户执行；发布自检数据库及Excel使用临时目录。
+
+本机暂未配置WSL/Linux；用户已明确本轮优先完成Windows环境与EXE。AppImage需另行在Linux x86_64构建并验证SHA256，不应将Windows EXE当作AppImage。

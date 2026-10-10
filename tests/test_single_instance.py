@@ -5,6 +5,8 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QWidget
+from PyQt5.QtCore import QElapsedTimer
+from PyQt5.QtTest import QTest
 from infrastructure.single_instance import SingleInstance,installation_directory
 
 class SingleInstanceTests(unittest.TestCase):
@@ -21,7 +23,11 @@ class SingleInstanceTests(unittest.TestCase):
    self.assertTrue(first.acquire());first.set_window(window)
    self.assertFalse(second.acquire())
    with patch.object(first,'activate') as activate:
-    self.assertTrue(second.notify_existing());self.app.processEvents();activate.assert_called_once()
+    self.assertTrue(second.notify_existing())
+    # Windows命名管道异步投递连接事件，单次processEvents不保证已收到通知。
+    timer=QElapsedTimer();timer.start()
+    while not activate.called and timer.elapsed()<1000:QTest.qWait(10)
+    activate.assert_called_once()
    second.close();self.assertFalse(SingleInstance(directory,self.path).acquire())
   finally:window.close();second.close();first.close()
   # 正常退出后不需删除残留锁文件即可再次启动。

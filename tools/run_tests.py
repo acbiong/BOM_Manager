@@ -2,6 +2,7 @@
 """Windows/Linux通用测试入口，完整报告写入test_reports。"""
 import datetime
 import os
+import platform
 from pathlib import Path
 import py_compile
 import subprocess
@@ -13,8 +14,11 @@ report=root/'test_reports'/('test_'+datetime.datetime.now().strftime('%Y%m%d_%H%
 env=dict(os.environ,PYTHONUTF8='1',PYTHONDONTWRITEBYTECODE='1')
 failed=False
 with report.open('w',encoding='utf-8') as output:
+    output.write(f'BOM管理系统测试报告\n时间：{datetime.datetime.now().astimezone().isoformat()}\n项目：{root}\nPython：{sys.executable}\n平台：{platform.platform()}\n')
     for args in ([sys.executable,'tests/audit_requirements.py'],[sys.executable,'-m','unittest','discover','-s','tests','-q']):
+        output.write('\n$ '+subprocess.list2cmdline(args)+'\n');output.flush()
         result=subprocess.run(args,env=env,stdout=output,stderr=subprocess.STDOUT)
+        output.write(f'[exit={result.returncode}]\n')
         failed=failed or result.returncode!=0
     try:
         for source in (root/'src').rglob('*.py'):

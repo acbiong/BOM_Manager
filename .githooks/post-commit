@@ -7,7 +7,8 @@ mkdir -p .tmp
 changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
 if printf '%s\n' "$changed" | grep -Eq '^(src/|VERSION$|requirements\.txt$|tools/|\.githooks/)'; then
   if [ "${OS:-}" = Windows_NT ]; then
-   python tools/build_windows.py
+   . "$ROOT/tools/python_env.sh"
+   "$BOM_PYTHON" tools/build_windows.py
    git rev-parse HEAD > .tmp/package_success_commit
    exit 0
   fi
