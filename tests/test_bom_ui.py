@@ -326,7 +326,7 @@ class BomUiTests(unittest.TestCase):
   materials=MaterialWindow(self.s)
   try:
    actions=materials.menuBar().actions()
-   self.assertEqual([a.text() for a in actions],['新建物料','导入物料','导出物料库','导出模板'])
+   self.assertEqual([a.text() for a in actions],['查找物料','新建物料','导入物料','导出物料库','导出模板'])
    self.assertTrue(all(a.menu() is None for a in actions))
   finally:materials.close()
  def test_alternate_notifications_follow_owning_bom(self):

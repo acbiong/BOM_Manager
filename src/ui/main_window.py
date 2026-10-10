@@ -10,6 +10,7 @@ from infrastructure.events import WindowRefreshBus
 from services.services import MaterialHeaderError, BomImportError
 from ui.theme import apply_theme, theme_icon
 from ui.material_clipboard import copy_material, clipboard_material
+from ui.material_search import MaterialSearchDialog
 
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
@@ -1005,9 +1006,19 @@ class MaterialWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._filters={}; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
-  menu=self.menuBar(); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
+  menu=self.menuBar(); a=menu.addAction('查找物料'); a.triggered.connect(self.search_materials); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
   header=self.t.horizontalHeader(); header.setSectionsClickable(True); header.sectionClicked.connect(self.filter_menu); self.refresh()
+ def search_materials(self):
+  MaterialSearchDialog(self).exec_()
+ def locate_material(self,material_id):
+  self.refresh()
+  for row in range(self.t.rowCount()):
+   if self.t.item(row,0).data(Qt.UserRole)!=material_id:continue
+   if self.t.isRowHidden(row):self._filters.clear();self.apply_filters()
+   self.t.setCurrentCell(row,0);self.t.selectRow(row);self.t.scrollToItem(self.t.item(row,0),QAbstractItemView.PositionAtCenter)
+   return True
+  return False
  def filter_menu(self,column):
   menu=QMenu(self); choose=menu.addAction('筛选此列…'); clear=menu.addAction('清除此列筛选'); clear.setEnabled(column in self._filters); clear_all=menu.addAction('清除全部筛选'); clear_all.setEnabled(bool(self._filters))
   header=self.t.horizontalHeader(); from PyQt5.QtCore import QPoint
@@ -1125,7 +1136,7 @@ class MaterialWindow(QMainWindow):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
    for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]):
-    item=QTableWidgetItem(str(v or ''))
+    item=QTableWidgetItem(str(v or '')); item.setData(Qt.UserRole,r['id'])
     if self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
     self.t.setItem(i,j,item)
