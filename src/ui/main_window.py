@@ -496,14 +496,37 @@ class BomWindow(QMainWindow):
    if act==child:self.add_relative(d,True)
    elif act==imp:self.import_bom(it)
    return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
   if self.handle_clipboard_action(act,clipboard_actions,it):return
+  if act==up:self.move_item(it,-1); return
+  if act==down:self.move_item(it,1); return
   if act==imp:self.import_bom(it); return
   if act==alternate:
    self.tree.setCurrentItem(it); self.show_item_info(it); self.add_alternate(); return
   if act in (same,child): self.add_relative(d, act==child); return
   if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    self.remove_relation(it)
+ def can_move_item(self,item,direction):
+  parent=item.parent()
+  if parent is None or direction not in (-1,1) or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return False
+  return 0<=parent.indexOfChild(item)+direction<parent.childCount()
+ def move_item(self,item,direction):
+  if not self.can_move_item(item,direction):return
+  parent=item.parent(); index=parent.indexOfChild(item); expanded=item.isExpanded()
+  parent.takeChild(index); parent.insertChild(index+direction,item); item.setExpanded(expanded)
+  data=item.data(0,Qt.UserRole) or {}; data['_moved']=True; item.setData(0,Qt.UserRole,data)
+  # 同一共享父物料的多个显示位置同步排序，避免保存时被另一副本覆盖。
+  parent_id=(parent.data(0,Qt.UserRole) or {})['material_id']
+  order=[(parent.child(i).data(0,Qt.UserRole) or {}).get('material_id') for i in range(parent.childCount())]
+  for _,other in list(self.expansion_nodes()):
+   if other is parent or (other.data(0,Qt.UserRole) or {}).get('material_id')!=parent_id:continue
+   children=other.takeChildren(); rank={mid:i for i,mid in enumerate(order)}
+   children.sort(key=lambda child:rank.get((child.data(0,Qt.UserRole) or {}).get('material_id'),len(rank)))
+   other.addChildren(children)
+   for child in children:
+    d=child.data(0,Qt.UserRole) or {}
+    if d.get('material_id')==data['material_id']:d['_moved']=True;child.setData(0,Qt.UserRole,d)
+  self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item); self.tree.scrollToItem(item); self.remember_expansion()
  def clipboard_actions(self,menu,item):
   actions={'copy':menu.addAction('复制物料')}
   material=clipboard_material(self.svc)
@@ -645,7 +668,7 @@ class BomWindow(QMainWindow):
   base={identity(n,groups):n for n in baseline}; ours={identity(n,groups):n for n in local}; theirs={identity(n,groups):n for n in remote}
   def modified(node,original):
    data=node['data']; previous=original['data']
-   if data.get('_deleted') or (data.get('_added') and not previous.get('_added')):return True
+   if data.get('_moved') or data.get('_deleted') or (data.get('_added') and not previous.get('_added')):return True
    if data.get('id') in self._alternate_edits and self._alternate_edits[data['id']]!=previous.get('_db_alternates',[]):return True
    if any(data.get(k)!=previous.get(k) for k in ('quantity','position','remark')):return True
    if [n['data'].get('id') for n in node['children']]!=[n['data'].get('id') for n in original['children']]:return True
@@ -662,6 +685,7 @@ class BomWindow(QMainWindow):
     previous={'data':{},'children':[]}
    result=deepcopy(new)
    if edit['data'].get('_added'):result['data']['_added']=True
+   if edit['data'].get('_moved'):result['data']['_moved']=True
    for field in ('quantity','position','remark'):
     value=edit['data'].get(field)
     if value!=previous['data'].get(field):
@@ -677,6 +701,9 @@ class BomWindow(QMainWindow):
    if previous is None or edit['data'].get('_deleted') or modified(edit,previous):
     if previous is not None and not edit['data'].get('_deleted'):conflicts.append('外部删除了本地已编辑物料')
     merged.append(deepcopy(edit))
+  if any(node['data'].get('_moved') for node in local):
+   rank={node['data']['material_id']:i for i,node in enumerate(local)}
+   merged.sort(key=lambda node:rank.get(node['data']['material_id'],len(rank)))
   return merged
  def refresh_external(self):
   from copy import deepcopy
@@ -762,7 +789,9 @@ class BomWindow(QMainWindow):
     item.setFont(column,font)
     color=QColor('red') if deleted else QColor('green') if added else QColor('#9a6700') if changed else None
     item.setForeground(column,QBrush(color) if color else QBrush(QColor('white')) if external else QBrush())
-    item.setBackground(column,QBrush(QColor('#4a148c')) if external else QBrush())
+    moved=data.get('_moved',False)
+    if moved and not color:item.setForeground(column,QBrush(QColor('#202020')))
+    item.setBackground(column,QBrush(QColor('#f8d7e3')) if moved else QBrush(QColor('#4a148c')) if external else QBrush())
    remark=data.get('remark','') if not root else ''
    display=remark
    if external:display=(remark+'\n' if remark else '')+'有其他BOM更新导入此变更'

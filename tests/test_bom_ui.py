@@ -187,11 +187,12 @@ class BomUiTests(unittest.TestCase):
  def test_context_menu_has_only_add_and_delete(self):
   item=self.w.root_item.child(0)
   with patch.object(self.w.tree,'itemAt',return_value=item), patch('ui.main_window.QMenu') as menu:
-   menu.return_value.addAction.side_effect=[object(),object(),object(),object(),object(),object()]
+   from unittest.mock import MagicMock
+   menu.return_value.addAction.side_effect=[MagicMock() for _ in range(8)]
    menu.return_value.exec_.return_value=None
    from PyQt5.QtCore import QPoint
    self.w.context_menu(QPoint())
-   self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['新增同级物料','新增子级物料','导入BOM','删除物料','增加替代料','复制物料'])
+   self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['新增同级物料','新增子级物料','导入BOM','删除物料','增加替代料','物料上移','物料下移','复制物料'])
  def test_idle_flags_recursive_shared_skus_and_red_rows(self):
   from ui.main_window import MaterialWindow
   from PyQt5.QtGui import QColor
