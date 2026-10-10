@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, pyqtSignal, QSettings, QTimer, QEvent, QSize, QSortFilterProxyModel
 from PyQt5.QtGui import QColor, QBrush, QFont, QStandardItemModel, QStandardItem
 from pathlib import Path
+import os
 from config.config_service import ConfigService, DEFAULT_MATERIAL_UNITS
 from database.database import Database
 from infrastructure.events import WindowRefreshBus
@@ -200,6 +201,19 @@ def export_filename(text):
  import re
  return re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', text).strip().rstrip('.')+'.xlsx'
 
+def export_start_path(filename):
+ import sys
+ from PyQt5.QtCore import QSettings
+ settings=QSettings('Biong','BOMManager'); folder=settings.value('export_directory','')
+ if not folder or not Path(folder).is_dir():
+  folder=str((Path(os.environ.get('APPIMAGE')).resolve().parent if os.environ.get('APPIMAGE') else (Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[2])))
+ return str(Path(folder)/filename)
+
+def remember_export_path(path):
+ from PyQt5.QtCore import QSettings
+ QSettings('Biong','BOMManager').setValue('export_directory',str(Path(path).resolve().parent))
+
+
 class MaterialSelectionDialog(QInputDialog):
  @staticmethod
  def getItem(parent,title,label,items,current=0,editable=True):
@@ -296,8 +310,8 @@ class MainWindow(QMainWindow):
   except Exception as exc:
    QMessageBox.critical(self,'数据库错误','目标数据库无法使用，请重新选择数据库。\n\n'+str(exc))
  def export_database(self):
-  p=QFileDialog.getSaveFileName(self,'导出资料库','资料库.xlsx','Excel (*.xlsx)')[0]
-  if p:self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
+  p=QFileDialog.getSaveFileName(self,'导出资料库',export_start_path('资料库.xlsx'),'Excel (*.xlsx)')[0]
+  if p:remember_export_path(p); self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
  def edit_project(self):
   d=ProjectDialog(self,self.svc.project())
   if d.exec_(): self.svc.update_project(d.data()); self.refresh()
@@ -368,10 +382,17 @@ class MainWindow(QMainWindow):
   row=self.table.rowAt(pos.y())
   if row<0:return
   self.table.selectRow(row); sid=int(self.table.item(row,5).text())
-  menu=QMenu(self); version=menu.addAction('版本变更'); delete=menu.addAction('删除SKU')
+  menu=QMenu(self); version=menu.addAction('版本变更'); export_action=menu.addAction('导出BOM'); delete=menu.addAction('删除SKU')
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
   if action==version:self.change_sku_version(sid)
+  elif action==export_action:self.export_sku_id(sid)
   elif action==delete:self.delete_sku(sid)
+ def export_sku_id(self,sid):
+  row=self.svc.db.conn.execute('SELECT m.base_code,m.version,m.name FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
+  if not row:return
+  p=QFileDialog.getSaveFileName(self,'导出BOM',export_start_path(export_filename(row['base_code']+row['version']+' '+row['name'])),'Excel (*.xlsx)')[0]
+  if p:
+   remember_export_path(p);self.svc.export_sku(sid,p);QMessageBox.information(self,'完成','BOM导出成功')
  def open_bom(self,row,col): self.open_bom_id(int(self.table.item(row,5).text()))
  def open_bom_id(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
@@ -392,11 +413,12 @@ class MainWindow(QMainWindow):
   self.activate_window(window)
   return window
  def export_materials(self):
-  p=QFileDialog.getSaveFileName(self,'导出物料库',export_filename(self.svc.project()['project_name']+' 物料库'),'Excel (*.xlsx)')[0]
-  if p:self.svc.export_materials(p); QMessageBox.information(self,'完成','导出成功')
+  p=QFileDialog.getSaveFileName(self,'导出物料库',export_start_path(export_filename(self.svc.project()['project_name']+' 物料库')),'Excel (*.xlsx)')[0]
+  if p:remember_export_path(p); self.svc.export_materials(p); QMessageBox.information(self,'完成','导出成功')
  def template(self):
-  p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx'),'Excel (*.xlsx)')[0]
   if p:
+   remember_export_path(p)
    from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN']); w.save(p)
 class BomImportIssuesDialog(QDialog):
  def __init__(self,error,parent=None):
@@ -815,8 +837,9 @@ class BomWindow(QMainWindow):
   self.notice.clear(); self.refresh_action.setEnabled(False); self.statusBar().clearMessage()
  def export_bom(self):
   material=self.svc.material_snapshot(self.root)
-  p=QFileDialog.getSaveFileName(self,'导出BOM',export_filename(material['base_code']+material['version']+' '+material['name']),'Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出BOM',export_start_path(export_filename(material['base_code']+material['version']+' '+material['name'])),'Excel (*.xlsx)')[0]
   if p:
+   remember_export_path(p)
    r=self.svc.db.conn.execute('SELECT id FROM skus WHERE material_id=?',(self.root,)).fetchone()
    if r:self.svc.export_sku(r['id'],p); QMessageBox.information(self,'完成','导出成功')
  def add(self):
@@ -976,11 +999,12 @@ class MaterialWindow(QMainWindow):
     self.refresh(); MaterialImportResultDialog(ok,fail,self).exec_()
    except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
  def export_materials(self):
-  p=QFileDialog.getSaveFileName(self,'导出物料库',export_filename(self.svc.project()['project_name']+' 物料库'),'Excel (*.xlsx)')[0]
-  if p:self.svc.export_materials(p)
+  p=QFileDialog.getSaveFileName(self,'导出物料库',export_start_path(export_filename(self.svc.project()['project_name']+' 物料库')),'Excel (*.xlsx)')[0]
+  if p:remember_export_path(p); self.svc.export_materials(p)
  def template(self):
-  p=QFileDialog.getSaveFileName(self,'导出模板','物料模板.xlsx','Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx'),'Excel (*.xlsx)')[0]
   if p:
+   remember_export_path(p)
    from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN']); w.save(p)
  def on_event(self,event):
   if event.get('type') in ('material_changed','bom_changed','sku_changed'): self.refresh()
