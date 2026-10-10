@@ -260,7 +260,7 @@ class MainWindow(QMainWindow):
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
-  self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(0,2,0,2); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().showMessage(''); self.refresh()
+  self.count_label=QLabel(''); self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(8,2,8,2); footer_l.addWidget(self.count_label); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().showMessage(''); self.refresh()
  def set_theme(self,dark):
   apply_theme(dark); self.theme_button.setIcon(theme_icon(dark))
   label='当前深色主题（月亮），点击切换浅色主题' if dark else '当前浅色主题（太阳），点击切换深色主题'
@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
   fit_columns(self.table)
-  self.statusBar().showMessage(f'共计{len(rows)}个SKU')
+  self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
  def select_database(self):
   current=Path(self.svc.db.path).expanduser()
   # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
