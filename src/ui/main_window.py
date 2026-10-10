@@ -246,7 +246,7 @@ class MainWindow(QMainWindow):
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
-  self.power_label=QLabel('Power by Biong & BrainCo Inc.'); self.version_label=QLabel('版本 '+self.version); self.statusBar().addPermanentWidget(self.power_label); self.statusBar().addPermanentWidget(self.version_label); self.statusBar().showMessage(''); self.refresh()
+  self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(0,2,0,2); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().showMessage(''); self.refresh()
  def set_theme(self,dark):
   apply_theme(dark); self.theme_button.setIcon(theme_icon(dark))
   label='当前深色主题（月亮），点击切换浅色主题' if dark else '当前浅色主题（太阳），点击切换深色主题'
@@ -438,10 +438,11 @@ class BomWindow(QMainWindow):
   self.fields['quantity'].valueChanged.connect(lambda value:self.update_tree_field('quantity',value))
   for key in ('position','remark'): self.fields[key].textChanged.connect(lambda value,k=key:self.update_tree_field(k,value))
   info_box=QGroupBox('物料信息'); info_box.setLayout(form); self.alt_table=QTableWidget(0,6); self.alt_table.setHorizontalHeaderLabels(['替代料编码','版本号','名称','描述','制造商','MPN']); self.alt_table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.alt_table.setContextMenuPolicy(Qt.CustomContextMenu); self.alt_table.customContextMenuRequested.connect(self.alternate_menu); alt_box=QGroupBox('替代料'); alt_l=QVBoxLayout(alt_box); alt_l.addWidget(self.alt_table)
-  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.statusBar().addWidget(self.notice); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(self.refresh_external); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); imp=QAction('导入BOM',self); imp.triggered.connect(self.import_bom); tb.addAction(imp); exp=QAction('导出SKU BOM',self); exp.triggered.connect(self.export_bom); tb.addAction(exp); self.load()
+  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.statusBar().addWidget(self.notice); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(self.refresh_external); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); self.export_action=QAction('导出BOM',self); self.export_action.triggered.connect(self.export_bom); self.export_action.setEnabled(False); tb.addAction(self.export_action); self.load()
  def mark_dirty(self):
   self.dirty=True
   self.save_action.setEnabled(True)
+  self.export_action.setEnabled(False)
   self.refresh_styles()
  def on_external_change(self,event):
   if self._saving: return
@@ -462,10 +463,12 @@ class BomWindow(QMainWindow):
   d=it.data(0,Qt.UserRole) or {}
   if d.get('_deleted'):return
   if it is getattr(self,'root_item',None):
-   m=QMenu(self); child=m.addAction('增加子级物料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
-   if act==child: self.add_relative(d,True)
+   m=QMenu(self); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+   if act==child:self.add_relative(d,True)
+   elif act==imp:self.import_bom(it)
    return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  if act==imp:self.import_bom(it); return
   if act==alternate:
    self.tree.setCurrentItem(it); self.show_item_info(it); self.add_alternate(); return
   if act in (same,child): self.add_relative(d, act==child); return
@@ -619,7 +622,7 @@ class BomWindow(QMainWindow):
  def load(self,preserve=None):
   from copy import deepcopy
   fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
-  self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+  self.save_action.setEnabled(False); self.refresh_action.setEnabled(False); self.export_action.setEnabled(True)
  def expansion_nodes(self):
   if not hasattr(self,'root_item'):return
   def walk(item,path):
@@ -770,7 +773,7 @@ class BomWindow(QMainWindow):
   material_id=self.alt_table.item(row,0).data(Qt.UserRole)
   self._alternate_edits[self.alternate_key(item)]=[mid for mid in self.alternate_ids(item) if mid!=material_id]
   self.mark_dirty(); self.show_item_info(item)
- def import_bom(self):
+ def import_bom(self,selected_item=None):
   if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将替换当前编辑缓存，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
   p=QFileDialog.getOpenFileName(self,'导入BOM','','Excel (*.xlsx)')[0]
   if not p:return
@@ -782,8 +785,9 @@ class BomWindow(QMainWindow):
    finally:wb.close()
    dialog=MaterialHeaderMappingDialog(p,headers,[h for h in self.svc.BOM_HEADERS if h not in headers],self,sheet_name=sheet,required=self.svc.BOM_HEADERS)
    if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
-   nodes=self.svc.import_bom(p,self.root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False)
-   self.stage_import(nodes)
+   target_root=(selected_item.data(0,Qt.UserRole) or {}).get('material_id') if selected_item is not None else self.root
+   nodes=self.svc.import_bom(p,target_root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False)
+   self.stage_import(nodes) if target_root==self.root else self.stage_import_subtree(selected_item,nodes)
    QMessageBox.information(self,'导入完成','BOM已导入编辑缓存，请检查后点击“保存”写入数据库。')
   except BomImportError as error:BomImportIssuesDialog(error,self).exec_()
   except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
@@ -817,6 +821,16 @@ class BomWindow(QMainWindow):
    if r:self.svc.export_sku(r['id'],p); QMessageBox.information(self,'完成','导出成功')
  def add(self):
   self.add_relative({'id':None,'parent_item_id':None,'level_no':0},False)
+ def stage_import_subtree(self,item,nodes):
+  from copy import deepcopy
+  while item.childCount():item.takeChild(0)
+  data=item.data(0,Qt.UserRole) or {}
+  def append(node,parent,path,level):
+   d=dict(node['data']); d['_added']=d.get('_added',True); d.update(parent_material_id=data.get('material_id'),parent_item_id=data.get('id'),node_id=f'{path}/{d["id"]}',parent_node_id=path,level_no=level)
+   child=QTreeWidgetItem(parent,[f"{d['base_code']}{d['version']} {d['name']}",f"{d['quantity']:.1f}",d['unit'],d.get('position',''),d.get('remark','')]);child.setData(0,Qt.UserRole,d)
+   for grand in node['children']:append(grand,child,d['node_id'],level+1)
+  for node in nodes:append(node,item,data.get('node_id',''),(data.get('level_no') or 0)+1)
+  item.setExpanded(True);self.mark_dirty();self.tree.setCurrentItem(item);self.show_item_info(item)
  def save(self):
   self._saving=True
   try:
@@ -836,7 +850,7 @@ class BomWindow(QMainWindow):
    return False
   finally:
    self._saving=False
-  self.dirty=False; self._deleted_relations.clear(); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+  self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
   QMessageBox.information(self,'保存','BOM已保存')
   return True
 
