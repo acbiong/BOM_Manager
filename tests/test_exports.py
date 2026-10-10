@@ -22,7 +22,7 @@ class BomExportLayoutTests(unittest.TestCase):
      out=Path(tmp)/('all.xlsx' if database_export else 'sku.xlsx')
      if database_export:s.export_database(out)
      else:s.export_sku(sid,out)
-     wb=load_workbook(out);sheet=wb['R001' if database_export else 'SKU对应的BOM']
+     wb=load_workbook(out);sheet=wb['R001' if database_export else ('中文物料名称'*12)[:31]]
      try:
       rows=list(sheet.values);headers=rows[0]
       self.assertEqual([r[0] for r in rows[1:]],['1','1.1','1.1.1','1.2','2','2.1'])
@@ -44,5 +44,5 @@ class BomExportLayoutTests(unittest.TestCase):
      finally:wb.close()
     empty=s.create_sku(s.create_material(dict(base_code='EMPTY',version='1',name='空',unit='pcs')))
     s.export_sku(empty,Path(tmp)/'empty.xlsx');wb=load_workbook(Path(tmp)/'empty.xlsx')
-    self.assertEqual(wb['SKU对应的BOM'].max_row,1);self.assertTrue(wb['SKU对应的BOM']['A1'].font.bold);wb.close()
+    self.assertEqual(wb['空'].max_row,1);self.assertTrue(wb['空']['A1'].font.bold);wb.close()
    finally:db.close()

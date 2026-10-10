@@ -118,7 +118,7 @@ class MaterialVersionTests(unittest.TestCase):
   self.s.save_bom(parent,[dict(material_id=a['PART'],quantity=1,unit='pcs')])
   usages=self.s.material_usage(a['PART'])
   self.assertEqual(len(usages),4)
-  self.assertIn({'sku_id':None,'sku':'未包含在SKU中','parent':'LOOSE1 独立'},usages)
+  self.assertIn({'sku_id':None,'sku':'未包含在SKU中','parent':'LOOSE1 独立','parent_id':parent},usages)
   dialog=MaterialUsageDialog(self.material(a['PART']),usages)
   try:
    for i,usage in enumerate(usages):

@@ -403,6 +403,7 @@ class MainWindow(QMainWindow):
   if row is None:return
   window=self.open_material_bom(row['material_id'])
   if window is not None:self._bom_windows[sid]=window
+  return window
  def open_material_bom(self,material_id):
   if self.svc.db.conn.execute('SELECT 1 FROM materials WHERE id=?',(material_id,)).fetchone() is None:return
   if material_id not in self._material_bom_windows:
@@ -473,7 +474,7 @@ class BomWindow(QMainWindow):
  def on_external_change(self,event):
   if self._saving: return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
-   self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
+   self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
  def closeEvent(self,event):
   if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); event.accept(); return
   box=QMessageBox(self); box.setWindowTitle('BOM未保存'); box.setText('BOM结构或物料信息已修改，是否保存？'); save=box.addButton('保存并退出',QMessageBox.AcceptRole); discard=box.addButton('不保存退出',QMessageBox.DestructiveRole); cancel=box.addButton('取消',QMessageBox.RejectRole); box.exec_()
@@ -643,7 +644,7 @@ class BomWindow(QMainWindow):
     node['children']=exclude_deleted(node['children'],data['material_id']); result.append(node)
    return result
   self.render_tree(exclude_deleted(merged,self.root)); self._baseline_tree=deepcopy(fresh)
-  self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(self.dirty or bool(self._external_paths)); self.refresh_styles()
+  self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(True); self.export_action.setEnabled(False); self.refresh_styles()
   if conflicts:self.statusBar().showMessage('已加载外部更新；检测到冲突，已保留本地未保存修改，请核对后保存。')
  def load(self,preserve=None):
   from copy import deepcopy
@@ -718,6 +719,19 @@ class BomWindow(QMainWindow):
    for n in range(item.childCount()):style(item.child(n),path,added,deleted,external)
   style(self.root_item,())
   fit_columns(self.tree)
+ def locate_material(self,material_id,parent_id=None):
+  # 仅展开目标的祖先路径，保留已有窗口中的编辑缓存和其他展开状态。
+  for _,item in self.expansion_nodes():
+   data=item.data(0,Qt.UserRole) or {}
+   if data.get('material_id',self.root if data.get('root') else None)!=material_id:continue
+   if parent_id is not None and data.get('parent_material_id')!=parent_id:continue
+   if data.get('_deleted'):continue
+   ancestor=item.parent()
+   while ancestor is not None:
+    ancestor.setExpanded(True); ancestor=ancestor.parent()
+   self.tree.setCurrentItem(item); self.show_item_info(item); self.tree.scrollToItem(item,QAbstractItemView.PositionAtCenter)
+   return True
+  return False
  def show_item_info(self,item,column=0):
   self.current_item=item
   d=item.data(0,Qt.UserRole) or {}
@@ -840,6 +854,7 @@ class BomWindow(QMainWindow):
   self.render_tree(nodes); self.mark_dirty()
   self.notice.clear(); self.refresh_action.setEnabled(False); self.statusBar().clearMessage()
  def export_bom(self):
+  if not self.export_action.isEnabled():return
   material=self.svc.material_snapshot(self.root)
   p=QFileDialog.getSaveFileName(self,'导出BOM',export_start_path(export_filename(material['base_code']+material['version']+' '+material['name'])),'Excel (*.xlsx)')[0]
   if p:
@@ -1049,7 +1064,7 @@ class MaterialVersionDialog(QDialog):
 
 class MaterialUsageDialog(QDialog):
  def __init__(self,material,usages,parent=None):
-  super().__init__(parent); self.setWindowTitle('物料反查'); self.resize(720,430)
+  super().__init__(parent); self.material_id=material['id']; self.usages=usages; self.setWindowTitle('物料反查'); self.resize(720,430)
   layout=QVBoxLayout(self); title=QLabel(f"{material['base_code']}{material['version']} {material['name']}"); title.setWordWrap(True); layout.addWidget(title)
   self.table=QTableWidget(len(usages),1); self.table.setHorizontalHeaderLabels(['包含此物料的SKU / 父级物料']); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.setWordWrap(True)
   for index,usage in enumerate(usages):
@@ -1069,7 +1084,8 @@ class MaterialUsageDialog(QDialog):
   if main.svc.db.conn.execute('SELECT 1 FROM skus WHERE id=?',(sku_id,)).fetchone() is None:
    QMessageBox.information(self,'SKU不存在','该SKU已删除，请重新进行物料反查。'); return
   self.accept()  # 先结束模态反查，避免目标BOM被反查弹窗阻挡。
-  main.open_bom_id(sku_id)
+  window=main.open_bom_id(sku_id)
+  if window is not None:window.locate_material(self.material_id,self.usages[row].get('parent_id'))
  def resizeEvent(self,event):
   super().resizeEvent(event)
   self.table.resizeRowsToContents()

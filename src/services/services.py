@@ -398,7 +398,7 @@ class Services:
    result.append({'parent_id':parent['id'],'sku_ids':sku_ids or [None],'sku_labels':usages or ['未包含在SKU中'],'parent_label':parent_label,'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
   return result
  def material_usage(self,i):
-  result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label']} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
+  result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label'],'parent_id':reference['parent_id']} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
   for sku in self.skus():
    if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']}",'parent':'SKU根节点（无父级）'})
   return result
@@ -484,8 +484,9 @@ class Services:
  def export_database(self,path):
   wb=Workbook(); ws=wb.active; ws.title='SKU清单'; ws.append(['序号','SKU编码','SKU名称','SKU描述','修改日期时间'])
   for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['updated_at']])
+  self.format_export_sheet(ws,{'序号'})
   self.write_material_sheet(wb.create_sheet('物料库'))
-  self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute('SELECT * FROM change_logs ORDER BY id')))
+  self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
   for r in self.skus():
    self.write_bom_sheet(wb.create_sheet((r['base_code']+r['version'])[:31]),r['material_id'])
   wb.save(path)
@@ -625,5 +626,9 @@ class Services:
   reset=self.db.conn.execute('SELECT start_log_id FROM sku_history_reset WHERE root_id=?',(sku['material_id'],)).fetchone()
   if reset:records=[row for row in records if row['id']>=reset[0]]
   self.write_change_sheet(w,records)
-  self.write_bom_sheet(wb.create_sheet('SKU对应的BOM'),sku['material_id'])
+  import re
+  name=self.material_snapshot(sku['material_id'])['name']
+  # Excel工作表名称限制：非法字符替换、31字符上限，重名由openpyxl消歧。
+  title=re.sub(r'[\\/*?:\[\]]','_',name).strip().strip("'")[:31] or 'BOM'
+  self.write_bom_sheet(wb.create_sheet(title),sku['material_id'])
   wb.save(path)

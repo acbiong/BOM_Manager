@@ -31,7 +31,7 @@ class ExportSelectionTests(unittest.TestCase):
     s.update_project({'project_name':'项目甲'})
     path=Path(tmp)/'out.xlsx';s.export_sku(sid,path);wb=load_workbook(path)
     try:
-     sheet=wb['SKU对应的BOM'];headers=[c.value for c in sheet[1]]
+     sheet=wb['SKU名称'];headers=[c.value for c in sheet[1]]
      self.assertEqual(headers[15:20],['替代料1物料编码','替代料1版本号','替代料1名称','替代料1供应商','替代料1MPN'])
      self.assertEqual([sheet.cell(2,c).value for c in range(16,26)],['A','100','替代一','供应商','型号','B','100','替代二','供应商','型号'])
      self.assertEqual(sheet.cell(2,26).value,'备注内容');self.assertIsNone(sheet.cell(3,16).value)
