@@ -25,10 +25,13 @@ class BomExportLayoutTests(unittest.TestCase):
      wb=load_workbook(out);sheet=wb['R001' if database_export else ('中文物料名称'*12)[:31]]
      try:
       rows=list(sheet.values);headers=rows[0]
-      self.assertEqual([r[0] for r in rows[1:]],['1','1.1','1.1.1','1.2','2','2.1'])
-      self.assertEqual([r[2] for r in rows[1:]],['R','P','C','P','R','C'])
+      self.assertEqual([r[0] for r in rows[1:]],['1','1.1','1.1.1','1.1.1.1','1.1.2','1.2','1.2.1'])
+      self.assertEqual([r[2] for r in rows[1:]],['ROOT','R','P','C','P','R','C'])
+      self.assertEqual(rows[1][:8],('1',0,'ROOT','ROOT','R','001','中文物料名称'*12,'长描述'*30))
+      self.assertEqual(rows[1][8:13],(None,1,'pcs','工业级','M'))
+      self.assertEqual([r[1] for r in rows[1:]],[0,1,2,3,2,1,2])
       self.assertEqual(headers[8:13],('物料位置','用量','单位','物料等级','M/P'));self.assertEqual(headers[-1],'备注')
-      self.assertEqual(rows[2][8:12],('安装位置A',2.3,'pcs','工业级'));self.assertEqual(rows[2][-1],'业务备注\n第二行')
+      self.assertEqual(rows[3][8:12],('安装位置A',2.3,'pcs','工业级'));self.assertEqual(rows[3][-1],'业务备注\n第二行')
       self.assertEqual(sheet.cell(2,1).data_type,'s');self.assertEqual(sheet.cell(2,6).value,'001')
       self.assertTrue(all(5<=dimension.width<=60 for dimension in sheet.column_dimensions.values()))
       self.assertGreater(sheet.row_dimensions[2].height,22)
@@ -44,5 +47,19 @@ class BomExportLayoutTests(unittest.TestCase):
      finally:wb.close()
     empty=s.create_sku(s.create_material(dict(base_code='EMPTY',version='1',name='空',unit='pcs')))
     s.export_sku(empty,Path(tmp)/'empty.xlsx');wb=load_workbook(Path(tmp)/'empty.xlsx')
-    self.assertEqual(wb['空'].max_row,1);self.assertTrue(wb['空']['A1'].font.bold);wb.close()
+    self.assertEqual(wb['空'].max_row,2);self.assertTrue(wb['空']['A1'].font.bold);wb.close()
+   finally:db.close()
+ def test_exported_root_can_be_verified_on_import(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   try:
+    root,child,wrong=[s.create_material(dict(base_code=code,version='001',name=code,unit='pcs')) for code in ('SKU','CHILD','WRONG')]
+    sid=s.create_sku(root);s.save_bom(root,[dict(material_id=child,quantity=2.5,unit='pcs',position='A')])
+    path=Path(tmp)/'bom.xlsx';s.export_sku(sid,path)
+    mapping=dict(zip(s.BOM_HEADERS,['父项编码','父项版本','物料基础编码','物料版本号','用量','物料位置']))
+    preview=s.import_bom(path,root,sheet_name='SKU',header_mapping=mapping,persist=False)
+    self.assertEqual(len(preview),1);self.assertEqual(preview[0]['data']['material_id'],child)
+    self.assertEqual(preview[0]['data']['quantity'],2.5)
+    with self.assertRaisesRegex(ValueError,'BOM选择错误'):
+     s.import_bom(path,wrong,sheet_name='SKU',header_mapping=mapping,persist=False)
    finally:db.close()

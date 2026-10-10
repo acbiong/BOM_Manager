@@ -576,11 +576,15 @@ class Services:
   headers=headers[:-1]+alternate_headers+['备注']
   sheet.append(headers)
   materials={row['id']:row for row in self.materials()}
+  # 根SKU也属于导出的BOM：ROOT标记便于导入时核对根物料身份。
+  material=materials[root]
+  sheet.append(['1',0,'ROOT','ROOT',material['base_code'],material['version'],material['name'],material['description'],'',1.0,material['unit'],material['grade'],material['mp_flag'],material['manufacturer'],material['mpn']]+['']*(count*5)+[''])
+  sheet.cell(2,1).number_format='@'; sheet.cell(2,10).number_format='0.0'
   counters={}; numbers={}
   for row in rows:
    parent_path=row['parent_node_id']
    counters[parent_path]=counters.get(parent_path,0)+1
-   number=(numbers[parent_path]+'.' if parent_path else '')+str(counters[parent_path])
+   number=(numbers[parent_path] if parent_path else '1')+'.'+str(counters[parent_path])
    numbers[row['node_id']]=number
    parent=materials[row['parent_material_id']]
    alternate_values=[value for alternate in alternates[row['id']] for value in (alternate['base_code'],alternate['version'],alternate['name'],alternate['manufacturer'],alternate['mpn'])]

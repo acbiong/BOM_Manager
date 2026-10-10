@@ -33,8 +33,9 @@ class ExportSelectionTests(unittest.TestCase):
     try:
      sheet=wb['SKU名称'];headers=[c.value for c in sheet[1]]
      self.assertEqual(headers[15:20],['替代料1物料编码','替代料1版本号','替代料1名称','替代料1供应商','替代料1MPN'])
-     self.assertEqual([sheet.cell(2,c).value for c in range(16,26)],['A','100','替代一','供应商','型号','B','100','替代二','供应商','型号'])
-     self.assertEqual(sheet.cell(2,26).value,'备注内容');self.assertIsNone(sheet.cell(3,16).value)
+     self.assertTrue(all(sheet.cell(2,c).value is None for c in range(16,27)))
+     self.assertEqual([sheet.cell(3,c).value for c in range(16,26)],['A','100','替代一','供应商','型号','B','100','替代二','供应商','型号'])
+     self.assertEqual(sheet.cell(3,26).value,'备注内容');self.assertIsNone(sheet.cell(4,16).value)
      self.assertTrue(sheet.cell(2,25).alignment.wrap_text);self.assertEqual(sheet.cell(2,25).border.left.style,'thin')
      logs=list(wb['变更记录'].values);self.assertEqual(logs[0][-2:],('变更类型','变更详细内容'))
      created=next(row for row in logs[1:] if row[5]=='新建物料');self.assertIsNone(created[6])
