@@ -27,13 +27,13 @@ class MaterialSearchTests(unittest.TestCase):
    self.d.fields[field].setText(value);self.d.search();self.assertEqual(self.d.table.rowCount(),count)
   self.d.fields['name'].setText('电阻');self.d.fields['description'].setText('20K');self.d.search();self.assertEqual(self.d.table.rowCount(),0)
   self.d.fields['mpn'].setText('r200');self.d.search();self.assertEqual(self.d.table.rowCount(),1)
-  self.assertEqual([self.d.table.item(0,c).text() for c in range(4)],['2','B02100','电阻','20K 0603'])
+  self.assertEqual([self.d.table.item(0,c).text() for c in range(6)],['2','B02100','电阻','20K 0603','ACME','R200'])
  def test_double_click_locates_after_row_changes_and_clears_hiding_filter(self):
-  self.d.fields['code'].setText('B02');self.d.search()
+  self.d.show();self.d.fields['code'].setText('B02');self.d.search()
   self.s.create_material(dict(base_code='A00',version='1',name='插入行',unit='pcs'))
   self.w._filters={2:('电容',None)};self.w.apply_filters()
   self.d.table.cellDoubleClicked.emit(0,0)
-  row=self.w.t.currentRow();self.assertEqual(row,2);self.assertEqual(self.w.t.item(row,0).data(Qt.UserRole),self.ids[1]);self.assertFalse(self.w.t.isRowHidden(row));self.assertEqual(self.d.result(),self.d.Accepted)
+  row=self.w.t.currentRow();self.assertEqual(row,2);self.assertEqual(self.w.t.item(row,0).data(Qt.UserRole),self.ids[1]);self.assertFalse(self.w.t.isRowHidden(row));self.assertEqual(self.d.result(),0);self.assertTrue(self.d.isVisible());self.assertFalse(self.d.isModal())
  def test_empty_and_deleted_result(self):
   self.d.search();self.assertEqual(self.d.table.rowCount(),0);self.assertIn('至少',self.d.count_label.text())
   self.d.fields['mpn'].setText('R100');self.d.search();self.s.delete_material(self.ids[0])

@@ -51,7 +51,7 @@ class ImportDialogTests(unittest.TestCase):
    path=Path(tmp)/'wide.xlsx';wb=Workbook();headers=['字段'+str(i)+'较长的名称'*4 for i in range(20)];wb.active.append(headers)
    for i in range(30):wb.active.append([str(i)+'行内容'*20]*20)
    wb.save(path);wb.close();dialog=MaterialHeaderMappingDialog(path,headers,headers);dialog.resize(600,420);dialog.show();self.app.processEvents()
-   self.assertEqual(dialog.preview.horizontalScrollBarPolicy(),Qt.ScrollBarAlwaysOn);self.assertEqual(dialog.preview.verticalScrollBarPolicy(),Qt.ScrollBarAlwaysOn)
+   self.assertEqual(dialog.preview.horizontalScrollBarPolicy(),Qt.ScrollBarAsNeeded);self.assertEqual(dialog.preview.verticalScrollBarPolicy(),Qt.ScrollBarAlwaysOn)
    for bar in (dialog.preview.horizontalScrollBar(),dialog.preview.verticalScrollBar()):
     self.assertGreater(bar.maximum(),0);bar.setValue(bar.maximum());self.assertEqual(bar.value(),bar.maximum())
    dialog.close()

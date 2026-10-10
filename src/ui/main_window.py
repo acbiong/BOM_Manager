@@ -11,6 +11,7 @@ from services.services import MaterialHeaderError, BomImportError
 from ui.theme import apply_theme, theme_icon
 from ui.material_clipboard import copy_material, clipboard_material
 from ui.material_search import MaterialSearchDialog
+from ui.table_layout import fit_columns
 
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
@@ -20,20 +21,6 @@ class QuantityEdit(QDoubleSpinBox):
  def text(self):
   return f'{self.value():.1f}'
 
-def fit_columns(widget):
- """按内容自适应列宽，限制在5~25个中文字符，并启用换行。"""
- widget.setWordWrap(True)
- header=widget.header() if hasattr(widget,'header') else widget.horizontalHeader()
- char_width=max(widget.fontMetrics().horizontalAdvance('中'),1)
- minimum=5*char_width; maximum=25*char_width
- header.setStretchLastSection(False)
- for i in range(header.count()):
-  if hasattr(widget,'isColumnHidden') and widget.isColumnHidden(i): continue
-  header.setSectionResizeMode(i,QHeaderView.ResizeToContents)
-  width=max(minimum,min(maximum,header.sectionSize(i)))
-  header.setSectionResizeMode(i,QHeaderView.Interactive)
-  header.resizeSection(i,width)
- if hasattr(widget,'resizeRowsToContents'): widget.resizeRowsToContents()
 class MaterialDialog(QDialog):
  def __init__(self,parent=None,data=None,readonly_keys=None):
   super().__init__(parent); self.setWindowTitle('物料'); f=QFormLayout(self); data=data or {}; self.e={}; readonly_keys=readonly_keys or set()
@@ -147,7 +134,7 @@ class MaterialHeaderMappingDialog(QDialog):
   table.verticalHeader().setFixedWidth(max(table.verticalHeader().fontMetrics().horizontalAdvance(x) for x in ('需求表头','目标表头'))+24)
   extra=max(0,table.viewport().width()-sum(widths))
   table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
-  for column,width in enumerate(widths):table.setColumnWidth(column,width+extra//len(widths)+(column<extra%len(widths)))
+  for column,width in enumerate(widths):table.setColumnWidth(column,width+(extra*sum(widths[:column+1])//sum(widths)-extra*sum(widths[:column])//sum(widths)))
   # 不使用ResizeToContents覆盖组合框行高；需求行、目标行都按当前字体和主题计算。
   table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
   table.setRowHeight(0,table.fontMetrics().height()+20); table.setRowHeight(1,max(heights))
@@ -1010,7 +997,8 @@ class MaterialWindow(QMainWindow):
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
   header=self.t.horizontalHeader(); header.setSectionsClickable(True); header.sectionClicked.connect(self.filter_menu); self.refresh()
  def search_materials(self):
-  MaterialSearchDialog(self).exec_()
+  if not hasattr(self,'_search_dialog'):self._search_dialog=MaterialSearchDialog(self)
+  self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
  def locate_material(self,material_id):
   self.refresh()
   for row in range(self.t.rowCount()):
@@ -1171,7 +1159,7 @@ class MaterialUsageDialog(QDialog):
   for index,usage in enumerate(usages):
    item=QTableWidgetItem(f"SKU：{usage['sku']}\n父级物料：{usage['parent']}"); item.setData(Qt.UserRole,usage.get('sku_id')); self.table.setItem(index,0,item)
   self.table.cellDoubleClicked.connect(self.open_sku); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-  self.table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch); self.table.resizeRowsToContents(); layout.addWidget(self.table)
+  fit_columns(self.table); layout.addWidget(self.table)
   buttons=QDialogButtonBox(QDialogButtonBox.Close); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
  def open_sku(self,row,column=0):
   item=self.table.item(row,0)

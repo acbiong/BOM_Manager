@@ -1,4 +1,5 @@
 """物料组合查找对话框：输入模糊条件，输出匹配清单并定位物料库。编辑时间：2026-10-10。"""
+from ui.table_layout import fit_columns
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QAbstractItemView, QLabel,
@@ -25,8 +26,8 @@ class MaterialSearchDialog(QDialog):
         self.search_button = QPushButton('查找')
         self.search_button.clicked.connect(self.search)
         layout.addWidget(self.search_button)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(['物料库行号', '物料编码', '物料名称', '物料规格'])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(['物料库行号', '物料编码', '物料名称', '物料规格', '物料制造商', 'MPN'])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -35,6 +36,7 @@ class MaterialSearchDialog(QDialog):
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.cellDoubleClicked.connect(self.locate)
         layout.addWidget(self.table)
+        fit_columns(self.table)
         self.count_label = QLabel('请输入查找条件')
         layout.addWidget(self.count_label)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
@@ -54,17 +56,13 @@ class MaterialSearchDialog(QDialog):
                 continue
             row = self.table.rowCount()
             self.table.insertRow(row)
-            for col, value in enumerate((number, values['code'], values['name'], values['description'])):
+            for col, value in enumerate((number, values['code'], values['name'], values['description'], values['manufacturer'], values['mpn'])):
                 item = QTableWidgetItem(str(value or ''))
                 item.setData(Qt.UserRole, material['id'])
                 if col == 0:
                     item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, col, item)
-        self.table.resizeColumnsToContents()
-        width = max(1, self.table.fontMetrics().horizontalAdvance('中'))
-        for col in range(4):
-            self.table.setColumnWidth(col, min(25 * width, max(5 * width, self.table.columnWidth(col))))
-        self.table.resizeRowsToContents()
+        fit_columns(self.table)
         self.count_label.setText(f'共找到 {self.table.rowCount()} 个物料（行号对应物料库完整清单）')
 
     def locate(self, row, column=0):
@@ -75,7 +73,6 @@ class MaterialSearchDialog(QDialog):
             QMessageBox.information(self, '物料不存在', '该物料已删除，请重新查找。')
             self.search()
             return
-        self.accept()
         if self.library.isMinimized():
             self.library.showNormal()
         self.library.raise_()
