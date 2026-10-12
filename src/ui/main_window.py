@@ -13,6 +13,7 @@ from ui.material_clipboard import copy_material, clipboard_material
 from ui.material_search import MaterialSearchDialog
 from ui.table_layout import fit_columns
 from ui.about_dialog import AboutDialog
+from ui.frozen_table import FrozenMaterialTable
 from ui.import_paths import bom_import_directory, remember_bom_import
 
 class QuantityEdit(QDoubleSpinBox):
@@ -1075,10 +1076,22 @@ class MaterialWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._filters={}; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
-  menu=self.menuBar(); a=menu.addAction('查找物料'); a.triggered.connect(self.search_materials); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
+  menu=self.menuBar(); a=menu.addAction('查找物料'); a.triggered.connect(self.search_materials); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=FrozenMaterialTable(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
-  self._base_column_labels=list(self._column_labels);self._sku_column_ids=[]
+  self._base_column_labels=list(self._column_labels);self._sku_column_ids=[];self._hidden_skus=set()
+  self.sku_columns_button=QToolButton();self.sku_columns_button.setText('SKU用量列');self.sku_columns_button.clicked.connect(self.choose_sku_columns);menu.setCornerWidget(self.sku_columns_button,Qt.TopRightCorner)
   header=self.t.horizontalHeader(); header.setSectionsClickable(True); header.sectionClicked.connect(self.filter_menu); self.refresh()
+ def choose_sku_columns(self):
+  dialog=QDialog(self);dialog.setWindowTitle('选择显示的SKU用量列');dialog.resize(600,480);layout=QVBoxLayout(dialog)
+  choices=QListWidget();layout.addWidget(choices)
+  for sid,label in zip(self._sku_column_ids,self._column_labels[len(self._base_column_labels):]):
+   item=QListWidgetItem(label.replace('\n',' '),choices);item.setData(Qt.UserRole,sid);item.setCheckState(Qt.Unchecked if sid in self._hidden_skus else Qt.Checked)
+  row=QHBoxLayout()
+  for text,state in [('全选',Qt.Checked),('全不选',Qt.Unchecked)]:
+   button=QPushButton(text);button.clicked.connect(lambda _,value=state:[choices.item(i).setCheckState(value) for i in range(choices.count())]);row.addWidget(button)
+  layout.addLayout(row);buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+  if dialog.exec_()==QDialog.Accepted:
+   self._hidden_skus={choices.item(i).data(Qt.UserRole) for i in range(choices.count()) if choices.item(i).checkState()==Qt.Unchecked};self.refresh()
  def search_materials(self):
   if not hasattr(self,'_search_dialog'):self._search_dialog=MaterialSearchDialog(self)
   self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
@@ -1114,6 +1127,7 @@ class MaterialWindow(QMainWindow):
    self.t.setRowHidden(row,not match); visible+=int(match)
   for column,label in enumerate(self._column_labels):
    item=self.t.horizontalHeaderItem(column); item.setText(label+(' [筛选] ▾' if column in self._filters else ' ▾')); item.setToolTip('点击筛选；多列条件同时生效')
+  self.t.sync_frozen()
   self.statusBar().showMessage(f'显示 {visible} / {self.t.rowCount()} 个物料')
  def edit_current(self,row,column):
   rs=self.svc.materials();
@@ -1214,8 +1228,13 @@ class MaterialWindow(QMainWindow):
   self._filters={col:condition for col,condition in self._filters.items() if col<base}
   self._filters.update({base+i:remembered[sid] for i,sid in enumerate(ids) if sid in remembered})
   self._sku_column_ids=ids
-  self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+' '+sku['name'] for sku in skus]
+  self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+'\n'+sku['name'] for sku in skus]
   self.t.setColumnCount(len(self._column_labels));self.t.setHorizontalHeaderLabels(self._column_labels)
+  self._hidden_skus.intersection_update(ids)
+  for i,sid in enumerate(ids):
+   self.t.setColumnHidden(base+i,sid in self._hidden_skus)
+   if sid in self._hidden_skus:self._filters.pop(base+i,None)
+  self.t.horizontalHeader().setMinimumHeight(self.t.fontMetrics().height()*2+16)
   quantities=self.svc.sku_material_quantities(skus)
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
@@ -1224,7 +1243,7 @@ class MaterialWindow(QMainWindow):
     if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
     self.t.setItem(i,j,item)
-  self.apply_filters(); fit_columns(self.t)
+  self.apply_filters(); fit_columns(self.t);self.t.sync_frozen()
 
 class MaterialVersionDialog(QDialog):
  def __init__(self,material,references,parent=None):

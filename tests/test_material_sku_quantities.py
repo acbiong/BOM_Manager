@@ -29,7 +29,7 @@ class MaterialSkuQuantityTests(unittest.TestCase):
     self.assertEqual(w.t.columnCount(),13);self.assertEqual(value('C',z),'9.0');self.assertEqual(value('Z',z),'1.0');self.assertEqual(value('C',a),'NA');self.assertEqual(value('X',z),'NA')
     w._filters[11]=('',{'9.0'});w.apply_filters()
     main.sort_skus(1);self.assertEqual(w._sku_column_ids,[a,z]);self.assertEqual(standalone._sku_column_ids,[a,z]);self.assertIn(12,w._filters);self.assertEqual(value('C',z),'9.0')
-    self.assertEqual(w._column_labels[11],'A1 A');main.refresh();self.assertEqual(w._sku_column_ids,[a,z])
+    self.assertEqual(w._column_labels[11],'A1\nA');main.refresh();self.assertEqual(w._sku_column_ids,[a,z])
     s.save_bom(ids['P'],[dict(material_id=ids['C'],quantity=2,unit='pcs')]);self.assertEqual(value('C',z),'10.0')
     s.delete_sku(z);self.assertEqual(w._sku_column_ids,[a]);self.assertEqual(w._filters,{})
     new=s.create_sku(ids['X']);self.assertIn(new,w._sku_column_ids);self.assertEqual(value('X',new),'1.0')
