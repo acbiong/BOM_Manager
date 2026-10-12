@@ -13,6 +13,7 @@ from ui.material_clipboard import copy_material, clipboard_material
 from ui.material_search import MaterialSearchDialog
 from ui.table_layout import fit_columns
 from ui.about_dialog import AboutDialog
+from ui.import_paths import bom_import_directory, remember_bom_import
 
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
@@ -943,9 +944,11 @@ class BomWindow(QMainWindow):
   self.mark_dirty(); self.show_item_info(item)
  def import_bom(self,selected_item=None):
   if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将替换当前编辑缓存，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
-  p=QFileDialog.getOpenFileName(self,'导入BOM','','Excel (*.xlsx)')[0]
+  config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
+  p=QFileDialog.getOpenFileName(self,'导入BOM',bom_import_directory(config_service),'Excel (*.xlsx)')[0]
   if not p:return
   try:
+   p=remember_bom_import(config_service,p)
    sheet=choose_material_sheet(p,self,'BOM')
    from openpyxl import load_workbook
    wb=load_workbook(p,read_only=True,data_only=True)

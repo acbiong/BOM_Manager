@@ -176,3 +176,12 @@ config.ini的import_mappings节分别以materials和bom保存已确认的需求�
 BOM窗口自动恢复基本字段及动态替代料映射组（含非连续编号），源列缺失时置空让用户补选或删除该组；组的删除在确认后更新记忆。物料与BOM记录隔离，取消不写入，损坏JSON忽略并恢复初始匹配。
 
 验证：tests/test_import_mapping_memory.py覆盖重新实例化/列重排恢复、缺列不回退同名、取消/校验失败不保存、BOM替代料组恢复删除与类型隔离、两个物料UI入口优先记忆、损坏配置容错。专项报告test_reports/import_mapping_memory.txt，全量报告和发布由收尾流程生成。
+
+
+## BOM导入目录记忆修复（2026-10-12）
+
+BOM文件选择器不再每次传入空初始路径。选择文件后立即将其目录写入config.ini的database.last_bom_import_dir，相对配置目录保存并与物料导入路径独立；即使后续映射取消/文件不合法也保留选定目录，取消文件选择不覆盖记录。重启及其他BOM窗口均读取同一记录；目录暂不可用回退桌面，保留历史以便重新挂载后恢复。
+
+支持file://解码和smb://映射至已挂载CIFS/GVFS本机路径，Windows使用UNC；不将SMB地址直接交给openpyxl或Path作为普通文件名。不自动挂载共享、不写共享测试数据，找不到挂载/文件时明确提示。
+
+本机只读验证用户指定MFH1目录：smb://192.168.77.143/!项目文件夹/Mobius Foot（脚踝）/02 研发设计资料/90BOM/MFH1正确解析为/media/biong/smbmounts下对应目录，is_dir=True。未读取/导入业务BOM。tests/test_bom_import_paths.py覆盖相对路径持久化、file URI、SMB挂载映射、目录失效/恢复记录、未挂载不覆盖历史、真实UI第二次文件选择初始路径。测试报告test_reports/bom_import_paths.txt。
