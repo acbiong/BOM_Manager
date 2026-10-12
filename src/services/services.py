@@ -438,6 +438,9 @@ class Services:
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
  def import_materials(self,path,conflict_resolver=None,header_mapping=None,progress_callback=None,sheet_name=None):
   required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']
+  # 配置中首个大小写变体为标准写法，先归一化再做重复判断和入库。
+  unit_spellings={}
+  for unit in self.UNITS:unit_spellings.setdefault(unit.casefold(),unit)
   wb=load_workbook(path,read_only=True,data_only=True)
   try:
    if sheet_name is None:
@@ -464,7 +467,9 @@ class Services:
     missing_fields=[field for field in ('物料基础编码','物料版本号','物料名称','单位','物料制造商') if not d[field]]
     if missing_fields:
      fail.append((no,display_code,d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue
-    if d['单位'] not in self.UNITS: fail.append((no,display_code,d['物料名称'],'单位不合规')); continue
+    canonical_unit=unit_spellings.get(d['单位'].casefold())
+    if canonical_unit is None: fail.append((no,display_code,d['物料名称'],'单位不合规：'+d['单位']+'；允许：'+'、'.join(self.UNITS))); continue
+    d['单位']=canonical_unit
     old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
     if old:
      if grade_index is None:d['物料等级']=old['grade']
