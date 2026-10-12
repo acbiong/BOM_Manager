@@ -61,6 +61,22 @@ class Services:
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
  def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,m.updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+ def sku_material_quantities(self,skus=None):
+  """每个SKU数量为1；仅累计主BOM，Decimal保留路径连乘精度。"""
+  from decimal import Decimal
+  graph={}
+  for row in self.db.conn.execute('SELECT parent_material_id,child_material_id,quantity FROM material_bom_items ORDER BY sort_no,id'):
+   graph.setdefault(row['parent_material_id'],[]).append((row['child_material_id'],Decimal(str(row['quantity']))))
+  result={}
+  for sku in self.skus() if skus is None else skus:
+   root=sku['material_id'];totals={root:Decimal('1')}
+   def walk(parent,quantity,ancestors):
+    for child,usage in graph.get(parent,[]):
+     if child in ancestors:continue
+     amount=quantity*usage;totals[child]=totals.get(child,Decimal('0'))+amount
+     walk(child,amount,ancestors|{child})
+   walk(root,Decimal('1'),{root});result[sku['id']]=totals
+  return result
  def create_sku(self,mid,require_empty_bom=False):
   if not self.material_snapshot(mid):raise ValueError('物料不存在')
   if require_empty_bom and self.db.conn.execute('SELECT 1 FROM material_bom_items WHERE parent_material_id=?',(mid,)).fetchone():raise ValueError('物料已有BOM结构，不可用于新建SKU')

@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build(); WindowRefreshBus.subscribe(self.on_data_change)
  def on_data_change(self,event):
-  if event.get('type') in ('bom_changed','material_changed'):self.refresh()
+  if event.get('type') in ('bom_changed','material_changed','sku_changed'):self.refresh()
  def closeEvent(self,event):
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
@@ -288,6 +288,10 @@ class MainWindow(QMainWindow):
   order=Qt.DescendingOrder if self._sku_sort==(column,Qt.AscendingOrder) else Qt.AscendingOrder
   self._sku_sort=(column,order);self.table.sortItems(column,order)
   self.table.horizontalHeader().setSortIndicator(column,order);self.table.horizontalHeader().setSortIndicatorShown(True)
+  self.publish_sku_order()
+ def publish_sku_order(self):
+  self.svc.sku_display_order=[int(self.table.item(row,5).text()) for row in range(self.table.rowCount())]
+  WindowRefreshBus.publish({'type':'sku_order_changed'})
  def refresh(self):
   project=self.svc.project(); name=(project['project_name'] or '').strip(); code=(project['project_code'] or '').strip(); prefix=' '.join(x for x in (code,name) if x and x!='请输入项目名称'); title=f'{prefix} BOM管理系统' if prefix else 'BOM管理系统'
   self.setWindowTitle(title)
@@ -297,6 +301,7 @@ class MainWindow(QMainWindow):
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
   self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
+  self.publish_sku_order()
  def select_database(self):
   current=Path(self.svc.db.path).expanduser()
   # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
@@ -1072,6 +1077,7 @@ class MaterialWindow(QMainWindow):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._filters={}; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
   menu=self.menuBar(); a=menu.addAction('查找物料'); a.triggered.connect(self.search_materials); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=QTableWidget(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
+  self._base_column_labels=list(self._column_labels);self._sku_column_ids=[]
   header=self.t.horizontalHeader(); header.setSectionsClickable(True); header.sectionClicked.connect(self.filter_menu); self.refresh()
  def search_materials(self):
   if not hasattr(self,'_search_dialog'):self._search_dialog=MaterialSearchDialog(self)
@@ -1193,17 +1199,29 @@ class MaterialWindow(QMainWindow):
    remember_export_path(p)
    from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); w.save(p); w.close()
  def on_event(self,event):
-  if event.get('type') in ('material_changed','bom_changed','sku_changed'): self.refresh()
+  if event.get('type') in ('material_changed','bom_changed','sku_changed','sku_order_changed'): self.refresh()
  def closeEvent(self,event):
   for window in list(self._local_bom_windows.values()):
    if not window.close(): event.ignore(); return
   WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); event.accept()
  def refresh(self):
+  from decimal import Decimal,ROUND_HALF_UP
+  skus=list(self.svc.skus());order={sid:i for i,sid in enumerate(getattr(self.svc,'sku_display_order',[]))}
+  skus.sort(key=lambda sku:order.get(sku['id'],len(order)+sku['id']))
+  ids=[sku['id'] for sku in skus];base=len(self._base_column_labels)
+  # 按SKU身份迁移筛选条件，排序或删除列不能把条件套到另一个SKU。
+  remembered={self._sku_column_ids[col-base]:condition for col,condition in self._filters.items() if base<=col<base+len(self._sku_column_ids)}
+  self._filters={col:condition for col,condition in self._filters.items() if col<base}
+  self._filters.update({base+i:remembered[sid] for i,sid in enumerate(ids) if sid in remembered})
+  self._sku_column_ids=ids
+  self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+' '+sku['name'] for sku in skus]
+  self.t.setColumnCount(len(self._column_labels));self.t.setHorizontalHeaderLabels(self._column_labels)
+  quantities=self.svc.sku_material_quantities(skus)
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
-   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]):
+   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+[format(quantities[sku['id']][r['id']].quantize(Decimal('0.1'),rounding=ROUND_HALF_UP),'.1f') if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
     item=QTableWidgetItem(str(v or '')); item.setData(Qt.UserRole,r['id'])
-    if self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
+    if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
     self.t.setItem(i,j,item)
   self.apply_filters(); fit_columns(self.t)
