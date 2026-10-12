@@ -406,7 +406,10 @@ class MainWindow(QMainWindow):
   if sid is None:
    if r<0:return
    sid=int(self.table.item(r,5).text())
-  if QMessageBox.question(self,'确认','删除当前SKU及BOM？')==QMessageBox.Yes:self.svc.delete_sku(sid); self.refresh()
+  sku=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
+  if sku is None:return
+  prompt='该SKU物料仍被其他BOM引用，是否仅移除SKU标记？物料及BOM结构将保留。' if self.svc.material_is_bom_referenced(sku['material_id']) else '删除当前SKU及BOM？'
+  if QMessageBox.question(self,'确认',prompt)==QMessageBox.Yes:self.svc.delete_sku(sid); self.refresh()
  def sku_context_menu(self,pos):
   row=self.table.rowAt(pos.y())
   if row<0:return

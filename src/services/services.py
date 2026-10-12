@@ -69,26 +69,30 @@ class Services:
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'sku_changed','id':sid})
   return sid
+ def material_is_bom_referenced(self,mid):
+  return bool(self.db.conn.execute('SELECT 1 FROM material_bom_items WHERE child_material_id=? LIMIT 1',(mid,)).fetchone() or self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=? LIMIT 1',(mid,)).fetchone())
  def delete_sku(self,sid):
   with self.db.transaction():
    r=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
    if r is None:raise ValueError('SKU不存在')
    root=r['material_id']
-   self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(root,))
-   self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(root,))
-   self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
-   self.db.conn.execute('UPDATE materials SET has_bom=0 WHERE id=?',(root,))
-   owned={row[0] for row in self.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(root,))}
-   owned.update(row[0] for row in self.db.conn.execute("SELECT id FROM change_logs WHERE object_type='bom' AND object_id=?",(root,)))
-   self.db.conn.execute('DELETE FROM bom_log_roots WHERE root_id=?',(root,))
-   for log_id in owned:
-    if not self.db.conn.execute('SELECT 1 FROM bom_log_roots WHERE log_id=?',(log_id,)).fetchone():self.db.conn.execute('DELETE FROM change_logs WHERE id=?',(log_id,))
+   preserve_bom=self.material_is_bom_referenced(root)
+   if not preserve_bom:
+    self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(root,))
+    self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(root,))
+    self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
+    self.db.conn.execute('UPDATE materials SET has_bom=0 WHERE id=?',(root,))
+    owned={row[0] for row in self.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(root,))}
+    owned.update(row[0] for row in self.db.conn.execute("SELECT id FROM change_logs WHERE object_type='bom' AND object_id=?",(root,)))
+    self.db.conn.execute('DELETE FROM bom_log_roots WHERE root_id=?',(root,))
+    for log_id in owned:
+     if not self.db.conn.execute('SELECT 1 FROM bom_log_roots WHERE log_id=?',(log_id,)).fetchone():self.db.conn.execute('DELETE FROM change_logs WHERE id=?',(log_id,))
    self.db.conn.execute("DELETE FROM change_logs WHERE object_type='sku' AND object_id=?",(sid,))
    self.db.conn.execute('INSERT OR REPLACE INTO sku_history_reset(root_id,start_log_id) VALUES(?,0)',(root,))
    self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,))
   from infrastructure.events import WindowRefreshBus
   WindowRefreshBus.publish({'type':'sku_changed','id':sid})
-  WindowRefreshBus.publish({'type':'bom_changed','root':r['material_id']})
+  if not preserve_bom:WindowRefreshBus.publish({'type':'bom_changed','root':r['material_id']})
  def bom(self,root):
   """递归展开物料关系表，返回兼容BOM编辑器的扁平树行。"""
   result=[]
