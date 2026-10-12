@@ -85,7 +85,7 @@ class BomImportTests(unittest.TestCase):
   from unittest.mock import patch
   from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
   from PyQt5.QtCore import Qt
-  from ui.main_window import BomWindow,BomTreeWidget
+  from ui.main_window import BomWindow,BomTreeWidget,BomImportConflictDialog
   root=self.ids['R','1'];old=self.ids['C','1'];new=self.ids['P','2']
   self.s.save_bom(root,[dict(material_id=old,quantity=5,unit='pcs')])
   self.write([['ROOT','ROOT','R','1',None,None],['R','1','P','2',2.3,'new']])
@@ -93,7 +93,7 @@ class BomImportTests(unittest.TestCase):
   for save in (False,True):
    window=BomWindow(self.s,root)
    try:
-    with patch.object(MaterialHeaderMappingDialog,'exec_',return_value=1),patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning') as warning:
+    with patch.object(MaterialHeaderMappingDialog,'exec_',return_value=1),patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QInputDialog,'getItem',return_value=('BOM',True)),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning') as warning,patch.object(BomImportConflictDialog,'exec_',lambda dialog:dialog.finish('incoming')):
      window.import_bom();warning.assert_not_called()
      self.assertTrue(window.dirty);self.assertTrue(window.save_action.isEnabled())
      self.assertEqual([tuple(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items')],before)
@@ -179,7 +179,7 @@ class BomImportTests(unittest.TestCase):
    with patch.object(QMessageBox,'information'):self.assertTrue(window.save())
    relation=self.s.bom(root)[0]['id'];self.assertEqual(self.s.alternates(relation)[0]['material_id'],alt)
    # 无映射时明确清空当前关系的替代料，保存前数据库仍保持原值。
-   nodes=self.s.import_bom(self.path,root,sheet_name='BOM',persist=False);window.stage_import(nodes)
+   nodes=self.s.import_bom(self.path,root,sheet_name='BOM',persist=False,conflict_resolver=lambda _: 'incoming');window.stage_import(nodes)
    window.show_item_info(window.root_item.child(0));self.assertEqual(window.alt_table.rowCount(),0);self.assertEqual(len(self.s.alternates(relation)),1)
    with patch.object(QMessageBox,'information'):self.assertTrue(window.save())
    self.assertEqual(self.s.alternates(relation),[])

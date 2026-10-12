@@ -279,7 +279,7 @@ class Services:
    WindowRefreshBus.publish({'type':'bom_changed','root':r['parent_material_id']})
   except Exception: pass
  BOM_HEADERS=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
- def import_bom(self,path,root=None,sheet_name=None,header_mapping=None,persist=True):
+ def import_bom(self,path,root=None,sheet_name=None,header_mapping=None,persist=True,conflict_resolver=None):
   import math
   wb=load_workbook(path,read_only=True,data_only=True)
   try:
@@ -376,14 +376,74 @@ class Services:
      lines=sorted({no for (parent,child),no in edge_lines.items() if parent in unreachable or child in unreachable})
      issues.append('第'+ '、'.join(map(str,lines))+'行存在不属于当前根物料的孤立分支，请检查父项编码和版本号')
    for mid in sorted(parents|child_ids):walk(mid)
-   if root is not None:
-    try:preview_tree=self.save_bom(root,rows,preview=True)
-    except ValueError as error:issues.append('与数据库共享BOM结构校验失败：'+str(error))
    if issues:raise BomImportError(issues)
+   imported_count=len(rows)
+   rows=self.resolve_import_bom_conflicts(root,rows,conflict_resolver)
+   try:preview_tree=self.save_bom(root,rows,preview=True)
+   except ValueError as error:raise BomImportError(['与数据库共享BOM结构校验失败：'+str(error)]) from error
    if not persist:return preview_tree
    self.save_bom(root,rows)
-   return len(rows)
+   return imported_count
   finally:wb.close()
+ def resolve_import_bom_conflicts(self,root,rows,resolver=None):
+  """Compare explicit imported sub-BOMs, then validate a single resolved shared graph."""
+  from collections import defaultdict
+  system=defaultdict(list); incoming=defaultdict(list)
+  materials={r['id']:dict(r) for r in self.materials()}
+  for record in self.db.conn.execute('SELECT * FROM material_bom_items ORDER BY parent_material_id,sort_no,id'):
+   data=dict(record);data['material_id']=data['child_material_id']
+   data['unit']=materials[data['material_id']]['unit']
+   data['alternate_material_ids']=[a['material_id'] for a in self.alternates(data['id'])]
+   system[data['parent_material_id']].append(data)
+  incoming[root]=[]
+  for row in rows:incoming[row['parent_material_id']].append(row)
+  def label(mid):
+   m=materials[mid];return m['base_code']+m['version']+' '+m['name']
+  def signature(row):return (round(float(row['quantity']),1),row.get('position','') or '',row.get('remark','') or '',tuple(sorted(row.get('alternate_material_ids',[]))))
+  def describe(items):
+   return '\n'.join(f"数量：{signature(row)[0]:.1f}；位置：{signature(row)[1] or '（空）'}；备注：{signature(row)[2] or '（空）'}；替代料："+('、'.join(label(mid) for mid in signature(row)[3]) or '无') for row in items) or '不存在'
+  conflicts=[];conflict_parents=set()
+  # 检查明确提供子项且系统也已有子项的每个物料，包含导入根。
+  for parent,new_rows in incoming.items():
+   if not new_rows or not system.get(parent):continue
+   old_by=defaultdict(list);new_by=defaultdict(list)
+   for row in system[parent]:old_by[row['material_id']].append(row)
+   for row in new_rows:new_by[row['material_id']].append(row)
+   for mid in sorted(set(old_by)|set(new_by)):
+    old=old_by[mid];new=new_by[mid]
+    if sorted(map(signature,old))==sorted(map(signature,new)):continue
+    fields=[]
+    if not old:fields=['导入新增子项']
+    elif not new:fields=['导入删除子项']
+    elif len(old)==len(new)==1:
+     fields=[name for i,name in enumerate(('数量','位置','备注','替代料')) if signature(old[0])[i]!=signature(new[0])[i]]
+    else:fields=['子项关系不同']
+    conflicts.append(dict(parent_id=parent,parent=label(parent),material=label(mid),difference='、'.join(fields),system=describe(old),incoming=describe(new)))
+    conflict_parents.add(parent)
+  choice='incoming'
+  if conflicts:
+   choice=resolver(conflicts) if resolver else 'stop'
+   if choice not in ('system','incoming'):
+    raise BomImportError(['用户停止导入，子BOM不一致，未修改编辑缓存或数据库']+[f"{c['parent']} / {c['material']}：{c['difference']}；系统：{c['system']}；导入：{c['incoming']}" for c in conflicts])
+  effective=dict(system);effective.update(incoming)
+  if choice=='system':
+   # 保留系统整个子树，包括系统叶子节点；防止较深导入定义绕过选择。
+   protected=set();pending=list(conflict_parents)
+   while pending:
+    parent=pending.pop()
+    if parent==root and root not in conflict_parents:raise BomImportError(['保留系统子BOM会使当前导入根物料成为自身的下阶，存在循环引用，未导入'])
+    if parent in protected:continue
+    protected.add(parent);effective[parent]=system.get(parent,[])
+    pending.extend(row['material_id'] for row in system.get(parent,[]))
+  # 丢弃已被替换分支中的孤立导入定义；同一父物料只保存一套定义。
+  resolved=[];visited=set();pending=[root]
+  while pending:
+   parent=pending.pop()
+   if parent in visited:continue
+   visited.add(parent)
+   children=effective.get(parent,[]);resolved.extend(dict(row) for row in children)
+   pending.extend(reversed([row['material_id'] for row in children]))
+  return resolved
  def update_project(self,d):
   with self.db.transaction(): self.db.conn.execute('UPDATE project SET project_name=?,project_code=?,product_name=?,product_model=? WHERE id=1',(d.get('project_name',''),d.get('project_code',''),d.get('product_name',''),d.get('product_model',''))); self.log('project',1,'update',d.get('project_name',''))
  def project(self): return self.db.conn.execute('SELECT * FROM project WHERE id=1').fetchone()
