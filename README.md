@@ -244,20 +244,37 @@ Qt在Windows通过用户注册表保存设置，沙箱禁止写入时，展开�
 
 本机暂未配置WSL/Linux；用户已明确本轮优先完成Windows环境与EXE。AppImage需另行在Linux x86_64构建并验证SHA256，不应将Windows EXE当作AppImage。
 
-## 网络共享目录运行与Deepin短名启动入口
+## Deepin 长路径直接启动修复（不使用快捷方式）
 
-若终端可运行，但Deepin从包含中文的很长共享路径双击无响应，可能是桌面管理器用完整路径生成的systemd服务名超过255字节。此时AppImage尚未启动，需安装短名桌面入口（不需要移动共享文件）：
+Deepin 25 的 dde-application-manager 1.2.59 将完整可执行路径转换为 systemd 服务名，长中文共享路径可能超过 255 字节。失败发生在 AppImage 执行前，不能仅通过重打包 Python 软件修复。此前的桌面入口方案已撤回，安装脚本已删除；不创建桌面快捷方式或 MIME 关联。
+
+`tools/patches/deepin-am-1.2.59-long-path.patch` 修复系统启动逻辑：过长的服务标识使用 SHA256 摘要，实际程序路径、参数和工作目录保持不变；同时将 systemd 请求错误返回给文件管理器，避免静默失败。补丁对应上游 LGPL-3.0-or-later 项目 https://github.com/linuxdeepin/dde-application-manager 的 1.2.59 标签。
+
+可复现编译（仅构建，不自动安装/重启系统服务）：
 
 ```bash
-python3 tools/install_desktop_launcher.py "/完整路径/BOM_Manager_版本_日期时间.AppImage"
+sudo apt-get install --no-install-recommends cmake g++ libsystemd-dev qt6-base-dev libdtk6core-dev libdtkcommon-dev treeland-protocols qt6-wayland-dev qt6-base-private-dev qt6-wayland-private-dev
+./tools/build_deepin_launch_fix.sh
 ```
 
-随后使用桌面或应用菜单中的“BOM管理系统”。如果桌面询问信任/允许启动，请按桌面提示确认；安装器不会修改共享挂载权限。更新AppImage后重新执行安装命令更新目标。
+源码归档有 SHA256 校验，源码及编译输出放在 `.tmp/deepin-launch-fix/`。本机通过用户级服务覆盖启用修复：可执行文件 `~/.local/lib/bom-manager/deepin/dde-application-manager-1.2.59`，配置 `~/.config/systemd/user/org.desktopspec.ApplicationManager1.service.d/90-bom-long-path.conf`。不替换 `/usr/bin/dde-application-manager`。这是本机桌面兼容补丁，不随 AppImage 在其他电脑上自动生效。系统启动管理器升级后应撤销此覆盖，再检查新版是否已修复，避免长期覆盖发行版更新。
 
-共享目录若以只读方式挂载（`findmnt -T "/共享路径"`可检查），无法在同目录生成config.ini及SQLite数据库。软件会显示本地配置路径，数据库新建默认转向可写目录。要使用共享数据库，需管理员提供支持写入和SQLite锁的共享挂载；不要关闭SQLite锁来绕过权限错误。
+撤销补丁、恢复发行版程序：
 
-### SMB文件锁与直接双击的已知限制
+```bash
+rm ~/.config/systemd/user/org.desktopspec.ApplicationManager1.service.d/90-bom-long-path.conf
+systemctl --user daemon-reload
+systemctl --user restart org.desktopspec.ApplicationManager1.service
+```
 
-`smb://`不是SQLite文件路径；通过GVFS等方式能写config.ini也不表示支持SQLite字节范围锁。出现`database is locked`时，软件会解释占用/共享锁原因并将下一次新建默认转到用户本地数据目录。若必须多人共享同一SQLite数据库，需要管理员验证挂载写权限与锁语义；本软件不会关闭锁强行写入。
+验证原生启动接口（测试长中文路径、临界长度、短路径、systemd 错误传播；只使用临时数据库）：
 
-已实测Deepin长路径直接执行可绕过MIME关联并产生超长systemd名称，因此原文件双击不能仅靠更新AppImage保证修复。请使用短名desktop入口或将文件放在简短路径；此项仍是桌面环境限制，不将入口验证算作原文件双击验收。
+```bash
+python3 tools/verify_deepin_launch.py package/BOM_Manager_版本_日期时间.AppImage
+```
+
+结果记录在 `test_reports/deepin_direct_launch.json`。接口自检不能替代文件管理器实际双击验收。文件管理器的“是否运行”安全确认仍由桌面环境控制，补丁不关闭此确认。
+
+### SMB 数据库限制
+
+共享目录能写 config.ini 不代表支持 SQLite 字节范围锁。`smb://` 本身也不是 SQLite 文件路径。出现 `database is locked` 时，软件说明占用/共享锁原因并将下一次新建默认转到本地用户数据目录。使用共享数据库前仍需验证挂载写权限及锁支持；不关闭 SQLite 锁、不擅自修改共享挂载。只读目录下软件会提示实际使用的本地配置位置。

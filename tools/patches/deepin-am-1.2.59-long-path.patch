@@ -1,0 +1,40 @@
+--- a/src/dbus/applicationmanager1service.cpp
++++ b/src/dbus/applicationmanager1service.cpp
+@@ -17,6 +17,7 @@
+ #include <QDBusMessage>
+ #include <QDBusVariant>
+ #include <QDirIterator>
++#include <QCryptographicHash>
+ #include <QFile>
+ #include <QGuiApplication>
+ #include <QHash>
+@@ -980,6 +981,14 @@
+     // Construct systemd unit name according to specification
+     QString unitName = QString{"app-DDE-tmp.%1.%2@%3.service"}.arg(type, actualRunId, randomComponent);
+ 
++    // A systemd unit name must fit into 255 bytes, including its suffix.
++    // Keep the executable and working directory unchanged; only bound the ID.
++    if (unitName.toUtf8().size() > 255) {
++        actualRunId = QString::fromLatin1(QCryptographicHash::hash(
++            (runId.isEmpty() ? program : runId).toUtf8(), QCryptographicHash::Sha256).toHex());
++        unitName = QString{"app-DDE-tmp.%1.%2@%3.service"}.arg(type, actualRunId, randomComponent);
++    }
++
+     // Prepare the command line
+     QStringList commandLine;
+     commandLine << program;
+@@ -1036,8 +1045,12 @@
+         QVariant::fromValue(QList<SystemdAux>())  // arg4: aux units (empty)
+     });
+ 
+-    auto reply = conn.asyncCall(msg);
+-    qInfo() << "Request sent to start transient unit (Async):" << unitName;
++    const auto reply = conn.call(msg, QDBus::Block, 5000);
++    if (reply.type() == QDBusMessage::ErrorMessage) {
++        safe_sendErrorReply(QDBusError::Failed, reply.errorMessage());
++        return QDBusObjectPath("/");
++    }
++    qInfo() << "Started transient unit:" << unitName;
+ 
+     // TODO: the return value is currently empty, it's reserved for future use if we plan to make the spawned process as an
+     // AM-managed instance At that moment, we should:
