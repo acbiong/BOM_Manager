@@ -1,22 +1,65 @@
 """INI配置服务：启动时自动创建配置。输入：应用目录；输出：配置字典。编辑时间：2026-09-24。"""
 from configparser import ConfigParser
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+import ntpath
+import posixpath
+import re
 DEFAULT_MATERIAL_UNITS=('pcs','套','ml','L','mm','cm','m','米','M','克','g')
 
+def relative_config_path(value, base):
+ """Return a portable relative spelling; never guess foreign drive/mount mappings."""
+ value=str(value).replace('\\','/'); base=str(base).replace('\\','/')
+ if not value:return ''
+ if re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://',value):
+  raise ValueError('配置路径不能使用URI，请选择本地文件或本机挂载路径')
+ windows=bool(PureWindowsPath(base).drive)
+ flavor=ntpath if windows else posixpath
+ drive=PureWindowsPath(value).drive
+ if drive and not windows:
+  raise ValueError('配置包含Windows绝对路径，无法在当前系统定位，请重新选择数据库并保存相对路径')
+ if windows and ((drive and not ntpath.isabs(value)) or (value.startswith('/') and not drive)):
+  raise ValueError('配置路径不属于当前系统或缺少完整盘符，请重新选择数据库')
+ target=value if flavor.isabs(value) else flavor.join(base,value)
+ try:return flavor.relpath(flavor.normpath(target),base).replace('\\','/')
+ except ValueError as error:
+  raise ValueError('数据库与config.ini位于不同盘符或共享根目录，无法保存相对路径；请将数据库放到配置文件同一盘符（建议同一文件夹）后重新选择') from error
+
 class ConfigService:
- def __init__(self, base=None): self.base=Path(base or Path.cwd()); self.path=self.base/'config.ini'
+ def __init__(self, base=None): self.base=Path(base or Path.cwd()).expanduser().resolve(); self.path=self.base/'config.ini'
  def load(self):
-  c=ConfigParser(); changed=False
+  c=ConfigParser(interpolation=None); changed=False
   if self.path.exists(): c.read(self.path,encoding='utf-8')
-  if not c.has_section('database'): c['database']={"driver":"sqlite","path":str(self.base/'bom.db'),"host":"127.0.0.1","port":"3306","name":"bom"}; changed=True
+  if not c.has_section('database'): c['database']={"driver":"sqlite","path":"bom.db","host":"127.0.0.1","port":"3306","name":"bom"}; changed=True
   if not c.has_section('materials'):c.add_section('materials'); changed=True
   units=self.parse_units(c.get('materials','units',fallback=''))
   if not units:units=list(DEFAULT_MATERIAL_UNITS); changed=True
   normalized=', '.join(units)
   if c.get('materials','units',fallback='')!=normalized:c.set('materials','units',normalized); changed=True
-  if changed:self.save(c)
+  # Migrate native legacy paths; foreign absolute paths stay visible for recovery.
+  before=dict(c['database'])
+  self._normalize_paths(c,strict=False)
+  if dict(c['database'])!=before:changed=True
+  if changed:self._write(c)
   return c
+ def relative_path(self,value):
+  value=str(value)
+  if value.startswith('~'):value=str(Path(value).expanduser())
+  return relative_config_path(value,self.base)
+ def resolve_path(self,value):
+  return (self.base/self.relative_path(value)).resolve()
+ def _normalize_paths(self,c,strict=True):
+  if not c.has_section('database'):return
+  for key in ('path','last_import_dir'):
+   value=c['database'].get(key,'')
+   if not value:continue
+   try:c['database'][key]=self.relative_path(value)
+   except ValueError:
+    if key=='last_import_dir':c.remove_option('database',key)
+    elif strict:raise
  def save(self,c):
+  self._normalize_paths(c)
+  self._write(c)
+ def _write(self,c):
   self.base.mkdir(parents=True,exist_ok=True)
   with self.path.open('w',encoding='utf-8') as f:c.write(f)
 

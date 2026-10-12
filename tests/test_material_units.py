@@ -17,12 +17,13 @@ class MaterialUnitsTests(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory(); self.base=Path(self.tmp.name); self.config=ConfigService(self.base); self.db=Database(str(self.base/'test.db'))
  def tearDown(self):self.db.close(); self.tmp.cleanup()
  def test_defaults_migration_and_restoration_preserve_database(self):
-  self.config.path.write_text('[database]\npath = /custom/data.db\n[other]\nkey = keep\n',encoding='utf-8')
+  database=self.base/'custom'/'data.db'
+  self.config.path.write_text(f'[database]\npath = {database}\n[other]\nkey = keep\n',encoding='utf-8')
   self.assertEqual(self.config.material_units(),list(DEFAULT_MATERIAL_UNITS))
   cfg=self.config.load(); cfg['materials']['units']='箱,包'; self.config.save(cfg)
   self.assertEqual(self.config.material_units(),['箱','包'])
   self.config.restore_material_units(); cfg=self.config.load()
-  self.assertEqual(cfg['database']['path'],'/custom/data.db'); self.assertEqual(cfg['other']['key'],'keep')
+  self.assertEqual(self.config.resolve_path(cfg['database']['path']),database); self.assertEqual(cfg['other']['key'],'keep')
   cfg.remove_option('materials','units'); self.config.save(cfg); self.assertEqual(self.config.material_units(),list(DEFAULT_MATERIAL_UNITS))
   cfg=self.config.load();cfg['materials']['units']=' , ， ';self.config.save(cfg);self.assertEqual(self.config.material_units(),list(DEFAULT_MATERIAL_UNITS))
  def test_default_new_units_create_and_import(self):

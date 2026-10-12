@@ -283,11 +283,14 @@ class MainWindow(QMainWindow):
   p=chooser.selectedFiles()[0] if chooser.selectedFiles() else ''
   if not p:return
   selected=Path(p).expanduser()
-  selected.parent.mkdir(parents=True,exist_ok=True)
   existed=selected.exists()
   if selected.resolve() == current.resolve():
    QMessageBox.information(self,'数据库未切换','当前已经在使用该数据库：\n'+str(selected)); return
+  new_db=None
   try:
+   config_service=self.svc.config_service or ConfigService()
+   relative_selected=config_service.relative_path(selected.resolve())
+   selected.parent.mkdir(parents=True,exist_ok=True)
    # sqlite3.connect 对已有数据库是打开，对不存在的数据库才是创建，不会覆盖原文件。
    new_db=Database(str(selected))
    valid,missing=new_db.validate_schema()
@@ -297,13 +300,14 @@ class MainWindow(QMainWindow):
    for window in list(self._material_bom_windows.values()):
     if not window.close(): new_db.close(); return
    if self._materials is not None: self._materials.close()
+   c=config_service.load(); c['database']['path']=relative_selected; config_service.save(c)
    old_db=self.svc.db
    self.svc.db=new_db
    old_db.close()
-   config_service=self.svc.config_service or ConfigService(); c=config_service.load(); c['database']['path']=str(selected); config_service.save(c)
    self.refresh()
    QMessageBox.information(self,'数据库已切换',('已打开已有数据库' if existed else '已创建并打开新数据库')+'：\n'+str(selected))
   except Exception as exc:
+   if new_db is not None and new_db is not self.svc.db:new_db.close()
    QMessageBox.critical(self,'数据库错误','目标数据库无法使用，请重新选择数据库。\n\n'+str(exc))
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 资料库').strip())),'Excel (*.xlsx)')[0]
@@ -321,7 +325,9 @@ class MainWindow(QMainWindow):
    self._materials.closed.connect(lambda:setattr(self,'_materials',None))
   self.activate_window(self._materials)
  def import_materials(self):
-  config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent); cfg=config_service.load(); last=cfg['database'].get('last_import_dir',str(Path.home()/'Desktop')); last=last if Path(last).is_dir() else str(Path.home()/'Desktop')
+  config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent); cfg=config_service.load()
+  last=config_service.resolve_path(cfg['database']['last_import_dir']) if cfg['database'].get('last_import_dir') else Path.home()/'Desktop'
+  last=str(last if last.is_dir() else Path.home()/'Desktop')
   p=QFileDialog.getOpenFileName(self,'导入物料清单',last,'Excel (*.xlsx)')[0]
   if p:
     cfg['database']['last_import_dir']=str(Path(p).parent); config_service.save(cfg)

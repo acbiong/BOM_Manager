@@ -18,7 +18,7 @@ class StartupDatabaseTests(unittest.TestCase):
    db=main.startup_database(self.config,self.cfg)
   try:self.assertEqual(db.path,str(target));self.assertTrue(db.validate_schema()[0])
   finally:db.close()
-  self.assertIn('不存在',choose.call_args.args[0]);self.assertEqual(self.config.load()['database']['path'],str(target));self.assertFalse((self.base/'bom.db').exists())
+  self.assertIn('不存在',choose.call_args.args[0]);self.assertEqual(self.config.load()['database']['path'],target.name);self.assertFalse((self.base/'bom.db').exists())
  def test_corrupt_file_preserved_select_valid_database(self):
   corrupt=self.base/'bom.db';corrupt.write_bytes(b'not sqlite');valid=self.base/'valid.db';db=Database(str(valid));db.conn.execute("UPDATE project SET project_name='原项目'");db.conn.commit();db.close()
   with patch.object(main,'choose_database_recovery',return_value='select'),patch.object(main.QFileDialog,'getOpenFileName',return_value=(str(valid),'')):

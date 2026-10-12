@@ -88,9 +88,10 @@ def selected_database_path(value):
  return Path(value).expanduser().resolve()
 
 def startup_database(config_service,cfg):
- path=Path(cfg['database'].get('path','bom.db')).expanduser()
- if not path.is_absolute():path=config_service.base/path
- try:return open_existing_database(path)
+ path=config_service.base/'bom.db'
+ try:
+  path=config_service.resolve_path(cfg['database'].get('path','bom.db'))
+  return open_existing_database(path)
  except (OSError,sqlite3.Error,ValueError) as error:reason=database_error_message(error,path)
  create_base=config_service.base
  if 'SQLite文件锁' in reason:create_base=database_local_fallback();path=create_base/'bom.db'
@@ -105,6 +106,7 @@ def startup_database(config_service,cfg):
   candidate=None; db=None
   try:
    candidate=selected_database_path(selected)
+   relative_candidate=config_service.relative_path(candidate)
    if choice=='create':
     if not writable_directory(candidate.parent):raise PermissionError('所选目录为只读或无写入权限，无法新建数据库：'+str(candidate.parent)+'。请选择本地可写目录；下次选择窗口将自动回到可写目录。')
     # 排他创建占位文件，防止同名数据库被覆盖；只有用户选择新建才创建。
@@ -113,7 +115,7 @@ def startup_database(config_service,cfg):
     except Exception:
      candidate.unlink(missing_ok=True); raise
    else:db=open_existing_database(candidate)
-   cfg['database']['path']=str(candidate); config_service.save(cfg)
+   cfg['database']['path']=relative_candidate; config_service.save(cfg)
    return db
   except (OSError,sqlite3.Error,ValueError) as error:
    if db is not None:db.close()
