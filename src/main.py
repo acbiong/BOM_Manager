@@ -10,17 +10,24 @@ from infrastructure.single_instance import SingleInstance
 from version import get_version
 VERSION=get_version()
 IS_WINDOWS=sys.platform=="win32"
+def writable_directory(directory):
+ # 用普通命名文件检测；SMB可能不支持TemporaryFile使用的O_TMPFILE。
+ try:
+  with tempfile.NamedTemporaryFile(prefix='.bom-write-',dir=directory):pass
+  return True
+ except OSError:return False
+
+def database_creation_directory(requested,config_base):
+ for directory in (Path(requested),Path(config_base),Path.home()):
+  if directory.is_dir() and writable_directory(directory):return directory
+ raise OSError('没有可写的数据库目录，请检查本地用户目录权限')
+
 def app_base():
  if getattr(sys,'frozen',False):
   # 可写的AppImage实际文件所在目录支持便携配置；只读挂载目录则回退到用户目录。
   image_path=os.environ.get('APPIMAGE')
   image_dir=Path(image_path).expanduser().resolve().parent if image_path else (Path(sys.executable).resolve().parent if IS_WINDOWS else None)
-  writable=False
-  if image_dir and os.access(image_dir,os.W_OK):
-   try:
-    with tempfile.TemporaryFile(dir=image_dir):pass
-    writable=True
-   except OSError:pass
+  writable=bool(image_dir and writable_directory(image_dir))
   if writable:
    root=image_dir
   else:
@@ -65,14 +72,15 @@ def startup_database(config_service,cfg):
  while True:
   choice=choose_database_recovery(reason)
   if choice is None:return None
-  start=str(path.parent if path.parent.is_dir() else Path.home()/'Desktop')
+  start=str(database_creation_directory(path.parent,config_service.base) if choice=='create' else (path.parent if path.parent.is_dir() else config_service.base))
   if choice=='create':
-   selected=QFileDialog.getSaveFileName(None,'新建SQLite数据库（可自行命名）',str(Path(start)/'bom.db'),'SQLite数据库 (*.db *.sqlite);;所有文件 (*)',options=QFileDialog.DontConfirmOverwrite)[0]
-  else:selected=QFileDialog.getOpenFileName(None,'选择已有SQLite数据库',start,'SQLite数据库 (*.db *.sqlite);;所有文件 (*)')[0]
+   selected=QFileDialog.getSaveFileName(None,'新建SQLite数据库（可自行命名）',str(Path(start)/'bom.db'),'SQLite数据库 (*.db *.sqlite);;所有文件 (*)',options=QFileDialog.DontConfirmOverwrite|QFileDialog.DontUseNativeDialog)[0]
+  else:selected=QFileDialog.getOpenFileName(None,'选择已有SQLite数据库',start,'SQLite数据库 (*.db *.sqlite);;所有文件 (*)',options=QFileDialog.DontUseNativeDialog)[0]
   if not selected:continue
   candidate=Path(selected).expanduser().resolve(); db=None
   try:
    if choice=='create':
+    if not writable_directory(candidate.parent):raise PermissionError('所选目录为只读或无写入权限，无法新建数据库：'+str(candidate.parent)+'。请选择本地可写目录；下次选择窗口将自动回到可写目录。')
     # 排他创建占位文件，防止同名数据库被覆盖；只有用户选择新建才创建。
     with candidate.open('xb'):pass
     try:db=Database(str(candidate))
@@ -93,7 +101,10 @@ def main():
    if not guard.notify_existing():QMessageBox.information(None,'软件已运行','该目录下的BOM管理系统已在运行或正在启动，请切换到已有窗口。')
    return 0
   base=app_base()
-  config_service=ConfigService(base); cfg=config_service.load(); db=startup_database(config_service,cfg)
+  config_service=ConfigService(base); cfg=config_service.load()
+  if getattr(sys,'frozen',False) and os.environ.get('APPIMAGE') and base!=Path(os.environ['APPIMAGE']).resolve().parent:
+   QMessageBox.information(None,'使用本地配置目录','软件所在目录为只读或无写入权限（网络共享可能以只读方式挂载）。\n配置保存在：'+str(config_service.path)+'\n新建数据库将默认使用可写目录，您也可以自行选择其他可写位置。')
+  db=startup_database(config_service,cfg)
   if db is None:return 0
   w=MainWindow(Services(db,config_service),VERSION); w.show(); guard.set_window(w); return app.exec_()
  except Exception as exc:

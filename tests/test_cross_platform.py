@@ -13,7 +13,7 @@ class CrossPlatformTests(unittest.TestCase):
    base=Path(tmp);install=base/'软件';install.mkdir();fallback=base/'local'
    with patch.object(main,'IS_WINDOWS',True),patch.object(sys,'frozen',True,create=True),patch.object(sys,'executable',str(install/'BOM.exe')),patch.dict(os.environ,{'APPIMAGE':'','LOCALAPPDATA':str(fallback)}):
     self.assertEqual(main.app_base(),install)
-    with patch.object(main.tempfile,'TemporaryFile',side_effect=PermissionError('protected')):
+    with patch.object(main.tempfile,'NamedTemporaryFile',side_effect=PermissionError('protected')):
      self.assertEqual(main.app_base(),fallback/'BOM管理系统')
  def test_smoke_checks_windows_database_and_excel_without_user_data(self):
   with tempfile.TemporaryDirectory() as tmp:

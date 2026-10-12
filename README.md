@@ -243,3 +243,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 finish -Me
 Qt在Windows通过用户注册表保存设置，沙箱禁止写入时，展开状态和导出目录测试可能失败；按权限流程在沙箱外复核，不能跳过测试或将权限失败误判为业务缺陷。完整测试会写入测试用的Qt偏好，建议在专用测试账户执行；发布自检数据库及Excel使用临时目录。
 
 本机暂未配置WSL/Linux；用户已明确本轮优先完成Windows环境与EXE。AppImage需另行在Linux x86_64构建并验证SHA256，不应将Windows EXE当作AppImage。
+
+## 网络共享目录运行与Deepin短名启动入口
+
+若终端可运行，但Deepin从包含中文的很长共享路径双击无响应，可能是桌面管理器用完整路径生成的systemd服务名超过255字节。此时AppImage尚未启动，需安装短名桌面入口（不需要移动共享文件）：
+
+```bash
+python3 tools/install_desktop_launcher.py "/完整路径/BOM_Manager_版本_日期时间.AppImage"
+```
+
+随后使用桌面或应用菜单中的“BOM管理系统”。如果桌面询问信任/允许启动，请按桌面提示确认；安装器不会修改共享挂载权限。更新AppImage后重新执行安装命令更新目标。
+
+共享目录若以只读方式挂载（`findmnt -T "/共享路径"`可检查），无法在同目录生成config.ini及SQLite数据库。软件会显示本地配置路径，数据库新建默认转向可写目录。要使用共享数据库，需管理员提供支持写入和SQLite锁的共享挂载；不要关闭SQLite锁来绕过权限错误。

@@ -95,3 +95,9 @@
 - 用户明确本轮先完成Windows环境与EXE，**不安装WSL/Linux**；AppImage构建和SHA256核验留待Linux环境。Windows11、Ubuntu/deepin跨机验收及人工完整业务验收仍待执行。
 - 最终版本/提交以VERSION和git log为准；收尾调用tools/finish_ai_change.sh，报告放test_reports、EXE及SHA256放package，必须核对.tmp/package_success_commit与HEAD、EXE自检中的版本/提交信息。Windows打包自检使用临时SQLite/Excel，不覆盖业务数据库；自动化窗口自检不等同人工双击验收。
 - 正式收尾前已原生构建0.5.0验证包BOM_Manager_0.5.0_20261010_183439_windows_x64.exe；SHA256复算一致，自检passed=true、qt_platform=windows，七类检查通过。其元数据为收尾前c905eaf，仅作环境验证；正式交付使用收尾后新版本/新提交的包。证据：test_reports/windows_build_initial.txt及同名_smoke.json。
+
+## 2026-10-12共享路径问题
+
+- 用户共享路径挂载经/proc/mounts确认cifs ro；程序不能在其中写配置/数据库，不要擅自改挂载或声称修复为可写。
+- Deepin直接双击超长中文路径会生成超过255字节systemd单元名，在AppImage启动前失败；提供tools/install_desktop_launcher.py短名入口绕过，原始长路径文件仍受桌面管理器限制。
+- 只读配置回退需显示实际位置；新建数据库对话框回退可写目录，使用命名文件探测兼容SMB。
