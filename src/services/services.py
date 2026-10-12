@@ -600,6 +600,53 @@ class Services:
   centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
   centered.update(f'替代料{number}版本号' for number in range(1,count+1))
   self.format_export_sheet(sheet,centered)
+ def export_purchase_bom(self,root,path):
+  """汇总全部下阶物料：路径用量连乘，同版本物料合并，根物料不采购。"""
+  from decimal import Decimal, ROUND_HALF_UP
+  import re
+  material=self.material_snapshot(root)
+  if not material:raise ValueError('根物料不存在')
+  totals={}; path_quantities={None:Decimal('1')}; path_labels={None:material['base_code']+material['version']}
+  alternate_cache={}; snapshots={}
+  for row in self.bom(root):
+   quantity=path_quantities[row['parent_node_id']]*Decimal(str(row['quantity']))
+   path_quantities[row['node_id']]=quantity
+   label=path_labels[row['parent_node_id']]+'/'+row['base_code']+row['version']
+   if row['position']:label+='（位置：'+row['position']+'）'
+   path_labels[row['node_id']]=label
+   entry=totals.setdefault(row['material_id'],dict(material=row,quantity=Decimal('0'),alternates={},remarks=[],occurrences=[]))
+   entry['quantity']+=quantity
+   if row['remark'] and row['remark'] not in entry['remarks']:entry['remarks'].append(row['remark'])
+   if row['id'] not in alternate_cache:alternate_cache[row['id']]=list(self.alternates(row['id']))
+   alternatives=alternate_cache[row['id']]
+   for alternate in alternatives:
+    mid=alternate['material_id']
+    if mid not in snapshots:snapshots[mid]=self.material_snapshot(mid)
+    entry['alternates'].setdefault(mid,snapshots[mid])
+   entry['occurrences'].append((label,quantity,tuple(a['material_id'] for a in alternatives)))
+  count=max((len(e['alternates']) for e in totals.values()),default=0)
+  headers=['序号','物料编码','物料名称','规格','用量','单位','物料等级','M/P','制造商','MPN']
+  headers += [f'替代料{n}{field}' for n in range(1,count+1) for field in ('物料编码','物料名称','规格','制造商','MPN')]+['备注']
+  wb=Workbook(); sheet=wb.active
+  sheet.title=re.sub(r'[\\/*?:\[\]]','_',material['name']).strip().strip("'")[:31] or '采购BOM'
+  sheet.append(headers)
+  try:
+   for number,entry in enumerate(totals.values(),1):
+    row=entry['material']; notes=list(entry['remarks'])
+    # 合并物料不代表不同使用位置的替代关系可以互换，明确标注适用范围。
+    if len({frozenset(ids) for _,_,ids in entry['occurrences']})>1:
+     notes.append('替代料仅适用于对应BOM位置：')
+     for label,quantity,ids in entry['occurrences']:
+      codes='、'.join(snapshots[mid]['base_code']+snapshots[mid]['version'] for mid in ids) or '无替代料'
+      notes.append(f'{label}（用量{quantity:.1f}）：{codes}')
+    values=[v for a in entry['alternates'].values() for v in (a['base_code']+a['version'],a['name'],a['description'],a['manufacturer'],a['mpn'])]
+    values+=['']*(count*5-len(values))
+    quantity=float(entry['quantity'].quantize(Decimal('0.1'),rounding=ROUND_HALF_UP))
+    sheet.append([number,row['base_code']+row['version'],row['name'],row['description'],quantity,row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn']]+values+['\n'.join(notes)])
+    sheet.cell(sheet.max_row,5).number_format='0.0'
+   self.format_export_sheet(sheet,{'序号','用量','单位','物料等级','M/P'})
+   wb.save(path)
+  finally:wb.close()
  def format_export_sheet(self,sheet,centered):
   from openpyxl.styles import Alignment, Border, Side, Font
   from openpyxl.utils import get_column_letter

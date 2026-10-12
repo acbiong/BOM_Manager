@@ -384,17 +384,23 @@ class MainWindow(QMainWindow):
   row=self.table.rowAt(pos.y())
   if row<0:return
   self.table.selectRow(row); sid=int(self.table.item(row,5).text())
-  menu=QMenu(self); version=menu.addAction('版本变更'); export_action=menu.addAction('导出BOM'); delete=menu.addAction('删除SKU')
+  menu=QMenu(self); version=menu.addAction('版本变更'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
   if action==version:self.change_sku_version(sid)
   elif action==export_action:self.export_sku_id(sid)
+  elif action==purchase_action:self.export_sku_id(sid,purchase=True)
   elif action==delete:self.delete_sku(sid)
- def export_sku_id(self,sid):
-  row=self.svc.db.conn.execute('SELECT m.base_code,m.version,m.name FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
+ def export_sku_id(self,sid,purchase=False):
+  row=self.svc.db.conn.execute('SELECT m.id AS material_id,m.base_code,m.version,m.name FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
   if not row:return
-  p=QFileDialog.getSaveFileName(self,'导出BOM',export_start_path(export_filename(row['base_code']+row['version']+' '+row['name'])),'Excel (*.xlsx)')[0]
+  title='采购BOM导出' if purchase else '导出BOM'
+  filename=row['base_code']+row['version']+' '+row['name']+(' 采购BOM' if purchase else '')
+  p=QFileDialog.getSaveFileName(self,title,export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
   if p:
-   remember_export_path(p);self.svc.export_sku(sid,p);QMessageBox.information(self,'完成','BOM导出成功')
+   remember_export_path(p)
+   if purchase:self.svc.export_purchase_bom(row['material_id'],p)
+   else:self.svc.export_sku(sid,p)
+   QMessageBox.information(self,'完成',title+'成功')
  def open_bom(self,row,col): self.open_bom_id(int(self.table.item(row,5).text()))
  def open_bom_id(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
@@ -463,7 +469,10 @@ class BomWindow(QMainWindow):
   self.fields['quantity'].valueChanged.connect(lambda value:self.update_tree_field('quantity',value))
   for key in ('position','remark'): self.fields[key].textChanged.connect(lambda value,k=key:self.update_tree_field(k,value))
   info_box=QGroupBox('物料信息'); info_box.setLayout(form); self.alt_table=QTableWidget(0,6); self.alt_table.setHorizontalHeaderLabels(['替代料编码','版本号','名称','描述','制造商','MPN']); self.alt_table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.alt_table.setContextMenuPolicy(Qt.CustomContextMenu); self.alt_table.customContextMenuRequested.connect(self.alternate_menu); alt_box=QGroupBox('替代料'); alt_l=QVBoxLayout(alt_box); alt_l.addWidget(self.alt_table)
-  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.statusBar().addWidget(self.notice); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(self.refresh_external); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); self.export_action=QAction('导出BOM',self); self.export_action.triggered.connect(self.export_bom); self.export_action.setEnabled(False); tb.addAction(self.export_action); self.load()
+  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.statusBar().addWidget(self.notice); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(self.refresh_external); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); self.export_action=QAction('导出BOM',self); self.export_action.triggered.connect(self.export_bom); self.export_action.setEnabled(False); tb.addAction(self.export_action)
+  self.purchase_export_action=QAction('采购BOM导出',self); self.purchase_export_action.triggered.connect(self.export_purchase_bom); self.purchase_export_action.setEnabled(self.export_action.isEnabled()); tb.addAction(self.purchase_export_action)
+  self.export_action.changed.connect(lambda:self.purchase_export_action.setEnabled(self.export_action.isEnabled()))
+  self.load()
  def mark_dirty(self):
   self.dirty=True
   self.save_action.setEnabled(True)
@@ -938,6 +947,13 @@ class BomWindow(QMainWindow):
   self._baseline_tree=deepcopy(baseline)
   self.render_tree(nodes); self.mark_dirty()
   self.notice.clear(); self.refresh_action.setEnabled(False); self.statusBar().clearMessage()
+ def export_purchase_bom(self):
+  if not self.purchase_export_action.isEnabled():return
+  material=self.svc.material_snapshot(self.root)
+  filename=material['base_code']+material['version']+' '+material['name']+' 采购BOM'
+  p=QFileDialog.getSaveFileName(self,'采购BOM导出',export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
+  if p:
+   remember_export_path(p);self.svc.export_purchase_bom(self.root,p);QMessageBox.information(self,'完成','采购BOM导出成功')
  def export_bom(self):
   if not self.export_action.isEnabled():return
   material=self.svc.material_snapshot(self.root)
