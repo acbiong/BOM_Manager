@@ -86,7 +86,7 @@ needle=bytes.fromhex('0f 85 53 04 00 00')
 pos=b.find(needle)
 if pos < 0:
     raise SystemExit('无法定位 AppImage runtime 的提取分支，拒绝生成可能无法双击运行的包')
-b[pos+1]=0x84  # 缺少环境变量时也跳转到 extract-and-run
+b[pos:pos+2]=bytes.fromhex('90 e9')  # NOP+JMP：无论环境变量是否存在都解压运行
 p.write_bytes(b)
 PYRUNTIME
  chmod +x "$runtime_default"
@@ -98,7 +98,7 @@ import sys
 out=Path(sys.argv[1]); runtime=Path(sys.argv[2]); image=bytearray(out.read_bytes()); patched=runtime.read_bytes()
 needle=bytes.fromhex('0f 85 53 04 00 00'); pos=image.find(needle)
 if pos < 0: raise SystemExit('生成的AppImage中未找到runtime提取分支')
-image[pos+1]=0x84
+image[pos:pos+2]=bytes.fromhex('90 e9')
 out.write_bytes(image)
 PYAPPIMAGE
  chmod +x "package/${name}.AppImage"

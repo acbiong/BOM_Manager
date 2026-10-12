@@ -64,21 +64,47 @@ def choose_database_recovery(reason):
  create=box.addButton('新建数据库',QMessageBox.ActionRole); select=box.addButton('选择数据库',QMessageBox.ActionRole); box.addButton('退出',QMessageBox.RejectRole); box.exec_()
  return 'create' if box.clickedButton()==create else 'select' if box.clickedButton()==select else None
 
+def database_error_message(error,path):
+ text=str(error)
+ if isinstance(error,sqlite3.OperationalError) and ('locked' in text.lower() or 'busy' in text.lower()):
+  return ('数据库无法取得SQLite文件锁：'+str(path)+'\n若其他程序正在使用该数据库，请先关闭相关程序。'
+          '\nSMB/GVFS可能允许写config.ini但不支持SQLite所需锁；请改用本地数据库，或由管理员提供支持SQLite锁的可写挂载。'
+          '\n下一次新建将默认使用本地用户目录。原始错误：'+text)
+ return text
+
+def database_local_fallback():
+ root=Path(os.environ.get('LOCALAPPDATA',Path.home()/'AppData'/'Local') if IS_WINDOWS else os.environ.get('XDG_DATA_HOME',Path.home()/'.local/share'))/'BOM管理系统'
+ root.mkdir(parents=True,exist_ok=True)
+ return root
+
+def selected_database_path(value):
+ from urllib.parse import urlparse,unquote
+ if value.lower().startswith('smb://'):
+  raise ValueError('SQLite不能直接使用smb://地址，请选择本地数据库或支持SQLite文件锁的可写挂载路径。')
+ if value.startswith('file://'):
+  url=urlparse(value)
+  if url.netloc not in ('','localhost'):raise ValueError('请使用本地文件路径或本机挂载路径')
+  value=unquote(url.path)
+ return Path(value).expanduser().resolve()
+
 def startup_database(config_service,cfg):
  path=Path(cfg['database'].get('path','bom.db')).expanduser()
  if not path.is_absolute():path=config_service.base/path
  try:return open_existing_database(path)
- except (OSError,sqlite3.Error,ValueError) as error:reason=str(error)
+ except (OSError,sqlite3.Error,ValueError) as error:reason=database_error_message(error,path)
+ create_base=config_service.base
+ if 'SQLite文件锁' in reason:create_base=database_local_fallback();path=create_base/'bom.db'
  while True:
   choice=choose_database_recovery(reason)
   if choice is None:return None
-  start=str(database_creation_directory(path.parent,config_service.base) if choice=='create' else (path.parent if path.parent.is_dir() else config_service.base))
+  start=str(database_creation_directory(path.parent,create_base) if choice=='create' else (path.parent if path.parent.is_dir() else config_service.base))
   if choice=='create':
    selected=QFileDialog.getSaveFileName(None,'新建SQLite数据库（可自行命名）',str(Path(start)/'bom.db'),'SQLite数据库 (*.db *.sqlite);;所有文件 (*)',options=QFileDialog.DontConfirmOverwrite|QFileDialog.DontUseNativeDialog)[0]
   else:selected=QFileDialog.getOpenFileName(None,'选择已有SQLite数据库',start,'SQLite数据库 (*.db *.sqlite);;所有文件 (*)',options=QFileDialog.DontUseNativeDialog)[0]
   if not selected:continue
-  candidate=Path(selected).expanduser().resolve(); db=None
+  candidate=None; db=None
   try:
+   candidate=selected_database_path(selected)
    if choice=='create':
     if not writable_directory(candidate.parent):raise PermissionError('所选目录为只读或无写入权限，无法新建数据库：'+str(candidate.parent)+'。请选择本地可写目录；下次选择窗口将自动回到可写目录。')
     # 排他创建占位文件，防止同名数据库被覆盖；只有用户选择新建才创建。
@@ -91,8 +117,10 @@ def startup_database(config_service,cfg):
    return db
   except (OSError,sqlite3.Error,ValueError) as error:
    if db is not None:db.close()
-   reason=('同名文件已存在，请选择其他名称或使用“选择数据库”。' if isinstance(error,FileExistsError) else str(error))
-   path=candidate
+   reason=('同名文件已存在，请选择其他名称或使用“选择数据库”。' if isinstance(error,FileExistsError) else database_error_message(error,candidate or selected))
+   if 'SQLite文件锁' in reason or str(selected).lower().startswith('smb://'):
+    create_base=database_local_fallback();path=create_base/'bom.db'
+   elif candidate is not None:path=candidate
 
 def main():
  app=QApplication(sys.argv); guard=SingleInstance(); db=None; base=None
