@@ -18,6 +18,14 @@ def apply_theme(dark=False):
  for role,values in colors.items():palette.setColor(role,QColor(values[int(dark)]))
  for role in (QPalette.Text,QPalette.WindowText,QPalette.ButtonText):palette.setColor(QPalette.Disabled,role,QColor('#777e88' if not dark else '#969ba5'))
  app.setProperty('bom_dark_theme',dark); app.setPalette(palette)
+ hover='#405a78' if dark else '#d7e9ff'
+ pressed='#294464' if dark else '#b7d5fa'
+ text='#ffffff' if dark else '#12365c'
+ app.setStyleSheet(f'''
+ QPushButton:enabled:hover, QToolButton:enabled:hover {{background-color:{hover};color:{text};}}
+ QPushButton:enabled:pressed, QToolButton:enabled:pressed {{background-color:{pressed};color:{text};}}
+ QMenuBar::item:selected, QMenu::item:selected:enabled {{background-color:{hover};color:{text};}}
+ ''')
  for widget in app.topLevelWidgets():widget.update()
 
 def theme_icon(dark):

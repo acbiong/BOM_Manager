@@ -54,12 +54,12 @@ class MaterialHeaderMappingDialog(QDialog):
   self.mapping_kind='bom' if required else 'materials'
   remembered=self.mapping_config.import_mapping(self.mapping_kind) if self.mapping_config else {}
   self.source_headers=headers; self.alternate_groups=[]
-  layout=QVBoxLayout(self); layout.addWidget(QLabel('请确认需求字段与文件列的映射关系：'))
+  layout=QVBoxLayout(self); layout.addWidget(QLabel('请确认需求字段与文件列的映射关系（* 为必选）：'))
   if required:
    button=QPushButton('增加替代料'); button.clicked.connect(self.add_alternate_mapping); layout.addWidget(button)
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
-   item=QTableWidgetItem(need); item.setToolTip(('可选；新建未映射默认：'+(MATERIAL_IMPORT_DEFAULTS.get(need) or '空值')+'；覆盖时未映射保留原值') if need in self.optional else '必需映射'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
+   item=QTableWidgetItem(need if need in self.optional else need+' *'); item.setToolTip(('可选；新建未映射默认：'+(MATERIAL_IMPORT_DEFAULTS.get(need) or '空值')+'；覆盖时未映射保留原值') if need in self.optional else '必需映射'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
    combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems([header for header in headers if header.strip()])
    if need not in missing and need in headers: combo.setCurrentText(need)
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
@@ -102,7 +102,7 @@ class MaterialHeaderMappingDialog(QDialog):
   group=[f'替代料{number}编码',f'替代料{number}版本号']; self.alternate_groups.append(group)
   for field in group:
    column=self.mapping_table.columnCount(); self.mapping_table.insertColumn(column); self.required.append(field)
-   item=QTableWidgetItem(field); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
+   item=QTableWidgetItem(field+' *'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
    combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems([h for h in self.source_headers if h.strip()]); self.combos[field]=combo
    if field in self.source_headers:combo.setCurrentText(field)
    combo.setContextMenuPolicy(Qt.CustomContextMenu); combo.customContextMenuRequested.connect(lambda pos,f=field,w=combo:self.alternate_mapping_menu(f,w.mapToGlobal(pos)))
@@ -267,6 +267,10 @@ class MainWindow(QMainWindow):
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.triggered.connect(self.new_sku); a=bar.addAction('关于'); a.triggered.connect(self.show_about)
   self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
+  self._sku_sort=None
+  self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+  self.table.horizontalHeader().setSectionsClickable(True);self.table.horizontalHeader().sectionClicked.connect(self.sort_skus)
+  for column in (1,2,4):self.table.horizontalHeaderItem(column).setToolTip('点击升序/降序排序')
   corner=QWidget(); corner_layout=QHBoxLayout(corner); corner_layout.setContentsMargins(0,0,4,0)
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
@@ -279,12 +283,18 @@ class MainWindow(QMainWindow):
   label='当前深色主题（月亮），点击切换浅色主题' if dark else '当前浅色主题（太阳），点击切换深色主题'
   self.theme_button.setToolTip(label); self.theme_button.setAccessibleName(label)
  def toggle_theme(self):self.set_theme(not bool(QApplication.instance().property('bom_dark_theme')))
+ def sort_skus(self,column):
+  if column not in (1,2,4):return
+  order=Qt.DescendingOrder if self._sku_sort==(column,Qt.AscendingOrder) else Qt.AscendingOrder
+  self._sku_sort=(column,order);self.table.sortItems(column,order)
+  self.table.horizontalHeader().setSortIndicator(column,order);self.table.horizontalHeader().setSortIndicatorShown(True)
  def refresh(self):
   project=self.svc.project(); name=(project['project_name'] or '').strip(); code=(project['project_code'] or '').strip(); prefix=' '.join(x for x in (code,name) if x and x!='请输入项目名称'); title=f'{prefix} BOM管理系统' if prefix else 'BOM管理系统'
   self.setWindowTitle(title)
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
+  if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
   self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
  def select_database(self):

@@ -29,7 +29,7 @@ class ImportDialogTests(unittest.TestCase):
    dialog=MaterialHeaderMappingDialog(path,headers,headers)
    self.assertEqual((dialog.mapping_table.rowCount(),dialog.mapping_table.columnCount()),(2,9))
    for column,need in enumerate(dialog.required):
-    self.assertEqual(dialog.mapping_table.item(0,column).text(),need)
+    self.assertEqual(dialog.mapping_table.item(0,column).text(),need if need in dialog.optional else need+' *')
     self.assertIs(dialog.mapping_table.cellWidget(1,column),dialog.combos[need])
     if need not in dialog.optional:dialog.combos[need].setCurrentText(headers[[field for field in dialog.required if field not in dialog.optional].index(need)])
    dialog.combos[dialog.required[-1]].setCurrentIndex(0)
