@@ -47,8 +47,11 @@ def choose_material_sheet(path,parent=None,kind='物料库'):
  return sheet
 
 class MaterialHeaderMappingDialog(QDialog):
- def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None):
+ def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None,config_service=None):
   super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=list(required) if required else list(MATERIAL_IMPORT_HEADERS); self.combos={}; self.optional=set() if required else set(MATERIAL_IMPORT_DEFAULTS)
+  self.mapping_config=config_service or getattr(getattr(parent,'svc',None),'config_service',None)
+  self.mapping_kind='bom' if required else 'materials'
+  remembered=self.mapping_config.import_mapping(self.mapping_kind) if self.mapping_config else {}
   self.source_headers=headers; self.alternate_groups=[]
   layout=QVBoxLayout(self); layout.addWidget(QLabel('请确认需求字段与文件列的映射关系：'))
   if required:
@@ -82,9 +85,19 @@ class MaterialHeaderMappingDialog(QDialog):
   self.mapping_table.viewport().installEventFilter(self); self.mapping_table.installEventFilter(self)
   self.fit_mapping_columns()
   self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
+  if required and remembered:
+   import re
+   numbers=sorted({int(match.group(1)) for key in remembered for match in [re.fullmatch(r'替代料([1-9][0-9]*)(?:编码|版本号)',key)] if match})
+   for number in numbers:self.add_alternate_mapping(number=number)
+  for field,combo in self.combos.items():
+   if field in remembered:
+    target=remembered[field]
+    # 按列名恢复，缺失/歧义列保持未映射，不能退回同名或列序号猜测。
+    combo.setCurrentIndex(combo.findText(target) if target and headers.count(target)==1 else 0)
+  self.schedule_mapping_fit()
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
- def add_alternate_mapping(self):
-  number=max([int(group[0].split('替代料')[1].split('编码')[0]) for group in self.alternate_groups] or [0])+1
+ def add_alternate_mapping(self,number=None):
+  if number is None or isinstance(number,bool):number=max([int(group[0].split('替代料')[1].split('编码')[0]) for group in self.alternate_groups] or [0])+1
   group=[f'替代料{number}编码',f'替代料{number}版本号']; self.alternate_groups.append(group)
   for field in group:
    column=self.mapping_table.columnCount(); self.mapping_table.insertColumn(column); self.required.append(field)
@@ -148,6 +161,10 @@ class MaterialHeaderMappingDialog(QDialog):
    if missing: detail.append('未映射：'+ '、'.join(missing))
    if duplicates: detail.append('重复映射：'+ '、'.join(sorted(duplicates)))
    QMessageBox.warning(self,'表头映射错误','；'.join(detail)+'。请继续修改映射关系。'); return
+  if self.mapping_config:
+   try:self.mapping_config.save_import_mapping(self.mapping_kind,values)
+   except (OSError,ValueError) as error:
+    QMessageBox.warning(self,'映射保存失败',str(error));return
   self.accept()
 class MaterialConflictDialog(QDialog):
  def __init__(self,incoming,existing,parent=None):
@@ -338,10 +355,10 @@ class MainWindow(QMainWindow):
     def update_progress(current,total):
      progress.setMaximum(max(total,1)); progress.setValue(min(current,total)); QApplication.processEvents()
     try:
-     try: ok,fail=self.svc.import_materials(p,resolver,progress_callback=update_progress,sheet_name=sheet_name)
+     try: ok,fail=self.svc.import_materials(p,resolver,header_mapping=config_service.import_mapping('materials') or None,progress_callback=update_progress,sheet_name=sheet_name)
      except MaterialHeaderError as header_error:
       progress.close()
-      mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self,sheet_name=sheet_name)
+      mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self,sheet_name=sheet_name,config_service=config_service)
       if mapping_dialog.exec_()!=QDialog.Accepted:
        progress.close(); QMessageBox.warning(self,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
       progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
@@ -934,7 +951,7 @@ class BomWindow(QMainWindow):
    wb=load_workbook(p,read_only=True,data_only=True)
    try:headers=[str(value if value is not None else '').strip() for value in next(wb[sheet].iter_rows(values_only=True),())]
    finally:wb.close()
-   dialog=MaterialHeaderMappingDialog(p,headers,[h for h in self.svc.BOM_HEADERS if h not in headers],self,sheet_name=sheet,required=self.svc.BOM_HEADERS)
+   dialog=MaterialHeaderMappingDialog(p,headers,[h for h in self.svc.BOM_HEADERS if h not in headers],self,sheet_name=sheet,required=self.svc.BOM_HEADERS,config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent))
    if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
    target_root=(selected_item.data(0,Qt.UserRole) or {}).get('material_id') if selected_item is not None else self.root
    def resolve_conflicts(conflicts):
@@ -1143,9 +1160,10 @@ class MaterialWindow(QMainWindow):
   if p:
    try:
     sheet_name=choose_material_sheet(p,self)
-    try:ok,fail=self.svc.import_materials(p,sheet_name=sheet_name)
+    config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
+    try:ok,fail=self.svc.import_materials(p,sheet_name=sheet_name,header_mapping=config_service.import_mapping('materials') or None)
     except MaterialHeaderError as error:
-     dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet_name)
+     dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet_name,config_service=config_service)
      if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消表头映射，未导入任何物料')
      ok,fail=self.svc.import_materials(p,header_mapping=dialog.mapping(),sheet_name=sheet_name)
     self.refresh(); MaterialImportResultDialog(ok,fail,self).exec_()

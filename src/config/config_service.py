@@ -70,3 +70,18 @@ class ConfigService:
  def restore_material_units(self):
   config=self.load(); config['materials']['units']=', '.join(DEFAULT_MATERIAL_UNITS); self.save(config)
   return list(DEFAULT_MATERIAL_UNITS)
+
+ def import_mapping(self,kind):
+  import json
+  if kind not in ('materials','bom'):raise ValueError('未知导入类型')
+  raw=self.load().get('import_mappings',kind,fallback='')
+  try:mapping=json.loads(raw)
+  except (ValueError,TypeError):return {}
+  return mapping if isinstance(mapping,dict) and all(isinstance(k,str) and isinstance(v,str) for k,v in mapping.items()) else {}
+ def save_import_mapping(self,kind,mapping):
+  import json
+  if kind not in ('materials','bom'):raise ValueError('未知导入类型')
+  config=self.load()
+  if not config.has_section('import_mappings'):config.add_section('import_mappings')
+  config['import_mappings'][kind]=json.dumps(mapping,ensure_ascii=False)
+  self.save(config)
