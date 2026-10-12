@@ -27,11 +27,11 @@ class ImportDialogTests(unittest.TestCase):
    path=Path(tmp)/'input.xlsx'; headers=['编码','版本','名称','描述','单位','厂家','料号']
    wb=Workbook(); wb.active.append(headers); wb.active.append(['A','1','名称','','pcs','厂家','M']); wb.save(path); wb.close()
    dialog=MaterialHeaderMappingDialog(path,headers,headers)
-   self.assertEqual((dialog.mapping_table.rowCount(),dialog.mapping_table.columnCount()),(2,8))
+   self.assertEqual((dialog.mapping_table.rowCount(),dialog.mapping_table.columnCount()),(2,9))
    for column,need in enumerate(dialog.required):
     self.assertEqual(dialog.mapping_table.item(0,column).text(),need)
     self.assertIs(dialog.mapping_table.cellWidget(1,column),dialog.combos[need])
-    if need not in dialog.optional:dialog.combos[need].setCurrentText(headers[column if column<5 else column-1])
+    if need not in dialog.optional:dialog.combos[need].setCurrentText(headers[[field for field in dialog.required if field not in dialog.optional].index(need)])
    dialog.combos[dialog.required[-1]].setCurrentIndex(0)
    with patch.object(QMessageBox,'warning') as warning:
     dialog.validate_mapping(); self.assertEqual(dialog.result(),QDialog.Rejected); self.assertIn('物料MPN',warning.call_args.args[2])

@@ -12,6 +12,8 @@ class MaterialHeaderError(ValueError):
   self.headers=headers; self.missing=missing
   super().__init__('缺少表头：'+ '、'.join(missing))
 from config.config_service import DEFAULT_MATERIAL_UNITS
+MATERIAL_IMPORT_HEADERS=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','M/P','物料制造商','物料MPN']
+MATERIAL_IMPORT_DEFAULTS={'物料等级':'','M/P':'M'}
 
 class Services:
  UNITS=list(DEFAULT_MATERIAL_UNITS); MP=['M','P']
@@ -437,7 +439,7 @@ class Services:
  def remove_alternate(self,aid):
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
  def import_materials(self,path,conflict_resolver=None,header_mapping=None,progress_callback=None,sheet_name=None):
-  required=['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']
+  required=[field for field in MATERIAL_IMPORT_HEADERS if field not in MATERIAL_IMPORT_DEFAULTS]
   # 配置中首个大小写变体为标准写法，先归一化再做重复判断和入库。
   unit_spellings={}
   for unit in self.UNITS:unit_spellings.setdefault(unit.casefold(),unit)
@@ -451,16 +453,19 @@ class Services:
    if header_mapping is None:
     missing=[x for x in required if x not in headers]
     if missing: raise MaterialHeaderError(headers,missing)
-    header_mapping={x:x for x in required}
+    header_mapping={x:x for x in MATERIAL_IMPORT_HEADERS if x in headers}
    missing=[x for x in required if not header_mapping.get(x) or header_mapping[x] not in headers]
+   missing.extend(x for x in MATERIAL_IMPORT_DEFAULTS if header_mapping.get(x) and header_mapping[x] not in headers)
    if missing: raise MaterialHeaderError(headers,missing)
    idx={x:headers.index(header_mapping[x]) for x in required}; ok=[]; fail=[]; total=max((ws.max_row or 1)-1,0)
-   grade_header=header_mapping.get('物料等级','物料等级')
-   grade_index=headers.index(grade_header) if grade_header and grade_header in headers else None
+   optional_indices={field:headers.index(header_mapping[field]) if header_mapping.get(field) else None for field in MATERIAL_IMPORT_DEFAULTS}
    if progress_callback: progress_callback(0,total)
    for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
     d={k:str(row[i] if row[i] is not None else '').strip() for k,i in idx.items()};
-    d['物料等级']=str(row[grade_index] if grade_index is not None and grade_index<len(row) and row[grade_index] is not None else '').strip()
+    for field,default in MATERIAL_IMPORT_DEFAULTS.items():
+     index=optional_indices[field]
+     d[field]=(str(row[index]).strip() if index is not None and index<len(row) and row[index] is not None else '') or default
+    d['M/P']=d['M/P'].upper()
     if progress_callback: progress_callback(no-1,total)
     if not d['物料基础编码'] and not d['物料名称']:continue
     display_code=(d['物料基础编码'] or '（空基础编码）')+(d['物料版本号'] or '（空版本号）')
@@ -470,18 +475,20 @@ class Services:
     canonical_unit=unit_spellings.get(d['单位'].casefold())
     if canonical_unit is None: fail.append((no,display_code,d['物料名称'],'单位不合规：'+d['单位']+'；允许：'+'、'.join(self.UNITS))); continue
     d['单位']=canonical_unit
+    if d['M/P'] not in self.MP:fail.append((no,display_code,d['物料名称'],'M/P不合规：'+d['M/P']+'；仅允许M或P')); continue
     old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
     if old:
-     if grade_index is None:d['物料等级']=old['grade']
-     same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('manufacturer','物料制造商'),('mpn','物料MPN')])
+     for field,key in (('物料等级','grade'),('M/P','mp_flag')):
+      if optional_indices[field] is None:d[field]=old[key]
+     same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('mp_flag','M/P'),('manufacturer','物料制造商'),('mpn','物料MPN')])
      if same:
       fail.append((no,display_code,d['物料名称'],'重复物料信息相同，自动跳过')); continue
      choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
      if choice=='cancel': return ok,fail+[(no,display_code,d['物料名称'],'用户取消')]
      if choice=='overwrite':
-      self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
+      self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'mp_flag':d['M/P'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
      fail.append((no,display_code,d['物料名称'],'跳过重复物料')); continue
-    try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
+    try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'mp_flag':d['M/P'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
     except Exception as e: fail.append((no,display_code,d['物料名称'],str(e)))
    if progress_callback: progress_callback(total,total)
    return ok,fail

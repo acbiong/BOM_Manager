@@ -7,7 +7,7 @@ import os
 from config.config_service import ConfigService, DEFAULT_MATERIAL_UNITS
 from database.database import Database
 from infrastructure.events import WindowRefreshBus
-from services.services import MaterialHeaderError, BomImportError
+from services.services import MaterialHeaderError, BomImportError, MATERIAL_IMPORT_HEADERS, MATERIAL_IMPORT_DEFAULTS
 from ui.theme import apply_theme, theme_icon
 from ui.material_clipboard import copy_material, clipboard_material
 from ui.material_search import MaterialSearchDialog
@@ -48,15 +48,14 @@ def choose_material_sheet(path,parent=None,kind='物料库'):
 
 class MaterialHeaderMappingDialog(QDialog):
  def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None):
-  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=list(required) if required else ['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料制造商','物料MPN']; self.combos={}; self.optional=set() if required else {'物料等级'}
-  if not required:self.required.insert(self.required.index('单位')+1,'物料等级')
+  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=list(required) if required else list(MATERIAL_IMPORT_HEADERS); self.combos={}; self.optional=set() if required else set(MATERIAL_IMPORT_DEFAULTS)
   self.source_headers=headers; self.alternate_groups=[]
   layout=QVBoxLayout(self); layout.addWidget(QLabel('请确认需求字段与文件列的映射关系：'))
   if required:
    button=QPushButton('增加替代料'); button.clicked.connect(self.add_alternate_mapping); layout.addWidget(button)
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
-   item=QTableWidgetItem(need); item.setToolTip('可选，未映射时使用空值' if need in self.optional else '必需映射'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
+   item=QTableWidgetItem(need); item.setToolTip(('可选；新建未映射默认：'+(MATERIAL_IMPORT_DEFAULTS.get(need) or '空值')+'；覆盖时未映射保留原值') if need in self.optional else '必需映射'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
    combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems([header for header in headers if header.strip()])
    if need not in missing and need in headers: combo.setCurrentText(need)
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
@@ -154,7 +153,7 @@ class MaterialConflictDialog(QDialog):
  def __init__(self,incoming,existing,parent=None):
   super().__init__(parent); self.setWindowTitle('发现重复物料'); self.resize(1000,400); self.choice='cancel'
   layout=QVBoxLayout(self); title=QLabel('物料 '+incoming['物料基础编码']+incoming['物料版本号']+' 已存在。上行为数据库现有信息，下行为待导入信息；黄色单元格表示差异。'); title.setWordWrap(True); layout.addWidget(title)
-  fields=[('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('manufacturer','物料制造商'),('mpn','物料MPN')]
+  fields=[('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('mp_flag','M/P'),('manufacturer','物料制造商'),('mpn','物料MPN')]
   self.table=QTableWidget(2,len(fields)); self.table.setHorizontalHeaderLabels([label for _,label in fields]); self.table.setVerticalHeaderLabels(['现有数据库','目标导入']); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
   for column,(key,label) in enumerate(fields):
    old=str(dict(existing).get(key,'') or ''); new=incoming.get(label,'')
@@ -428,7 +427,7 @@ class MainWindow(QMainWindow):
   p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx'),'Excel (*.xlsx)')[0]
   if p:
    remember_export_path(p)
-   from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN']); w.save(p)
+   from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); w.save(p); w.close()
 class BomImportIssuesDialog(QDialog):
  def __init__(self,error,parent=None):
   super().__init__(parent); self.setWindowTitle('BOM导入失败')
@@ -1138,7 +1137,7 @@ class MaterialWindow(QMainWindow):
   p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx'),'Excel (*.xlsx)')[0]
   if p:
    remember_export_path(p)
-   from openpyxl import Workbook; w=Workbook(); w.active.append(['物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN']); w.save(p)
+   from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); w.save(p); w.close()
  def on_event(self,event):
   if event.get('type') in ('material_changed','bom_changed','sku_changed'): self.refresh()
  def closeEvent(self,event):
