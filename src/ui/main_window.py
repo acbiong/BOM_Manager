@@ -16,6 +16,7 @@ from ui.about_dialog import AboutDialog
 from ui.frozen_table import FrozenMaterialTable
 from ui.import_paths import bom_import_directory, remember_bom_import
 from ui.replacement_selection import ReplacementSelectionDialog
+from ui.bom_view_state import preserve_bom_view
 
 class WrappingTextEdit(QPlainTextEdit):
  def __init__(self):
@@ -500,6 +501,8 @@ class BomImportConflictDialog(QDialog):
  def finish(self,choice):self.choice=choice;self.accept() if choice!='stop' else self.reject()
 
 class BomTreeWidget(QTreeWidget):
+ def scrollTo(self,index,hint=QAbstractItemView.EnsureVisible):
+  if not getattr(self,'_hold_view',False):super().scrollTo(index,hint)
  def drawRow(self,painter,option,index):
   super().drawRow(painter,option,index)
   painter.save(); painter.setPen(self.palette().mid().color())
@@ -514,7 +517,7 @@ class BomWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,root,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
-  self.tree=BomTreeWidget(); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
+  self.tree=BomTreeWidget(); self.tree.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
   import hashlib
   database_path=str(Path(self.svc.db.path).resolve())
   self._expansion_settings=QSettings('Biong','BOMManager')
@@ -527,7 +530,7 @@ class BomWindow(QMainWindow):
   self.fields={}; form=QFormLayout();
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('grade','物料等级'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
    w=QuantityEdit() if k=='quantity' else (WrappingTextEdit() if k in ('position','remark') else QLabel()); self.fields[k]=w; form.addRow(l,w)
-   if isinstance(w,QLabel):w.setWordWrap(True);w.setTextFormat(Qt.PlainText);w.setMinimumWidth(0);w.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
+   if isinstance(w,QLabel):w.setTextInteractionFlags(Qt.TextSelectableByMouse|Qt.TextSelectableByKeyboard);w.setWordWrap(True);w.setTextFormat(Qt.PlainText);w.setMinimumWidth(0);w.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
   self.fields['quantity'].valueChanged.connect(lambda value:self.update_tree_field('quantity',value))
   for key in ('position','remark'): self.fields[key].textChanged.connect(lambda k=key:self.update_tree_field(k,self.fields[k].text()))
   info_box=QGroupBox('物料信息'); info_box.setLayout(form); self.alt_table=QTableWidget(0,6); self.alt_table.setHorizontalHeaderLabels(['替代料编码','版本号','名称','描述','制造商','MPN']); self.alt_table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.alt_table.setContextMenuPolicy(Qt.CustomContextMenu); self.alt_table.customContextMenuRequested.connect(self.alternate_menu); alt_box=QGroupBox('替代料'); alt_l=QVBoxLayout(alt_box); alt_l.addWidget(self.alt_table)
@@ -626,6 +629,7 @@ class BomWindow(QMainWindow):
    matches=dialog.selected_nodes()
    if not matches:return
   return self.replace_nodes(item,matches,material)
+ @preserve_bom_view
  def replace_nodes(self,item,matches,material,swap_alternate=False):
   selected=None
   for old in matches:
@@ -650,6 +654,7 @@ class BomWindow(QMainWindow):
   parent=item.parent()
   if parent is None or direction not in (-1,1) or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return False
   return 0<=parent.indexOfChild(item)+direction<parent.childCount()
+ @preserve_bom_view
  def move_item(self,item,direction):
   if not self.can_move_item(item,direction):return
   parent=item.parent(); index=parent.indexOfChild(item); expanded=item.isExpanded()
@@ -704,6 +709,7 @@ class BomWindow(QMainWindow):
    if mid in visited:continue
    visited.add(mid); pending.extend(graph.get(mid,()))
   return ''
+ @preserve_bom_view
  def paste_material(self,item,child):
   material=clipboard_material(self.svc)
   if material is None:return
@@ -719,6 +725,7 @@ class BomWindow(QMainWindow):
   data=item.data(0,Qt.UserRole) or {}; parent=item.parent()
   parent_data=parent.data(0,Qt.UserRole) if parent else {}
   return (parent_data.get('material_id'),data.get('material_id'),item.text(3))
+ @preserve_bom_view
  def remove_relation(self,item):
   """将共享关系的所有显示副本标记为待删除，保存前保留可见。"""
   if item is self.root_item:return
@@ -995,6 +1002,7 @@ class BomWindow(QMainWindow):
   if not ok:return
   selected=self.by.get(parent.get('node_id')) if not child else None
   self.insert_material(target,rows[items.index(x)],after=selected)
+ @preserve_bom_view
  def insert_material(self,target,r,after=None):
   parent=target.data(0,Qt.UserRole) or {}
   self._deleted_relations.discard((parent.get('material_id'),r['id'],''))
