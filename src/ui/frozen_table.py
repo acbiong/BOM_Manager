@@ -2,9 +2,12 @@
 from PyQt5.QtCore import Qt,QEvent,QTimer
 from PyQt5.QtWidgets import QTableWidget,QTableView,QAbstractItemView,QFrame
 
+from ui.scrolling_header import ScrollingSkuHeader
+
 class FrozenMaterialTable(QTableWidget):
  def __init__(self,parent=None):
   super().__init__(parent)
+  self.setHorizontalHeader(ScrollingSkuHeader(self))
   self.frozen=QTableView(self);self.frozen.setModel(self.model());self.frozen.setSelectionModel(self.selectionModel())
   self.frozen.setFrameShape(QFrame.NoFrame);self.frozen.setFocusPolicy(Qt.NoFocus);self.frozen.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.frozen.setWordWrap(True);self.frozen.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.frozen.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

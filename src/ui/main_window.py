@@ -16,6 +16,12 @@ from ui.about_dialog import AboutDialog
 from ui.frozen_table import FrozenMaterialTable
 from ui.import_paths import bom_import_directory, remember_bom_import
 
+class WrappingTextEdit(QPlainTextEdit):
+ def __init__(self):
+  super().__init__();self.setLineWrapMode(QPlainTextEdit.WidgetWidth);self.setMinimumWidth(0);self.setFixedHeight(self.fontMetrics().height()*3+12)
+ def text(self):return self.toPlainText()
+ def setText(self,value):self.setPlainText(value)
+
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
   super().__init__(); self.setDecimals(1); self.setRange(0.1,1e12); self.setSingleStep(0.1); self.setValue(1.0)
@@ -519,13 +525,16 @@ class BomWindow(QMainWindow):
   self.tree.itemExpanded.connect(self.remember_expansion);self.tree.itemCollapsed.connect(self.remember_expansion)
   self.fields={}; form=QFormLayout();
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料描述'),('quantity','物料数量'),('unit','物料单位'),('grade','物料等级'),('position','物料位置'),('manufacturer','物料制造商'),('mpn','物料MPN'),('mp_flag','M/P'),('remark','备注')]:
-   w=QuantityEdit() if k=='quantity' else (QLineEdit() if k in ('position','remark') else QLabel()); self.fields[k]=w; form.addRow(l,w)
+   w=QuantityEdit() if k=='quantity' else (WrappingTextEdit() if k in ('position','remark') else QLabel()); self.fields[k]=w; form.addRow(l,w)
+   if isinstance(w,QLabel):w.setWordWrap(True);w.setTextFormat(Qt.PlainText);w.setMinimumWidth(0);w.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
   self.fields['quantity'].valueChanged.connect(lambda value:self.update_tree_field('quantity',value))
-  for key in ('position','remark'): self.fields[key].textChanged.connect(lambda value,k=key:self.update_tree_field(k,value))
+  for key in ('position','remark'): self.fields[key].textChanged.connect(lambda k=key:self.update_tree_field(k,self.fields[k].text()))
   info_box=QGroupBox('物料信息'); info_box.setLayout(form); self.alt_table=QTableWidget(0,6); self.alt_table.setHorizontalHeaderLabels(['替代料编码','版本号','名称','描述','制造商','MPN']); self.alt_table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.alt_table.setContextMenuPolicy(Qt.CustomContextMenu); self.alt_table.customContextMenuRequested.connect(self.alternate_menu); alt_box=QGroupBox('替代料'); alt_l=QVBoxLayout(alt_box); alt_l.addWidget(self.alt_table)
-  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.statusBar().addWidget(self.notice); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(self.refresh_external); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); self.export_action=QAction('导出BOM',self); self.export_action.triggered.connect(self.export_bom); self.export_action.setEnabled(False); tb.addAction(self.export_action)
+  right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); self.info_scroll=QScrollArea();self.info_scroll.setWidgetResizable(True);self.info_scroll.setWidget(right);self.info_scroll.setMinimumWidth(0);spl=QSplitter();self.bom_splitter=spl; spl.addWidget(self.tree); spl.addWidget(self.info_scroll); spl.setStretchFactor(0,1);spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.statusBar().addWidget(self.notice); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(self.refresh_external); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); self.export_action=QAction('导出BOM',self); self.export_action.triggered.connect(self.export_bom); self.export_action.setEnabled(False); tb.addAction(self.export_action)
   self.purchase_export_action=QAction('采购BOM导出',self); self.purchase_export_action.triggered.connect(self.export_purchase_bom); self.purchase_export_action.setEnabled(self.export_action.isEnabled()); tb.addAction(self.purchase_export_action)
   self.export_action.changed.connect(lambda:self.purchase_export_action.setEnabled(self.export_action.isEnabled()))
+  self.default_panel_width=self.fontMetrics().horizontalAdvance('M')*100
+  screen=self.screen().availableGeometry();self.tree.setMinimumWidth(min(420,max(200,screen.width()//2-40)));self.resize(min(self.default_panel_width*2+50,screen.width()),min(850,screen.height()));spl.setSizes([self.default_panel_width,self.default_panel_width])
   self.search_action=tb.addAction('查找物料');self.search_action.triggered.connect(self.search_materials)
   self.load()
  def search_materials(self):
@@ -1080,7 +1089,7 @@ class MaterialWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._filters={}; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
-  menu=self.menuBar(); a=menu.addAction('查找物料'); a.triggered.connect(self.search_materials); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=FrozenMaterialTable(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
+  menu=self.menuBar(); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('查找物料'); a.triggered.connect(self.search_materials); self.resize(1000,600); self.t=FrozenMaterialTable(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
   self._base_column_labels=list(self._column_labels);self._sku_column_ids=[];self._hidden_skus=set()
   self._column_config=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
@@ -1229,6 +1238,7 @@ class MaterialWindow(QMainWindow):
   WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); event.accept()
  def refresh(self):
   from decimal import Decimal,ROUND_HALF_UP
+  project=self.svc.project();self.setWindowTitle(' '.join(str(project[key] or '').strip() for key in ('project_code','project_name') if str(project[key] or '').strip())+' 物料库')
   skus=list(self.svc.skus());order={sid:i for i,sid in enumerate(getattr(self.svc,'sku_display_order',[]))}
   skus.sort(key=lambda sku:order.get(sku['id'],len(order)+sku['id']))
   ids=[sku['id'] for sku in skus];base=len(self._base_column_labels)
