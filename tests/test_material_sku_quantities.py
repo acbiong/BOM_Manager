@@ -47,3 +47,30 @@ class MaterialSkuQuantityTests(unittest.TestCase):
     self.assertEqual(str(s.sku_material_quantities()[sid][c]),'0.50')
     row=next(i for i in range(w.t.rowCount()) if w.t.item(i,0).text()=='C');self.assertEqual(w.t.item(row,11).text(),'0.5')
    finally:w.close();db.close()
+
+ def test_sku_code_width_tooltip_and_quantity_color_priority(self):
+  from PyQt5.QtGui import QColor
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));svc=Services(db)
+   ids={code:svc.create_material(dict(base_code=code,version='100',name=('很长的SKU名称'*12 if code=='SKU-A' else code),unit='pcs')) for code in ('SKU-A','SKU-B','USED','IDLE')}
+   a=svc.create_sku(ids['SKU-A']);b=svc.create_sku(ids['SKU-B'])
+   svc.save_bom(ids['SKU-A'],[dict(material_id=ids['USED'],quantity=2,unit='pcs')])
+   w=MaterialWindow(svc);w._selected_skus={a,b};w.refresh();w.show();self.app.processEvents()
+   try:
+    ca=11+w._sku_column_ids.index(a);cb=11+w._sku_column_ids.index(b)
+    for col,code in ((ca,'SKU-A100'),(cb,'SKU-B100')):
+     self.assertEqual(w.t.columnWidth(col),w.t.horizontalHeader().fontMetrics().horizontalAdvance(code+' ▾')+20)
+    width=w.t.columnWidth(ca);self.assertGreaterEqual(width,w.t.horizontalHeader().fontMetrics().horizontalAdvance('SKU-A100'))
+    self.assertLess(width,w.t.horizontalHeader().fontMetrics().horizontalAdvance('很长的SKU名称'*12))
+    for size in (2400,700):
+     w.resize(size,500);self.app.processEvents();self.app.processEvents();self.assertEqual(w.t.columnWidth(ca),width)
+    w._filters[ca]=('',{'2.0'});w.apply_filters()
+    self.assertIn('SKU-A100\n'+'很长的SKU名称'*12,w.t.horizontalHeaderItem(ca).toolTip())
+    def cell(code,col):
+     row=next(i for i in range(w.t.rowCount()) if w.t.item(i,0).text()==code)
+     return w.t.item(row,col)
+    self.assertEqual(cell('USED',ca).background().color(),QColor('#d9ead3'))
+    self.assertEqual(cell('USED',cb).text(),'NA');self.assertEqual(cell('USED',cb).background().color(),QColor('#eeeeee'))
+    for col in range(w.t.columnCount()):self.assertEqual(cell('IDLE',col).background().color(),QColor('red'))
+    w.refresh();self.assertEqual(w.t.columnWidth(ca),width)
+   finally:w.close();db.close()

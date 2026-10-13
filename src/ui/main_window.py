@@ -1135,7 +1135,7 @@ class MaterialWindow(QMainWindow):
     if query.casefold() not in value.casefold() or (selected is not None and value not in selected):match=False; break
    self.t.setRowHidden(row,not match); visible+=int(match)
   for column,label in enumerate(self._column_labels):
-   item=self.t.horizontalHeaderItem(column); item.setText(label+(' [筛选] ▾' if column in self._filters else ' ▾')); item.setToolTip('点击筛选；多列条件同时生效')
+   item=self.t.horizontalHeaderItem(column); item.setText(label+(' [筛选] ▾' if column in self._filters else ' ▾')); item.setToolTip((label+'\n' if column>=len(self._base_column_labels) else '')+'点击筛选；多列条件同时生效')
   self.t.sync_frozen()
   self.statusBar().showMessage(f'显示 {visible} / {self.t.rowCount()} 个物料')
  def edit_current(self,row,column):
@@ -1250,9 +1250,19 @@ class MaterialWindow(QMainWindow):
    for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+[format(quantities[sku['id']][r['id']].quantize(Decimal('0.1'),rounding=ROUND_HALF_UP),'.1f') if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
     item=QTableWidgetItem(str(v or '')); item.setData(Qt.UserRole,r['id'])
     if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
+    if j>=base:
+     item.setBackground(QColor('#eeeeee' if v=='NA' else '#d9ead3'));item.setForeground(QColor('black'))
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
     self.t.setItem(i,j,item)
-  self.apply_filters(); fit_columns(self.t);self.t.sync_frozen()
+  self.apply_filters(); fit_columns(self.t)
+  # SKU名称不参与列宽；固定编码宽度，窗口变宽时只拉伸普通物料列。
+  header=self.t.horizontalHeader();metrics=header.fontMetrics()
+  for column in range(base,self.t.columnCount()):
+   code=self._column_labels[column].split('\n',1)[0]
+   width=max(header.minimumSectionSize(),metrics.horizontalAdvance(code+' ▾')+20)
+   header.setSectionResizeMode(column,QHeaderView.Fixed);header.resizeSection(column,width)
+   if not self.t.isColumnHidden(column):self.t._proportional_columns.widths[column]=width
+  self.t._proportional_columns.apply();self.t.sync_frozen()
 
 class MaterialVersionDialog(QDialog):
  def __init__(self,material,references,parent=None):
