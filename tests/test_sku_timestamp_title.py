@@ -100,3 +100,20 @@ class SkuTimestampTitleTests(unittest.TestCase):
                     self.assertEqual(Path(dialog.call_args.args[2]).name, filename)
         finally:
             mw.close()
+
+    def test_rapid_saves_update_both_tables_and_linked_list(self):
+        self.s.save_bom(self.parent,[dict(material_id=self.child,quantity=1,unit='pcs')])
+        previous={row['material_id']:row['updated_at'] for row in self.s.skus()}
+        for quantity in (2,3):
+            self.s.save_bom(self.parent,[dict(material_id=self.child,quantity=quantity,unit='pcs')])
+            current={row['material_id']:row['updated_at'] for row in self.s.skus()}
+            for root in (self.root,self.other):
+                self.assertGreater(current[root],previous[root])
+                stored=self.db.conn.execute('SELECT updated_at FROM skus WHERE material_id=?',(root,)).fetchone()[0]
+                self.assertEqual(stored,current[root])
+            self.assertEqual(current[self.unrelated],previous[self.unrelated])
+            displayed={int(self.w.table.item(i,5).text()):self.w.table.item(i,4).text() for i in range(self.w.table.rowCount())}
+            for sku in self.s.skus():self.assertEqual(displayed[sku['id']],sku['updated_at'])
+            previous=current
+        self.s.save_bom(self.parent,[dict(material_id=self.child,quantity=3,unit='pcs')])
+        self.assertEqual({row['material_id']:row['updated_at'] for row in self.s.skus()},previous)

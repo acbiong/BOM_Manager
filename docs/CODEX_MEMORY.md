@@ -302,3 +302,10 @@ BOM右侧替代料表格右键增加“切换成主物料”。选中的替代�
 替换窗口使用原始物料字段查询，新增替代料窗口只取ID/编码/版本/名称，不再查询物料库has_bom/idle等无关计算。保留可输入筛选和选择校验。tests/test_material_picker_performance.py以10000条物料测量从调用操作到真实QEvent.Paint的耗时，并限制SQL数量；本机专项替换116.4ms（3次查询）、增加替代料114.3ms（2次查询），低于300ms。另对比新旧循环/重复规则结果。性能结果为本机离屏Qt测试，其他机器/网络数据库需实机验证，不代表所有环境绝对时间保证。
 
 报告test_reports/picker_performance.txt；完整功能回归、升版、Git提交及AppImage验证按统一收尾流程执行。
+
+
+## BOM保存与联动SKU时间修复（2026-10-13）
+
+BOM保存影响范围继续按保存前后包含发生变化父物料的SKU并集判定，覆盖直接修改、共享子BOM增删及替代料变更。修复只更新materials根记录、未写skus.updated_at的问题：在同一事务中用同一UTC微秒时间同步更新受影响SKU及其根物料，提交后显式发送sku_changed携带全部受影响ID，确保SKU清单刷新。微秒精度避免同一秒连续保存显示时间不变。保持现有UTC存储约定、无关SKU及未实际变更/预览不更新。
+
+tests/test_sku_timestamp_title.py新增连续无等待保存回归，检查两表同步、联动SKU相同保存时间、无关SKU不变、清单立即刷新、无变化保存不更新时间；原新增/数量/替代料/删除共享BOM影响测试保留。7项专项通过，报告test_reports/sku_save_timestamps.txt；全量测试、升版、Git提交与AppImage验证按统一收尾流程执行。

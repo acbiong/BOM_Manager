@@ -1,6 +1,6 @@
 """业务服务层：物料、SKU、BOM、日志和Excel；UI不得直接访问数据库。编辑时间：2026-09-24。"""
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from openpyxl import Workbook,load_workbook
 class BomImportError(ValueError):
  def __init__(self,issues):
@@ -203,6 +203,8 @@ class Services:
   log_roots={sku['material_id']:{sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])} for sku in self.skus()}
   log_roots.setdefault(root,{root}|{row['material_id'] for row in old_rows})
   old_alternates={row['id']:[r['material_id'] for r in self.alternates(row['id'])] for row in old.values()}
+  saved_at=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+  affected_skus=[]
   with self.db.transaction():
    for key,row in old.items():
     if key[0] in parents and key not in desired:
@@ -241,7 +243,9 @@ class Services:
     sku_root=sku['material_id']
     contained=log_roots.get(sku_root,{sku_root})|{sku_root}|{row['material_id'] for row in self.bom(sku_root)}
     if contained & changed_parents:
-     self.db.conn.execute('UPDATE materials SET updated_at=CURRENT_TIMESTAMP WHERE id=?',(sku_root,))
+     self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(saved_at,sku_root))
+     self.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(saved_at,sku['id']))
+     affected_skus.append(sku['id'])
    after={ (r['parent_material_id'],r['child_material_id'],r['position'] or ''):dict(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items') }
    def label(mid):
     material=self.material_snapshot(mid)
@@ -278,6 +282,7 @@ class Services:
      if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
   from infrastructure.events import WindowRefreshBus
   for parent in changed_parents: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
+  if affected_skus:WindowRefreshBus.publish({'type':'sku_changed','ids':affected_skus})
  def validate_bom_rows(self,root,rows):
   """校验导入BOM与现有结构的子项、数量、位置一致性。"""
   old={(x['material_id'],str(x['position'])):float(x['quantity']) for x in self.bom(root)}; new={(x['material_id'],str(x.get('position',''))):float(x['quantity']) for x in rows}
