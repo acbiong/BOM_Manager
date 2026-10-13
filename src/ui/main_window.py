@@ -581,10 +581,27 @@ class BomWindow(QMainWindow):
   if act in (same,child): self.add_relative(d, act==child); return
   if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    self.remove_relation(it)
+ def replacement_blocked_materials(self,item):
+  # Reverse reachability computes all cyclic candidates in one graph traversal.
+  target=item.parent();blocked={target.child(i).data(0,Qt.UserRole)['material_id'] for i in range(target.childCount())}
+  reverse={}
+  for parent,child in self.svc.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items'):
+   reverse.setdefault(child,set()).add(parent)
+  for _,node in self.expansion_nodes():
+   if node.parent() is not None:
+    parent=(node.parent().data(0,Qt.UserRole) or {})['material_id'];child=(node.data(0,Qt.UserRole) or {})['material_id']
+    reverse.setdefault(child,set()).add(parent)
+  pending=[(target.data(0,Qt.UserRole) or {})['material_id']];visited=set()
+  while pending:
+   mid=pending.pop()
+   if mid in visited:continue
+   visited.add(mid);pending.extend(reverse.get(mid,()))
+  return blocked|visited
  def replace_material(self,item):
   if item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   alternates=self.alternate_ids(item)
-  rows=[row for row in self.svc.materials() if row['id'] not in alternates and not self.paste_block_reason(item,False,row['id'])]
+  blocked=self.replacement_blocked_materials(item)|set(alternates)
+  rows=[row for row in self.svc.db.conn.execute('SELECT * FROM materials ORDER BY base_code,version') if row['id'] not in blocked]
   if not rows:QMessageBox.information(self,'替换物料','没有可用的替换物料（需避免同级重复、循环引用以及与继承的替代料相同）。');return
   choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
   choice,ok=MaterialSelectionDialog.getItem(self,'替换物料','输入筛选替换物料（继承数量、位置、备注及替代料）',choices,0,False)
@@ -1011,7 +1028,7 @@ class BomWindow(QMainWindow):
   item=self.tree.currentItem()
   if item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   existing=self.alternate_ids(item); data=item.data(0,Qt.UserRole) or {}
-  rows=[row for row in self.svc.materials() if row['id']!=data.get('material_id') and row['id'] not in existing]
+  rows=[row for row in self.svc.db.conn.execute('SELECT id,base_code,version,name FROM materials ORDER BY base_code,version') if row['id']!=data.get('material_id') and row['id'] not in existing]
   if not rows: QMessageBox.information(self,'增加替代料','没有可选替代料'); return
   choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
   choice,ok=MaterialSelectionDialog.getItem(self,'增加替代料','选择物料',choices,0,False)
