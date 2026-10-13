@@ -1,6 +1,7 @@
 """Keep the visible BOM tree anchored while draft operations change selection."""
 from functools import wraps
 from PyQt5.QtCore import QPoint
+from PyQt5.QtWidgets import QAbstractItemView
 
 
 def preserve_bom_view(method):
@@ -31,5 +32,17 @@ def preserve_bom_view(method):
                 tree.verticalScrollBar().setValue(tree.verticalScrollBar().value()+tree.visualItemRect(anchor).top()-y)
             tree.horizontalScrollBar().setValue(horizontal)
             tree._hold_view=False
+            selected=tree.currentItem()
+            if selected is not None:
+                rect=tree.visualItemRect(selected)
+                visible=not rect.isEmpty() and rect.bottom()>=0 and rect.top()<tree.viewport().height()
+                if not visible:
+                    ancestor=selected.parent()
+                    while ancestor is not None:
+                        ancestor.setExpanded(True)
+                        ancestor=ancestor.parent()
+                    tree.doItemsLayout()
+                    tree.scrollToItem(selected,QAbstractItemView.PositionAtCenter)
+                    tree.horizontalScrollBar().setValue(horizontal)
             tree.setUpdatesEnabled(True)
     return wrapped
