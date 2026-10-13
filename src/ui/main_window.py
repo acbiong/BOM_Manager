@@ -608,6 +608,8 @@ class BomWindow(QMainWindow):
    if dialog.exec_()!=QDialog.Accepted:return
    matches=dialog.selected_nodes()
    if not matches:return
+  return self.replace_nodes(item,matches,material)
+ def replace_nodes(self,item,matches,material,swap_alternate=False):
   selected=None
   for old in matches:
    original=dict(old.data(0,Qt.UserRole) or {})
@@ -617,7 +619,9 @@ class BomWindow(QMainWindow):
     data[field]=original.get(field,1.0 if field=='quantity' else '')
     added.setText(column,f"{data[field]:.1f}" if field=='quantity' else str(data[field] or ''))
    added.setData(0,Qt.UserRole,data)
-   self._alternate_edits[self.alternate_key(added)]=self.alternate_ids(old)
+   alternates=self.alternate_ids(old)
+   if swap_alternate:alternates=[original['material_id'] if mid==material['id'] else mid for mid in alternates]
+   self._alternate_edits[self.alternate_key(added)]=alternates
    self._draft_baselines[data['id']]=self.capture_item(added)
    if selected is None or old is item:selected=added
   for old in matches:
@@ -1017,12 +1021,29 @@ class BomWindow(QMainWindow):
  def alternate_menu(self,pos):
   row=self.alt_table.rowAt(pos.y()); item=self.current_item
   if row<0 or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
-  menu=QMenu(self); remove=menu.addAction('删除替代料')
-  if menu.exec_(self.alt_table.viewport().mapToGlobal(pos))!=remove:return
+  material_id=self.alt_table.item(row,0).data(Qt.UserRole)
+  menu=QMenu(self); promote=menu.addAction('切换成主物料');remove=menu.addAction('删除替代料')
+  reason=self.paste_block_reason(item,False,material_id);promote.setEnabled(not reason);promote.setToolTip(reason.replace('粘贴','切换') if reason else '与主物料互换，保留数量、位置、备注及其他替代料')
+  action=menu.exec_(self.alt_table.viewport().mapToGlobal(pos))
+  if action==promote:
+   if promote.isEnabled():self.promote_alternate(item,material_id)
+   return
+  if action!=remove:return
   if QMessageBox.question(self,'确认','删除当前替代料？')!=QMessageBox.Yes:return
   material_id=self.alt_table.item(row,0).data(Qt.UserRole)
   self._alternate_edits[self.alternate_key(item)]=[mid for mid in self.alternate_ids(item) if mid!=material_id]
   self.mark_dirty(); self.show_item_info(item)
+ def promote_alternate(self,item,material_id):
+  if item is None or item is self.root_item or material_id not in self.alternate_ids(item):return
+  key=self.relation_key(item)
+  matches=[node for _,node in self.expansion_nodes() if node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted') and self.relation_key(node)==key]
+  if not matches:return
+  for node in matches:
+   reason=self.paste_block_reason(node,False,material_id)
+   if reason:QMessageBox.warning(self,'无法切换成主物料',reason.replace('粘贴','切换'));return
+  material=next((row for row in self.svc.materials() if row['id']==material_id),None)
+  if material is None:return
+  return self.replace_nodes(item,matches,material,swap_alternate=True)
  def import_bom(self,selected_item=None):
   if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将替换当前编辑缓存，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
   config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)

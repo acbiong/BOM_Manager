@@ -295,7 +295,7 @@ class BomUiTests(unittest.TestCase):
   self.assertEqual(self.s.alternates(relation)[0]['material_id'],o)
   node=self.w.root_item.child(0); self.w.tree.setCurrentItem(node); self.w.show_item_info(node)
   def choose(menu,pos):
-   self.assertEqual([a.text() for a in menu.actions()],['删除替代料']); return menu.actions()[0]
+   self.assertEqual([a.text() for a in menu.actions()],['切换成主物料','删除替代料']); return menu.actions()[1]
   with patch.object(self.w.alt_table,'rowAt',return_value=0),patch.object(QMenu,'exec_',choose),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes):self.w.alternate_menu(QPoint())
   self.assertEqual(self.w.alt_table.rowCount(),0); self.assertEqual(len(self.s.alternates(relation)),1)
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
