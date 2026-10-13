@@ -569,8 +569,9 @@ class BomWindow(QMainWindow):
    if act==child:self.add_relative(d,True)
    elif act==imp:self.import_bom(it)
    return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); replace=m.addAction('替换物料'); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
   if self.handle_clipboard_action(act,clipboard_actions,it):return
+  if act==replace:self.replace_material(it);return
   if act==up:self.move_item(it,-1); return
   if act==down:self.move_item(it,1); return
   if act==imp:self.import_bom(it); return
@@ -579,6 +580,34 @@ class BomWindow(QMainWindow):
   if act in (same,child): self.add_relative(d, act==child); return
   if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    self.remove_relation(it)
+ def replace_material(self,item):
+  if item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
+  alternates=self.alternate_ids(item)
+  rows=[row for row in self.svc.materials() if row['id'] not in alternates and not self.paste_block_reason(item,False,row['id'])]
+  if not rows:QMessageBox.information(self,'替换物料','没有可用的替换物料（需避免同级重复、循环引用以及与继承的替代料相同）。');return
+  choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
+  choice,ok=MaterialSelectionDialog.getItem(self,'替换物料','输入筛选替换物料（继承数量、位置、备注及替代料）',choices,0,False)
+  if not ok:return
+  material=rows[choices.index(choice)]
+  # Shared parent BOM occurrences must receive the same replacement before saving.
+  key=self.relation_key(item)
+  matches=[node for _,node in self.expansion_nodes() if node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted') and self.relation_key(node)==key]
+  selected=None
+  for old in matches:
+   original=dict(old.data(0,Qt.UserRole) or {})
+   added=self.insert_material(old.parent(),material,after=old)
+   data=dict(added.data(0,Qt.UserRole) or {})
+   for field,column in [('quantity',1),('position',3),('remark',4)]:
+    data[field]=original.get(field,1.0 if field=='quantity' else '')
+    added.setText(column,f"{data[field]:.1f}" if field=='quantity' else str(data[field] or ''))
+   added.setData(0,Qt.UserRole,data)
+   self._alternate_edits[self.alternate_key(added)]=list(alternates)
+   self._draft_baselines[data['id']]=self.capture_item(added)
+   if old is item:selected=added
+  self.remove_relation(item)
+  self.mark_dirty();fit_columns(self.tree)
+  if selected is not None:self.tree.setCurrentItem(selected);self.show_item_info(selected);self.tree.scrollToItem(selected)
+  return selected
  def can_move_item(self,item,direction):
   parent=item.parent()
   if parent is None or direction not in (-1,1) or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return False

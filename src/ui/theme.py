@@ -5,7 +5,11 @@ from PyQt5.QtGui import QColor,QPalette,QIcon,QPixmap,QPainter,QPen
 from PyQt5.QtWidgets import QApplication
 
 def apply_theme(dark=False):
- app=QApplication.instance(); app.setStyle('Fusion'); palette=QPalette()
+ app=QApplication.instance()
+ # Keep the existing Fusion style alive when opening additional windows.
+ if not app.property('bom_fusion_initialized'):
+  app.setStyle('Fusion');app.setProperty('bom_fusion_initialized',True)
+ palette=QPalette()
  colors={
   QPalette.Window:('#f5f6f8','#24262b'),QPalette.WindowText:('#202124','#eceff4'),
   QPalette.Base:('#ffffff','#1c1e22'),QPalette.AlternateBase:('#edf0f4','#2d3037'),
