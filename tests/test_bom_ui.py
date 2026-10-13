@@ -631,3 +631,26 @@ class BomUiTests(unittest.TestCase):
   parent=self.w.root_item.child(0); self.assertEqual(parent.childCount(),1)
   for node in (self.w.root_item,parent,parent.child(0)):
    self.assertEqual(node.background(0).style(),Qt.NoBrush); self.assertEqual(node.text(4),'')
+
+ def test_new_sibling_inserted_after_selection_and_persisted(self):
+  r,p,c,o,x=self.ids
+  extra=self.s.create_material(dict(base_code='EXTRA',version='1',name='EXTRA',unit='pcs'))
+  last=self.s.create_material(dict(base_code='LAST',version='1',name='LAST',unit='pcs'))
+  for target in (r,p):
+   with self.subTest(parent=target):
+    self.s.save_bom(target,[dict(material_id=c,quantity=1,unit='pcs'),dict(material_id=o,quantity=1,unit='pcs'),dict(material_id=last,quantity=1,unit='pcs')])
+    self.w.load()
+    container=self.w.root_item if target==r else next(item for _,item in self.w.expansion_nodes() if (item.data(0,Qt.UserRole) or {}).get('material_id')==p)
+    selected=container.child(1)
+    with patch.object(MaterialSelectionDialog,'getItem',return_value=('EXTRA1 EXTRA',True)):
+     self.w.add_relative(selected.data(0,Qt.UserRole),False)
+    expected=[c,o,extra,last]
+    self.assertEqual([container.child(i).data(0,Qt.UserRole)['material_id'] for i in range(container.childCount())],expected)
+    added=container.child(2);self.assertIs(self.w.tree.currentItem(),added);self.assertTrue(added.data(0,Qt.UserRole)['_added'])
+    self.assertEqual(self.w.fields['base_code'].text(),'EXTRA')
+    with patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning') as warning:
+     self.assertTrue(self.w.save());warning.assert_not_called()
+    self.w.load()
+    self.assertEqual([row['child_material_id'] for row in self.s.db.conn.execute('SELECT child_material_id FROM material_bom_items WHERE parent_material_id=? ORDER BY sort_no,id',(target,))],expected)
+    # Restore the root so the next subcase tests a nested parent.
+    if target==r:self.s.save_bom(r,[dict(material_id=p,quantity=1,unit='pcs')])

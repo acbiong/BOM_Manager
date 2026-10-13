@@ -926,11 +926,14 @@ class BomWindow(QMainWindow):
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=MaterialSelectionDialog.getItem(self,'新建BOM物料','物料',items,0,False)
   if not ok:return
-  self.insert_material(target,rows[items.index(x)])
- def insert_material(self,target,r):
+  selected=self.by.get(parent.get('node_id')) if not child else None
+  self.insert_material(target,rows[items.index(x)],after=selected)
+ def insert_material(self,target,r,after=None):
   parent=target.data(0,Qt.UserRole) or {}
   self._deleted_relations.discard((parent.get('material_id'),r['id'],''))
   item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'',''])
+  if after is not None and after.parent() is target:
+   target.takeChild(target.indexOfChild(item));target.insertChild(target.indexOfChild(after)+1,item)
   temporary_id=-id(item); data=dict(r)
   data.update(_added=True,id=temporary_id,material_id=r['id'],quantity=1.0,position='',remark='',level_no=(parent.get('level_no') or 0)+1,parent_item_id=parent.get('id'),parent_material_id=parent.get('material_id'),node_id=str(temporary_id),parent_node_id=parent.get('node_id'))
   item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True)
