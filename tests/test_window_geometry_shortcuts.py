@@ -11,7 +11,7 @@ from config.config_service import ConfigService
 from database.database import Database
 from services.services import Services
 from ui.window_geometry import WindowGeometryMemory
-from ui.main_window import MainWindow,MaterialWindow
+from ui.main_window import MainWindow,MaterialWindow,BomWindow
 
 class WindowGeometryTests(unittest.TestCase):
  @classmethod
@@ -42,3 +42,19 @@ class WindowGeometryTests(unittest.TestCase):
      main.show();main.activateWindow();self.app.processEvents();QTest.keyClick(main,Qt.Key_N,Qt.ControlModifier);self.assertEqual(sku.call_count,1);material.assert_not_called()
      library.show();library.activateWindow();self.app.processEvents();QTest.keyClick(library,Qt.Key_N,Qt.ControlModifier);self.assertEqual(material.call_count,1);self.assertEqual(sku.call_count,1)
     finally:library.close();main.close();db.close()
+
+ def test_ctrl_f_opens_corresponding_search_and_reuses_dialog(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));svc=Services(db)
+   root=svc.create_material(dict(base_code='R',version='1',name='Root',unit='pcs'))
+   main=MainWindow(svc);library=MaterialWindow(svc,main);bom=BomWindow(svc,root,main)
+   try:
+    for window in (library,bom):
+     window.show();window.activateWindow();self.app.processEvents()
+     QTest.keyClick(window,Qt.Key_F,Qt.ControlModifier);self.app.processEvents()
+     dialog=window._search_dialog;self.assertTrue(dialog.isVisible());self.assertIs(dialog.library,window)
+     dialog.hide();window.activateWindow();self.app.processEvents()
+     QTest.keyClick(window,Qt.Key_F,Qt.ControlModifier);self.app.processEvents()
+     self.assertIs(window._search_dialog,dialog);self.assertTrue(dialog.isVisible());dialog.hide()
+    self.assertFalse(library._search_dialog.isVisible())
+   finally:bom.close();library.close();main.close();db.close()
