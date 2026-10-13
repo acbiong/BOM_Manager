@@ -10,7 +10,7 @@ from infrastructure.events import WindowRefreshBus
 from services.services import MaterialHeaderError, BomImportError, MATERIAL_IMPORT_HEADERS, MATERIAL_IMPORT_DEFAULTS
 from ui.theme import apply_theme, theme_icon
 from ui.material_clipboard import copy_material, clipboard_material
-from ui.material_search import MaterialSearchDialog
+from ui.material_search import MaterialSearchDialog, BomSearchDialog
 from ui.table_layout import fit_columns
 from ui.about_dialog import AboutDialog
 from ui.frozen_table import FrozenMaterialTable
@@ -526,7 +526,11 @@ class BomWindow(QMainWindow):
   right=QWidget(); right_l=QVBoxLayout(right); right_l.addWidget(info_box); right_l.addWidget(alt_box); spl=QSplitter(); spl.addWidget(self.tree); spl.addWidget(right); spl.setStretchFactor(1,1); box=QWidget(); lay=QVBoxLayout(box); lay.addWidget(spl); self.setCentralWidget(box); self.statusBar().addWidget(self.notice); tb=self.addToolBar('BOM'); self.save_action=QAction('保存',self); self.save_action.triggered.connect(self.save); self.save_action.setEnabled(False); tb.addAction(self.save_action); self.refresh_action=QAction('刷新',self); self.refresh_action.triggered.connect(self.refresh_external); self.refresh_action.setEnabled(False); tb.addAction(self.refresh_action); self.export_action=QAction('导出BOM',self); self.export_action.triggered.connect(self.export_bom); self.export_action.setEnabled(False); tb.addAction(self.export_action)
   self.purchase_export_action=QAction('采购BOM导出',self); self.purchase_export_action.triggered.connect(self.export_purchase_bom); self.purchase_export_action.setEnabled(self.export_action.isEnabled()); tb.addAction(self.purchase_export_action)
   self.export_action.changed.connect(lambda:self.purchase_export_action.setEnabled(self.export_action.isEnabled()))
+  self.search_action=tb.addAction('查找物料');self.search_action.triggered.connect(self.search_materials)
   self.load()
+ def search_materials(self):
+  if not hasattr(self,'_search_dialog'):self._search_dialog=BomSearchDialog(self)
+  self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
  def mark_dirty(self):
   self.dirty=True
   self.save_action.setEnabled(True)
@@ -1079,6 +1083,8 @@ class MaterialWindow(QMainWindow):
   menu=self.menuBar(); a=menu.addAction('查找物料'); a.triggered.connect(self.search_materials); a=menu.addAction('新建物料'); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); self.resize(1000,600); self.t=FrozenMaterialTable(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
   self._base_column_labels=list(self._column_labels);self._sku_column_ids=[];self._hidden_skus=set()
+  self._column_config=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
+  self._selected_skus=self._column_config.sku_columns(self.svc.db.path)
   self.sku_columns_button=QToolButton();self.sku_columns_button.setText('SKU用量列');self.sku_columns_button.clicked.connect(self.choose_sku_columns);menu.setCornerWidget(self.sku_columns_button,Qt.TopRightCorner)
   header=self.t.horizontalHeader(); header.setSectionsClickable(True); header.sectionClicked.connect(self.filter_menu); self.refresh()
  def choose_sku_columns(self):
@@ -1091,7 +1097,10 @@ class MaterialWindow(QMainWindow):
    button=QPushButton(text);button.clicked.connect(lambda _,value=state:[choices.item(i).setCheckState(value) for i in range(choices.count())]);row.addWidget(button)
   layout.addLayout(row);buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
   if dialog.exec_()==QDialog.Accepted:
-   self._hidden_skus={choices.item(i).data(Qt.UserRole) for i in range(choices.count()) if choices.item(i).checkState()==Qt.Unchecked};self.refresh()
+   selected={choices.item(i).data(Qt.UserRole) for i in range(choices.count()) if choices.item(i).checkState()==Qt.Checked}
+   try:self._column_config.save_sku_columns(self.svc.db.path,selected)
+   except (OSError,ValueError) as error:QMessageBox.warning(self,'保存失败',str(error));return
+   self._selected_skus=selected;self.refresh()
  def search_materials(self):
   if not hasattr(self,'_search_dialog'):self._search_dialog=MaterialSearchDialog(self)
   self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
@@ -1230,7 +1239,7 @@ class MaterialWindow(QMainWindow):
   self._sku_column_ids=ids
   self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+'\n'+sku['name'] for sku in skus]
   self.t.setColumnCount(len(self._column_labels));self.t.setHorizontalHeaderLabels(self._column_labels)
-  self._hidden_skus.intersection_update(ids)
+  self._hidden_skus=set(ids)-self._selected_skus
   for i,sid in enumerate(ids):
    self.t.setColumnHidden(base+i,sid in self._hidden_skus)
    if sid in self._hidden_skus:self._filters.pop(base+i,None)

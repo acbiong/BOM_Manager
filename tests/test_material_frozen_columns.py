@@ -30,7 +30,7 @@ class FrozenColumnsTests(unittest.TestCase):
     with patch('ui.main_window.MaterialDialog.exec_',return_value=QDialog.Rejected):table.frozen.doubleClicked.emit(table.model().index(0,2))
     self.assertEqual(seen,[(0,2)])
     def choose(dialog):
-     items=dialog.findChild(QListWidget);self.assertEqual(items.count(),2);items.item(0).setCheckState(Qt.Unchecked);return QDialog.Accepted
+     items=dialog.findChild(QListWidget);self.assertEqual(items.count(),2);items.item(0).setCheckState(Qt.Unchecked);items.item(1).setCheckState(Qt.Checked);return QDialog.Accepted
     with patch.object(QDialog,'exec_',choose):w.choose_sku_columns()
     self.assertTrue(table.isColumnHidden(11));self.assertFalse(table.isColumnHidden(12))
     with patch.object(QDialog,'exec_',return_value=QDialog.Rejected):w.choose_sku_columns()

@@ -43,14 +43,17 @@ class MaterialSearchDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def candidates(self):
+        for number,material in enumerate(self.library.svc.materials(),1):
+            yield number,material['id'],dict(material)
+
     def search(self):
         queries = {key: edit.text().strip().casefold() for key, edit in self.fields.items() if edit.text().strip()}
         self.table.setRowCount(0)
         if not queries:
             self.count_label.setText('请至少输入一个查找条件')
             return
-        for number, material in enumerate(self.library.svc.materials(), 1):
-            values = dict(material)
+        for number, identity, values in self.candidates():
             values['code'] = values['base_code'] + values['version']
             if not all(query in str(values.get(key) or '').casefold() for key, query in queries.items()):
                 continue
@@ -58,7 +61,7 @@ class MaterialSearchDialog(QDialog):
             self.table.insertRow(row)
             for col, value in enumerate((number, values['code'], values['name'], values['description'], values['manufacturer'], values['mpn'])):
                 item = QTableWidgetItem(str(value or ''))
-                item.setData(Qt.UserRole, material['id'])
+                item.setData(Qt.UserRole, identity)
                 if col == 0:
                     item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, col, item)
@@ -78,3 +81,59 @@ class MaterialSearchDialog(QDialog):
         self.library.raise_()
         self.library.activateWindow()
         self.library.t.setFocus()
+
+
+class BomSearchDialog(MaterialSearchDialog):
+    """Search the current draft tree; paths distinguish repeated materials."""
+    def __init__(self, bom):
+        super().__init__(bom)
+        from PyQt5.QtWidgets import QMenuBar
+        root = bom.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(bom.root,)).fetchone()
+        title = f"{root['base_code']}{root['version']} {root['name']} 物料查找"
+        self.setWindowTitle(title)
+        bar = QMenuBar(self)
+        label = bar.addAction(title)
+        label.setEnabled(False)
+        self.layout().setMenuBar(bar)
+        self.table.horizontalHeaderItem(0).setText('BOM位置')
+
+    def candidates(self):
+        materials = {m['id']:dict(m) for m in self.library.svc.materials()}
+        for path,node in self.library.expansion_nodes():
+            data = node.data(0,Qt.UserRole) or {}
+            if data.get('_deleted'):
+                continue
+            values = dict(materials.get(data.get('material_id'),{}))
+            values.update({k:v for k,v in data.items() if k in values})
+            position = []
+            current = node
+            while current.parent() is not None:
+                position.append(str(current.parent().indexOfChild(current)+1))
+                current = current.parent()
+            yield '.'.join(['1']+list(reversed(position))),path,values
+
+    def search(self):
+        super().search()
+        if not any(edit.text().strip() for edit in self.fields.values()):
+            return
+        self.count_label.setText(f'共找到 {self.table.rowCount()} 个物料' if self.table.rowCount() else '未查到物料')
+
+    def locate(self,row,column=0):
+        result = self.table.item(row,0)
+        if result is None:
+            return
+        for path,node in self.library.expansion_nodes():
+            if path != result.data(Qt.UserRole) or (node.data(0,Qt.UserRole) or {}).get('_deleted'):
+                continue
+            parent = node.parent()
+            while parent is not None:
+                parent.setExpanded(True)
+                parent = parent.parent()
+            self.library.tree.setCurrentItem(node)
+            self.library.show_item_info(node)
+            self.library.tree.scrollToItem(node,QAbstractItemView.PositionAtCenter)
+            if self.library.isMinimized():self.library.showNormal()
+            self.library.raise_();self.library.activateWindow();self.library.tree.setFocus()
+            return
+        QMessageBox.information(self,'物料不存在','该位置的物料已删除，请重新查找。')
+        self.search()

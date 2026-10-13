@@ -27,6 +27,7 @@ class MaterialSkuQuantityTests(unittest.TestCase):
     return w.t.item(row,11+w._sku_column_ids.index(sid)).text()
    try:
     self.assertEqual(w.t.columnCount(),13);self.assertEqual(value('C',z),'9.0');self.assertEqual(value('Z',z),'1.0');self.assertEqual(value('C',a),'NA');self.assertEqual(value('X',z),'NA')
+    w._selected_skus={a,z};w.refresh()
     w._filters[11]=('',{'9.0'});w.apply_filters()
     main.sort_skus(1);self.assertEqual(w._sku_column_ids,[a,z]);self.assertEqual(standalone._sku_column_ids,[a,z]);self.assertIn(12,w._filters);self.assertEqual(value('C',z),'9.0')
     self.assertEqual(w._column_labels[11],'A1\nA');main.refresh();self.assertEqual(w._sku_column_ids,[a,z])

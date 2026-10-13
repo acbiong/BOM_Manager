@@ -85,3 +85,21 @@ class ConfigService:
   if not config.has_section('import_mappings'):config.add_section('import_mappings')
   config['import_mappings'][kind]=json.dumps(mapping,ensure_ascii=False)
   self.save(config)
+
+ def _sku_columns_key(self,database):
+  import hashlib
+  # Relative database identity remains portable when the project folder moves.
+  identity=self.relative_path(database)
+  return hashlib.sha256(identity.encode('utf-8')).hexdigest()
+ def sku_columns(self,database):
+  import json
+  try:
+   value=json.loads(self.load().get('sku_columns',self._sku_columns_key(database),fallback='[]'))
+   return set(value) if isinstance(value,list) and all(type(v) is int for v in value) else set()
+  except (ValueError,TypeError):return set()
+ def save_sku_columns(self,database,selected):
+  import json
+  config=self.load()
+  if not config.has_section('sku_columns'):config.add_section('sku_columns')
+  config['sku_columns'][self._sku_columns_key(database)]=json.dumps(sorted(selected))
+  self.save(config)
