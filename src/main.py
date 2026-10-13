@@ -125,13 +125,15 @@ def startup_database(config_service,cfg):
    elif candidate is not None:path=candidate
 
 def main():
- app=QApplication(sys.argv); guard=SingleInstance(); db=None; base=None
+ app=QApplication(sys.argv); guard=SingleInstance(); db=None; base=None; geometry_memory=None
  try:
   if not guard.acquire():
    if not guard.notify_existing():QMessageBox.information(None,'软件已运行','该目录下的BOM管理系统已在运行或正在启动，请切换到已有窗口。')
    return 0
   base=app_base()
   config_service=ConfigService(base); cfg=config_service.load()
+  from ui.window_geometry import WindowGeometryMemory
+  geometry_memory=WindowGeometryMemory(app,config_service);cfg=config_service.load()
   if getattr(sys,'frozen',False) and os.environ.get('APPIMAGE') and base!=Path(os.environ['APPIMAGE']).resolve().parent:
    QMessageBox.information(None,'使用本地配置目录','软件所在目录为只读或无写入权限（网络共享可能以只读方式挂载）。\n配置保存在：'+str(config_service.path)+'\n新建数据库将默认使用可写目录，您也可以自行选择其他可写位置。')
   db=startup_database(config_service,cfg)
@@ -147,6 +149,8 @@ def main():
   QMessageBox.critical(None,'BOM管理系统启动失败',f'{exc}\n\n详细信息已写入：{log}')
   return 1
  finally:
+  if geometry_memory is not None:
+   app.removeEventFilter(geometry_memory);app.aboutToQuit.disconnect(geometry_memory.save_visible);geometry_memory.deleteLater()
   try:
    if db is not None:db.close()
   finally:guard.close()

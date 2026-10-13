@@ -30,6 +30,8 @@ class ConfigService:
   c=ConfigParser(interpolation=None); changed=False
   if self.path.exists(): c.read(self.path,encoding='utf-8')
   if not c.has_section('database'): c['database']={"driver":"sqlite","path":"bom.db","host":"127.0.0.1","port":"3306","name":"bom"}; changed=True
+  if not c.has_section('ui'):c.add_section('ui');changed=True
+  if not c.has_option('ui','reset_window_geometry'):c.set('ui','reset_window_geometry','false');changed=True
   if not c.has_section('materials'):c.add_section('materials'); changed=True
   units=self.parse_units(c.get('materials','units',fallback=''))
   if not units:units=list(DEFAULT_MATERIAL_UNITS); changed=True
