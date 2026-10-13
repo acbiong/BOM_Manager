@@ -89,7 +89,7 @@ class BomSearchDialog(MaterialSearchDialog):
         super().__init__(bom)
         from PyQt5.QtWidgets import QMenuBar
         root = bom.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(bom.root,)).fetchone()
-        title = f"{root['base_code']}{root['version']} {root['name']} 物料查找"
+        title = f"{root['base_code']}{root['version']} {root['name']}{bom.mirror_suffix()} 物料查找"
         self.setWindowTitle(title)
         bar = QMenuBar(self)
         label = bar.addAction(title)

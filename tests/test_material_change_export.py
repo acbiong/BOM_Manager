@@ -20,13 +20,15 @@ class MaterialChangeExportTests(unittest.TestCase):
   self.assertEqual(rows[1][3:5],('A1','旧名称'));self.assertEqual(rows[2][3:5],('A1','新名称'))
   for change in ['物料名称：旧名称 → 新名称','单位：pcs → 米','制造商：旧厂 → 新厂','MPN：旧MPN → 新MPN','规格描述：旧描述 → （空）','M/P：M → P']:self.assertIn(change,rows[2][6])
   self.assertEqual(rows[3][3],'A2');self.assertIn('1->2',rows[3][6]);self.assertEqual(rows[4][3:5],('A2','新名称'));self.assertEqual(rows[4][5],'删除物料')
-  self.assertEqual(len(rows[2][1]),10);self.assertEqual(len(rows[2][2]),8)
+  self.assertEqual(len(rows[2][1]),10);self.assertEqual(len(rows[2][2]),11)
  def test_old_schema_migrates_and_legacy_values_are_not_fabricated(self):
   other=self.path/'old.sqlite';conn=sqlite3.connect(other);conn.execute('CREATE TABLE change_logs(id INTEGER PRIMARY KEY,object_type TEXT,object_id INTEGER,action TEXT,detail TEXT,changed_at TEXT)');conn.execute("INSERT INTO change_logs VALUES(1,'material',1,'update','旧名字','2020-01-02 03:04:05')");conn.commit();conn.close()
   db=Database(str(other))
   try:
    service=Services(db);service.create_material(dict(base_code='NEW',version='1',name='无关',unit='pcs'));out=self.path/'old.xlsx';service.export_materials(out);wb=load_workbook(out);row=list(wb['变更记录'].values)[1];wb.close()
-   self.assertEqual(row[1:3],('2020-01-02','03:04:05'));self.assertEqual(row[3],'历史记录未保存');self.assertIn('旧名字',row[6])
+   from datetime import datetime,timezone
+   expected=datetime(2020,1,2,3,4,5,tzinfo=timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]
+   self.assertEqual(row[1:3],(expected[:10],expected[11:]));self.assertEqual(row[3],'历史记录未保存');self.assertIn('旧名字',row[6])
   finally:db.close()
  def test_import_overwrite_records_differences_and_failed_version_no_log(self):
   from openpyxl import Workbook

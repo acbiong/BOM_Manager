@@ -37,10 +37,13 @@ def run_smoke_test(report_path):
             wb = load_workbook(path)
             try:assert wb['SKU'].cell(3,10).value==1.5
             finally:wb.close()
-            windows = [MainWindow(svc,get_version()),MaterialWindow(svc),BomWindow(svc,root),AboutDialog(get_version())]
+            mirror_id=svc.copy_sku_bom(sid);mirror=svc.for_sku(mirror_id)
+            mirror.save_bom(root,[dict(material_id=child,quantity=2.5,unit='pcs')])
+            assert svc.bom(root)[0]['quantity']==1.5 and mirror.bom(root)[0]['quantity']==2.5, '镜像BOM未隔离'
+            windows = [BomWindow(mirror,root),MainWindow(svc,get_version()),MaterialWindow(svc),BomWindow(svc,root),AboutDialog(get_version())]
             for window in windows:window.show()
             app.processEvents()
-            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['single_instance','sqlite','excel','sku_window','material_window','bom_window','about_window'])
+            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['single_instance','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror'])
             for window in windows:window.close()
             windows=[];db.close();db=None
     except Exception:

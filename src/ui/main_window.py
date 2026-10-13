@@ -278,11 +278,12 @@ class MainWindow(QMainWindow):
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku); a=bar.addAction('关于'); a.triggered.connect(self.show_about)
-  self.table=QTableWidget(); self.table.setColumnCount(6); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','修改日期时间','ID']); self.table.hideColumn(5); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
-  self._sku_sort=None
+  self.table=QTableWidget(); self.table.setColumnCount(7); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID']); self.table.hideColumn(6); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
+  self._sku_sort=None;self._sku_filters={}
+  filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.table.horizontalHeader().setSectionsClickable(True);self.table.horizontalHeader().sectionClicked.connect(self.sort_skus)
-  for column in (1,2,4):self.table.horizontalHeaderItem(column).setToolTip('点击升序/降序排序')
+  for column in (1,2,4,5):self.table.horizontalHeaderItem(column).setToolTip('点击升序/降序排序')
   corner=QWidget(); corner_layout=QHBoxLayout(corner); corner_layout.setContentsMargins(0,0,4,0)
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
@@ -296,24 +297,56 @@ class MainWindow(QMainWindow):
   self.theme_button.setToolTip(label); self.theme_button.setAccessibleName(label)
  def toggle_theme(self):self.set_theme(not bool(QApplication.instance().property('bom_dark_theme')))
  def sort_skus(self,column):
-  if column not in (1,2,4):return
+  if column not in (1,2,4,5):return
   order=Qt.DescendingOrder if self._sku_sort==(column,Qt.AscendingOrder) else Qt.AscendingOrder
   self._sku_sort=(column,order);self.table.sortItems(column,order)
   self.table.horizontalHeader().setSortIndicator(column,order);self.table.horizontalHeader().setSortIndicatorShown(True)
-  self.publish_sku_order()
+  self.apply_sku_filters();self.publish_sku_order()
  def publish_sku_order(self):
-  self.svc.sku_display_order=[int(self.table.item(row,5).text()) for row in range(self.table.rowCount())]
+  self.svc.sku_display_order=[int(self.table.item(row,6).text()) for row in range(self.table.rowCount())]
   WindowRefreshBus.publish({'type':'sku_order_changed'})
  def refresh(self):
   project=self.svc.project(); name=(project['project_name'] or '').strip(); code=(project['project_code'] or '').strip(); prefix=' '.join(x for x in (code,name) if x and x!='请输入项目名称'); title=f'{prefix} BOM管理系统' if prefix else 'BOM管理系统'
   self.setWindowTitle(title)
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
-   btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,5,QTableWidgetItem(str(r['id'])))
+   btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
   self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
-  self.publish_sku_order()
+  self.apply_sku_filters();self.publish_sku_order()
+ def filter_skus(self):
+  labels=['SKU编码','SKU名称','SKU描述','版本号','修改日期时间','清除全部筛选']
+  label,ok=QInputDialog.getItem(self,'SKU筛选','选择筛选列',labels,0,False)
+  if not ok:return
+  if label==labels[-1]:self._sku_filters.clear();self.apply_sku_filters();return
+  column=labels.index(label)+1
+  dialog=MaterialColumnFilterDialog(label,[self.table.item(row,column).text() for row in range(self.table.rowCount())],self._sku_filters.get(column),self)
+  if dialog.exec_()==QDialog.Accepted:
+   condition=dialog.condition()
+   if condition==('',None):self._sku_filters.pop(column,None)
+   else:self._sku_filters[column]=condition
+   self.apply_sku_filters()
+ def apply_sku_filters(self):
+  count=0
+  for row in range(self.table.rowCount()):
+   visible=all(query.casefold() in self.table.item(row,col).text().casefold() and (selected is None or self.table.item(row,col).text() in selected) for col,(query,selected) in self._sku_filters.items())
+   self.table.setRowHidden(row,not visible);count+=int(visible)
+  self.count_label.setText(f'显示{count} / 共计{self.table.rowCount()}个SKU' if self._sku_filters else f'共计{self.table.rowCount()}个SKU')
+ def copy_sku_bom(self,sid):
+  row=self.svc.db.conn.execute('SELECT material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
+  window=self._bom_windows.get(sid) or (self._material_bom_windows.get(row['material_id']) if row and not row['scope_id'] else None)
+  if window and window.dirty:QMessageBox.information(self,'请先保存','当前镜像有未保存编辑，请先保存再复制BOM。');return
+  try:
+   new_id=self.svc.copy_sku_bom(sid);self.open_bom_id(new_id)
+  except Exception as error:QMessageBox.warning(self,'复制BOM失败',str(error))
+ def change_mirror_version(self,sid):
+  row=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(sid,)).fetchone()
+  if row is None:return
+  value,ok=QInputDialog.getInt(self,'镜像版本变更','新镜像版本号',row[0],1,2147483647)
+  if ok:
+   try:self.svc.change_mirror_version(sid,value)
+   except Exception as error:QMessageBox.warning(self,'镜像版本变更失败',str(error))
  def select_database(self):
   current=Path(self.svc.db.path).expanduser()
   # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
@@ -341,7 +374,7 @@ class MainWindow(QMainWindow):
    if not valid:
     new_db.close()
     raise ValueError('数据库结构不可用，缺少表：'+', '.join(missing))
-   for window in list(self._material_bom_windows.values()):
+   for window in set(self._material_bom_windows.values())|set(self._bom_windows.values()):
     if not window.close(): new_db.close(); return
    if self._materials is not None: self._materials.close()
    c=config_service.load(); c['database']['path']=relative_selected; config_service.save(c)
@@ -413,7 +446,7 @@ class MainWindow(QMainWindow):
  def change_sku_version(self,sid=None):
   r=self.table.currentRow() if sid is None else -1
   if sid is None and r<0:return
-  if sid is None:sid=int(self.table.item(r,5).text())
+  if sid is None:sid=int(self.table.item(r,6).text())
   v,ok=QInputDialog.getText(self,'SKU版本变更','新版本号')
   if ok:
    try:self.svc.change_sku_version(sid,v.strip()); self.refresh()
@@ -422,36 +455,46 @@ class MainWindow(QMainWindow):
   r=self.table.currentRow() if sid is None else -1
   if sid is None:
    if r<0:return
-   sid=int(self.table.item(r,5).text())
+   sid=int(self.table.item(r,6).text())
   sku=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
   if sku is None:return
   prompt='该SKU物料仍被其他BOM引用，是否仅移除SKU标记？物料及BOM结构将保留。' if self.svc.material_is_bom_referenced(sku['material_id']) else '删除当前SKU及BOM？'
-  if QMessageBox.question(self,'确认',prompt)==QMessageBox.Yes:self.svc.delete_sku(sid); self.refresh()
+  if QMessageBox.question(self,'确认',prompt)==QMessageBox.Yes:
+   window=self._bom_windows.get(sid)
+   if window and not window.close():return
+   self.svc.delete_sku(sid);self.refresh()
  def sku_context_menu(self,pos):
   row=self.table.rowAt(pos.y())
   if row<0:return
-  self.table.selectRow(row); sid=int(self.table.item(row,5).text())
-  menu=QMenu(self); version=menu.addAction('版本变更'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
+  self.table.selectRow(row); sid=int(self.table.item(row,6).text())
+  menu=QMenu(self); version=menu.addAction('SKU版本变更');mirror=menu.addAction('镜像版本变更');copy=menu.addAction('复制BOM'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
-  if action==version:self.change_sku_version(sid)
+  if action==copy:self.copy_sku_bom(sid)
+  elif action==mirror:self.change_mirror_version(sid)
+  elif action==version:self.change_sku_version(sid)
   elif action==export_action:self.export_sku_id(sid)
   elif action==purchase_action:self.export_sku_id(sid,purchase=True)
   elif action==delete:self.delete_sku(sid)
  def export_sku_id(self,sid,purchase=False):
-  row=self.svc.db.conn.execute('SELECT m.id AS material_id,m.base_code,m.version,m.name FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
+  row=self.svc.db.conn.execute('SELECT m.id AS material_id,m.base_code,m.version,m.name,s.mirror_version,s.scope_id FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
   if not row:return
   title='采购BOM导出' if purchase else '导出BOM'
-  filename=row['base_code']+row['version']+' '+row['name']+(' 采购BOM' if purchase else '')
+  filename=row['base_code']+row['version']+' '+row['name']+(' 镜像'+str(row['mirror_version']) if row['scope_id'] else '')+(' 采购BOM' if purchase else '')
   p=QFileDialog.getSaveFileName(self,title,export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
   if p:
    remember_export_path(p)
-   if purchase:self.svc.export_purchase_bom(row['material_id'],p)
+   if purchase:self.svc.for_sku(sid).export_purchase_bom(row['material_id'],p)
    else:self.svc.export_sku(sid,p)
    QMessageBox.information(self,'完成',title+'成功')
- def open_bom(self,row,col): self.open_bom_id(int(self.table.item(row,5).text()))
+ def open_bom(self,row,col): self.open_bom_id(int(self.table.item(row,6).text()))
  def open_bom_id(self,sid):
-  row=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
+  row=self.svc.db.conn.execute('SELECT material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
   if row is None:return
+  if row['scope_id']:
+   if sid not in self._bom_windows:
+    window=BomWindow(self.svc.for_sku(sid),row['material_id'],self);self._bom_windows[sid]=window
+    window.closed.connect(lambda:self._bom_windows.pop(sid,None))
+   window=self._bom_windows[sid];self.activate_window(window);return window
   window=self.open_material_bom(row['material_id'])
   if window is not None:self._bom_windows[sid]=window
   return window
@@ -524,7 +567,7 @@ class BomWindow(QMainWindow):
   import hashlib
   database_path=str(Path(self.svc.db.path).resolve())
   self._expansion_settings=QSettings('Biong','BOMManager')
-  self._expansion_key='bom_expansion/'+hashlib.sha256(database_path.encode()).hexdigest()+'/'+str(self.root)
+  self._expansion_key='bom_expansion/'+hashlib.sha256(database_path.encode()).hexdigest()+'/'+str(self.root)+('/'+str(self.svc.scope_id) if getattr(self.svc,'scope_id',0) else '')
   import json
   try:self._expansion_state=json.loads(self._expansion_settings.value(self._expansion_key,'{}'))
   except (ValueError,TypeError):self._expansion_state={}
@@ -543,10 +586,20 @@ class BomWindow(QMainWindow):
   self.default_panel_width=self.fontMetrics().horizontalAdvance('M')*100
   screen=self.screen().availableGeometry();self.tree.setMinimumWidth(min(420,max(200,screen.width()//2-40)));self.resize(min(self.default_panel_width*2+50,screen.width()),min(850,screen.height()));spl.setSizes([self.default_panel_width,self.default_panel_width])
   self.search_action=tb.addAction('查找物料');self.search_action.setShortcut('Ctrl+F');self.search_action.setShortcutContext(Qt.WindowShortcut);self.search_action.triggered.connect(self.search_materials)
-  self.load()
+  self.load();self.update_mirror_title()
  def search_materials(self):
   if not hasattr(self,'_search_dialog'):self._search_dialog=BomSearchDialog(self)
   self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
+ def mirror_suffix(self):
+  if getattr(self.svc,'sku_id',None):
+   row=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(self.svc.sku_id,)).fetchone()
+   if row:return ' 镜像'+str(row[0])
+  return ''
+ def update_mirror_title(self):
+  if getattr(self.svc,'sku_id',None):
+   sku=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(self.svc.sku_id,)).fetchone()
+   material=self.svc.material_snapshot(self.root)
+   if sku:self.setWindowTitle(f"{material['base_code']}{material['version']} {material['name']} 镜像{sku[0]}")
  def mark_dirty(self):
   self.dirty=True
   self.save_action.setEnabled(True)
@@ -554,6 +607,9 @@ class BomWindow(QMainWindow):
   self.refresh_styles()
  def on_external_change(self,event):
   if self._saving: return
+  if event.get('type')=='sku_changed':
+   self.update_mirror_title();return
+  if event.get('type')=='bom_changed' and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
    self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
  def closeEvent(self,event):
@@ -590,11 +646,11 @@ class BomWindow(QMainWindow):
   if act in (same,child): self.add_relative(d, act==child); return
   if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    self.remove_relation(it)
- def replacement_blocked_materials(self,item):
+ def replacement_blocked_materials(self,item,child=False):
   # Reverse reachability computes all cyclic candidates in one graph traversal.
-  target=item.parent();blocked={target.child(i).data(0,Qt.UserRole)['material_id'] for i in range(target.childCount())}
+  target=item if child else item.parent();blocked={target.child(i).data(0,Qt.UserRole)['material_id'] for i in range(target.childCount())}
   reverse={}
-  for parent,child in self.svc.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items'):
+  for parent,child in self.svc.bom_graph_edges():
    reverse.setdefault(child,set()).add(parent)
   for _,node in self.expansion_nodes():
    if node.parent() is not None:
@@ -702,7 +758,7 @@ class BomWindow(QMainWindow):
   if any((target.child(i).data(0,Qt.UserRole) or {}).get('material_id')==material_id for i in range(target.childCount())):return '目标父级下已存在相同物料'
   # 合并数据库和当前编辑树的关系，检查跨分支、未保存关系导致的循环。
   graph={}
-  for row in self.svc.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items'):
+  for row in self.svc.bom_graph_edges():
    graph.setdefault(row[0],set()).add(row[1])
   for _,node in self.expansion_nodes():
    if node.parent() is not None:
@@ -905,6 +961,7 @@ class BomWindow(QMainWindow):
   self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(True); self.export_action.setEnabled(False); self.refresh_styles()
   if conflicts:self.statusBar().showMessage('已加载外部更新；检测到冲突，已保留本地未保存修改，请核对后保存。')
  def load(self,preserve=None):
+  self.update_mirror_title()
   from copy import deepcopy
   fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
   self.save_action.setEnabled(False); self.refresh_action.setEnabled(False); self.export_action.setEnabled(True)
@@ -924,7 +981,7 @@ class BomWindow(QMainWindow):
   if hasattr(self,'root_item'):self.remember_expansion()
   self._rendering_tree=True
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
-  self.setWindowTitle(f"{root['base_code']}{root['version']} {root['name']}")
+  self.setWindowTitle(f"{root['base_code']}{root['version']} {root['name']}");self.update_mirror_title()
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
   def append(node,parent,path,level):
    data=dict(node['data']); data.setdefault('_edit_base',{k:data.get(k) for k in ('quantity','position','remark')}); parent_data=parent.data(0,Qt.UserRole) or {}
@@ -1019,16 +1076,7 @@ class BomWindow(QMainWindow):
   col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); d=self.current_item.data(0,Qt.UserRole) or {}; d[key]=float(value) if key=='quantity' and value else value; self.current_item.setData(0,Qt.UserRole,d); self.mark_dirty()
  def add_relative(self,parent,child):
   target=self.by.get(parent.get('node_id'),self.root_item) if child else (self.by.get(parent.get('parent_node_id'),self.root_item) or self.root_item)
-  used={target.child(i).data(0,Qt.UserRole).get('material_id') for i in range(target.childCount()) if target.child(i).data(0,Qt.UserRole)}
-  blocked=set(used)
-  node=target; ancestors=set()
-  while node is not None:
-   node_data=node.data(0,Qt.UserRole) or {}
-   if node_data.get('material_id'): ancestors.add(node_data['material_id'])
-   node=node.parent()
-  blocked.update(ancestors)
-  for candidate in self.svc.materials():
-   if any(row['material_id'] in ancestors for row in self.svc.bom(candidate['id'])): blocked.add(candidate['id'])
+  blocked=self.replacement_blocked_materials(target,True)
   rows=[r for r in self.svc.materials() if r['id'] not in blocked]; items=[f"{r['base_code']}{r['version']} {r['name']}" for r in rows]
   if not items: QMessageBox.information(self,'提示','当前父级下已没有可新增的物料'); return
   x,ok=MaterialSelectionDialog.getItem(self,'新建BOM物料','物料',items,0,False)
@@ -1037,6 +1085,7 @@ class BomWindow(QMainWindow):
   self.insert_material(target,rows[items.index(x)],after=selected)
  @preserve_bom_view
  def insert_material(self,target,r,after=None):
+  if hasattr(self.svc,'ensure_material_bom'):self.svc.ensure_material_bom(r['id'])
   parent=target.data(0,Qt.UserRole) or {}
   self._deleted_relations.discard((parent.get('material_id'),r['id'],''))
   item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'',''])
@@ -1149,17 +1198,18 @@ class BomWindow(QMainWindow):
  def export_purchase_bom(self):
   if not self.purchase_export_action.isEnabled():return
   material=self.svc.material_snapshot(self.root)
-  filename=material['base_code']+material['version']+' '+material['name']+' 采购BOM'
+  filename=material['base_code']+material['version']+' '+material['name']+self.mirror_suffix()+' 采购BOM'
   p=QFileDialog.getSaveFileName(self,'采购BOM导出',export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
   if p:
    remember_export_path(p);self.svc.export_purchase_bom(self.root,p);QMessageBox.information(self,'完成','采购BOM导出成功')
  def export_bom(self):
   if not self.export_action.isEnabled():return
   material=self.svc.material_snapshot(self.root)
-  p=QFileDialog.getSaveFileName(self,'导出BOM',export_start_path(export_filename(material['base_code']+material['version']+' '+material['name'])),'Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出BOM',export_start_path(export_filename(material['base_code']+material['version']+' '+material['name']+self.mirror_suffix())),'Excel (*.xlsx)')[0]
   if p:
    remember_export_path(p)
-   r=self.svc.db.conn.execute('SELECT id FROM skus WHERE material_id=?',(self.root,)).fetchone()
+   sid=getattr(self.svc,'sku_id',None)
+   r=self.svc.db.conn.execute('SELECT id FROM skus WHERE id=?',(sid,)).fetchone() if sid else self.svc.db.conn.execute('SELECT id FROM skus WHERE material_id=? AND scope_id=0',(self.root,)).fetchone()
    if r:self.svc.export_sku(r['id'],p); QMessageBox.information(self,'完成','导出成功')
  def add(self):
   self.add_relative({'id':None,'parent_item_id':None,'level_no':0},False)
@@ -1375,7 +1425,7 @@ class MaterialWindow(QMainWindow):
   self._filters={col:condition for col,condition in self._filters.items() if col<base}
   self._filters.update({base+i:remembered[sid] for i,sid in enumerate(ids) if sid in remembered})
   self._sku_column_ids=ids
-  self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+'\n'+sku['name'] for sku in skus]
+  self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+(' [镜像'+str(sku['mirror_version'])+']' if sum(x['material_id']==sku['material_id'] for x in skus)>1 else '')+'\n'+sku['name'] for sku in skus]
   self.t.setColumnCount(len(self._column_labels));self.t.setHorizontalHeaderLabels(self._column_labels)
   self._hidden_skus=set(ids)-self._selected_skus
   for i,sid in enumerate(ids):

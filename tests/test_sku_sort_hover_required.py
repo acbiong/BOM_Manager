@@ -23,13 +23,13 @@ class SortHoverRequiredTests(unittest.TestCase):
     mid=s.create_material(dict(base_code=code,version='1',name=name,unit='pcs'));s.create_sku(mid);db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(date,mid))
    db.conn.commit();w=MainWindow(s)
    try:
-    for col in (1,2,4):
+    for col in (1,2,4,5):
      w.table.horizontalHeader().sectionClicked.emit(col)
      values=[w.table.item(i,col).text() for i in range(3)];self.assertEqual(values,sorted(values))
      w.table.horizontalHeader().sectionClicked.emit(col);w.refresh()
      values=[w.table.item(i,col).text() for i in range(3)];self.assertEqual(values,sorted(values,reverse=True))
      for i in range(3):
-      sid=int(w.table.item(i,5).text())
+      sid=int(w.table.item(i,6).text())
       with patch.object(w,'open_bom_id') as opened:w.table.cellWidget(i,0).click();opened.assert_called_once_with(sid)
     previous=w._sku_sort;w.sort_skus(0);self.assertEqual(w._sku_sort,previous)
    finally:w.close();db.close()

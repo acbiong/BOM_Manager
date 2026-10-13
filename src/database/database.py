@@ -4,7 +4,16 @@ from contextlib import contextmanager
 class Database:
  def __init__(self,path):
   self.path=path; self.conn=sqlite3.connect(path); self.conn.row_factory=sqlite3.Row
-  try:self.create_schema()
+  try:
+   columns={row[1] for row in self.conn.execute('PRAGMA table_info(skus)')}
+   if columns and 'mirror_version' not in columns and path!=':memory:':
+    from pathlib import Path
+    from datetime import datetime
+    backup=Path(str(path)+'.pre-mirrors-'+datetime.now().strftime('%Y%m%d_%H%M%S_%f')+'.db')
+    destination=sqlite3.connect(str(backup))
+    try:self.conn.backup(destination)
+    finally:destination.close()
+   self.create_schema()
   except Exception:self.conn.close(); raise
  def create_schema(self):
   self.conn.executescript('''CREATE TABLE IF NOT EXISTS materials(id INTEGER PRIMARY KEY,base_code TEXT NOT NULL,version TEXT NOT NULL,name TEXT NOT NULL,description TEXT DEFAULT '',unit TEXT NOT NULL,manufacturer TEXT DEFAULT '',mpn TEXT DEFAULT '',mp_flag TEXT DEFAULT 'M',has_bom INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(base_code,version));CREATE TABLE IF NOT EXISTS skus(id INTEGER PRIMARY KEY,material_id INTEGER UNIQUE,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS bom_items(id INTEGER PRIMARY KEY,bom_root_id INTEGER NOT NULL,parent_item_id INTEGER,material_id INTEGER NOT NULL,quantity REAL NOT NULL,unit TEXT NOT NULL,position TEXT DEFAULT '',level_no INTEGER DEFAULT 1,remark TEXT DEFAULT '',sort_no INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS material_bom_items(id INTEGER PRIMARY KEY,parent_material_id INTEGER NOT NULL,child_material_id INTEGER NOT NULL,quantity REAL NOT NULL,unit TEXT NOT NULL,position TEXT DEFAULT '',remark TEXT DEFAULT '',sort_no INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(parent_material_id,child_material_id,position));CREATE INDEX IF NOT EXISTS idx_material_bom_parent ON material_bom_items(parent_material_id);CREATE INDEX IF NOT EXISTS idx_material_bom_child ON material_bom_items(child_material_id);CREATE TABLE IF NOT EXISTS alternates(id INTEGER PRIMARY KEY,bom_item_id INTEGER NOT NULL,material_id INTEGER NOT NULL,sort_no INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS change_logs(id INTEGER PRIMARY KEY,object_type TEXT,object_id INTEGER,action TEXT,detail TEXT,changed_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS project(id INTEGER PRIMARY KEY CHECK(id=1),project_name TEXT DEFAULT '请输入项目名称',project_code TEXT DEFAULT '',product_name TEXT DEFAULT '',product_model TEXT DEFAULT '');INSERT OR IGNORE INTO project(id) VALUES(1);''')
@@ -23,6 +32,26 @@ class Database:
     parent_id=parent['material_id'] if parent else r['bom_root_id']
     self.conn.execute('INSERT OR IGNORE INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(parent_id,r['material_id'],r['quantity'],r['unit'],r['position'],r['remark'],r['sort_no']))
   self.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=materials.id) THEN 1 ELSE 0 END')
+  self.conn.execute('CREATE TABLE IF NOT EXISTS app_metadata(key TEXT PRIMARY KEY,value TEXT)')
+  if 'mirror_version' not in {r[1] for r in self.conn.execute('PRAGMA table_info(skus)')}:
+   self.conn.execute('ALTER TABLE skus RENAME TO skus_legacy')
+   self.conn.execute("CREATE TABLE skus(id INTEGER PRIMARY KEY AUTOINCREMENT,material_id INTEGER,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,mirror_version INTEGER NOT NULL DEFAULT 100,scope_id INTEGER NOT NULL DEFAULT 0,UNIQUE(material_id,mirror_version))")
+   self.conn.execute('INSERT INTO skus(id,material_id,updated_at) SELECT id,material_id,updated_at FROM skus_legacy')
+   self.conn.execute('DROP TABLE skus_legacy')
+  self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_material_usage(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,parent_id INTEGER NOT NULL,role TEXT NOT NULL,PRIMARY KEY(sku_id,material_id,parent_id,role))')
+  self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_captured_materials(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,PRIMARY KEY(sku_id,material_id))')
+  self.conn.execute('CREATE INDEX IF NOT EXISTS mirror_usage_material ON mirror_material_usage(material_id)')
+  if not self.conn.execute("SELECT 1 FROM app_metadata WHERE key='local_log_time_v1'").fetchone():
+   from datetime import datetime,timezone
+   for row in self.conn.execute('SELECT id,changed_at FROM change_logs').fetchall():
+    try:value=datetime.fromisoformat(row['changed_at']).replace(tzinfo=timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]
+    except (TypeError,ValueError):continue
+    self.conn.execute('UPDATE change_logs SET changed_at=? WHERE id=?',(value,row['id']))
+   self.conn.execute("INSERT INTO app_metadata VALUES('local_log_time_v1','1')")
+  from services.mirrors import TABLES,table_name
+  existing={row[0] for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+  for row in self.conn.execute('SELECT id,scope_id FROM skus WHERE scope_id<>0'):
+   if row['scope_id']!=row['id'] or any(table_name(row['id'],table) not in existing for table in TABLES):raise ValueError('镜像BOM数据表缺失或标识错误，请从备份恢复数据库')
   self.conn.commit()
  @contextmanager
  def transaction(self):

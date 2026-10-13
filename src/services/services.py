@@ -33,17 +33,55 @@ class Services:
    if sku:snapshot=self.material_snapshot(sku['material_id'])
   snapshot=snapshot or {}
   code=f"{snapshot['base_code']}{snapshot['version']}" if snapshot else None
-  self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail,material_code,material_name) VALUES(?,?,?,?,?,?)',(typ,obj,act,detail,code,snapshot.get('name')))
+  self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail,material_code,material_name,changed_at) VALUES(?,?,?,?,?,?,?)',(typ,obj,act,detail,code,snapshot.get('name'),datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]))
+ def publish(self,event):
+  from infrastructure.events import WindowRefreshBus
+  if event.get('type')=='bom_changed' and getattr(self,'scope_id',0):event=dict(event,scope_id=self.scope_id)
+  WindowRefreshBus.publish(event)
+ def for_sku(self,sid):
+  row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
+  if row is None:raise ValueError('SKU不存在')
+  if not row['scope_id']:return self
+  from services.mirror_service import MirrorServices
+  return MirrorServices(getattr(self,'primary',self),sid)
+ def bom_skus(self):return [row for row in self.skus() if row['scope_id']==getattr(self,'scope_id',0)]
+ def copy_sku_bom(self,sid):
+  if getattr(self,'scope_id',0):return self.primary.copy_sku_bom(sid)
+  from services.mirrors import create_namespace
+  source=self.for_sku(sid)
+  sku=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
+  with self.db.transaction():
+   version=max(sku['mirror_version']+1,self.db.conn.execute('SELECT MAX(mirror_version)+1 FROM skus WHERE material_id=?',(sku['material_id'],)).fetchone()[0])
+   new_id=self.db.conn.execute('INSERT INTO skus(material_id,mirror_version) VALUES(?,?)',(sku['material_id'],version)).lastrowid
+   self.db.conn.execute('UPDATE skus SET scope_id=? WHERE id=?',(new_id,new_id))
+   create_namespace(self.db,new_id,source)
+   copied=self.for_sku(new_id);copied.refresh_usage()
+   copied.db.conn.execute("UPDATE change_logs SET object_id=? WHERE object_type='sku' AND object_id=?",(new_id,sid))
+   copied.log('sku',new_id,'copy',f'复制BOM；源镜像版本：{sku["mirror_version"]}；新镜像版本：{version}')
+  self.publish({'type':'sku_changed','id':new_id});return new_id
+ def change_mirror_version(self,sid,value):
+  try:value=int(value)
+  except (TypeError,ValueError):raise ValueError('镜像版本号必须为正整数')
+  if value<1:raise ValueError('镜像版本号必须为正整数')
+  row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
+  if row is None:raise ValueError('SKU不存在')
+  if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=? AND mirror_version=? AND id<>?',(row['material_id'],value,sid)).fetchone():raise ValueError('此SKU镜像版本号已存在')
+  with self.db.transaction():
+   stamp=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+   self.db.conn.execute('UPDATE skus SET mirror_version=?,updated_at=? WHERE id=?',(value,stamp,sid))
+   if not row['scope_id']:self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,row['material_id']))
+   self.for_sku(sid).log('sku',sid,'mirror_version',f'镜像版本号：{row["mirror_version"]} → {value}')
+  self.publish({'type':'sku_changed','id':sid})
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；SKU、有效BOM主料或替代料引用均为非呆滞。
-  q=f'%{query}%'; return self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
+  q=f'%{query}%'; return self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
  def create_material(self,d):
   if not all(d.get(k) for k in ('base_code','version','name')): raise ValueError('基础编码、版本号、名称为必填')
   if d.get('unit','pcs') not in self.UNITS: raise ValueError('单位不合规')
   with self.db.transaction():
    c=self.db.conn.execute('INSERT INTO materials(base_code,version,name,description,unit,grade,manufacturer,mpn,mp_flag) VALUES(?,?,?,?,?,?,?,?,?)',(d['base_code'],d['version'],d['name'],d.get('description',''),d.get('unit','pcs'),d.get('grade',''),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'))); i=c.lastrowid; self.log('material',i,'create','新建物料；'+self.material_detail({},self.material_snapshot(i)))
   try:
-   from infrastructure.events import WindowRefreshBus; WindowRefreshBus.publish({'type':'material_changed','id':i})
+   from infrastructure.events import WindowRefreshBus; self.publish({'type':'material_changed','id':i})
   except Exception: pass
   return i
  def update_material(self,i,d):
@@ -51,16 +89,18 @@ class Services:
   before=self.material_snapshot(i)
   if not before:raise ValueError('物料不存在')
   with self.db.transaction(): self.db.conn.execute('UPDATE materials SET name=?,description=?,unit=?,grade=?,manufacturer=?,mpn=?,mp_flag=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(d['name'],d.get('description',''),d['unit'],d.get('grade',before.get('grade','')),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'),i)); self.log('material',i,'update','修改物料；'+(self.material_detail(before,self.material_snapshot(i)) or '物料属性未发生变化'))
+  self.db.conn.execute('UPDATE skus SET updated_at=CURRENT_TIMESTAMP WHERE material_id=?',(i,));self.db.conn.commit()
   from infrastructure.events import WindowRefreshBus
-  WindowRefreshBus.publish({'type':'material_changed','id':i})
+  self.publish({'type':'material_changed','id':i})
  def delete_material(self,i):
+  if self.db.conn.execute('SELECT 1 FROM mirror_material_usage WHERE material_id=?',(i,)).fetchone():raise ValueError('物料仍被镜像BOM引用，请先删除引用')
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(i,)).fetchone(): raise ValueError('物料是SKU，请先删除SKU引用')
   r=self.db.conn.execute('SELECT COUNT(*) n FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)).fetchone();
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
   if self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=?',(i,)).fetchone():raise ValueError('物料仍被BOM作为替代料引用，请先删除引用')
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
- def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,m.updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+ def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
  def sku_material_quantities(self,skus=None):
   """每个SKU数量为1；仅累计主BOM，Decimal保留路径连乘精度。"""
   from decimal import Decimal
@@ -69,6 +109,8 @@ class Services:
    graph.setdefault(row['parent_material_id'],[]).append((row['child_material_id'],Decimal(str(row['quantity']))))
   result={}
   for sku in self.skus() if skus is None else skus:
+   if sku['scope_id'] and sku['scope_id']!=getattr(self,'scope_id',0):
+    result.update(self.for_sku(sku['id']).sku_material_quantities());continue
    root=sku['material_id'];totals={root:Decimal('1')}
    def walk(parent,quantity,ancestors):
     for child,usage in graph.get(parent,[]):
@@ -83,11 +125,16 @@ class Services:
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone(): raise ValueError('已是SKU')
   with self.db.transaction(): c=self.db.conn.execute('INSERT INTO skus(material_id) VALUES(?)',(mid,)); self.log('sku',c.lastrowid,'create','创建SKU'); sid=c.lastrowid; self.db.conn.execute('UPDATE sku_history_reset SET start_log_id=(SELECT MAX(id) FROM change_logs) WHERE root_id=?',(mid,))
   from infrastructure.events import WindowRefreshBus
-  WindowRefreshBus.publish({'type':'sku_changed','id':sid})
+  self.publish({'type':'sku_changed','id':sid})
   return sid
  def material_is_bom_referenced(self,mid):
-  return bool(self.db.conn.execute('SELECT 1 FROM material_bom_items WHERE child_material_id=? LIMIT 1',(mid,)).fetchone() or self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=? LIMIT 1',(mid,)).fetchone())
+  return bool(self.db.conn.execute('SELECT 1 FROM mirror_material_usage WHERE material_id=?',(mid,)).fetchone() or self.db.conn.execute('SELECT 1 FROM material_bom_items WHERE child_material_id=? LIMIT 1',(mid,)).fetchone() or self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=? LIMIT 1',(mid,)).fetchone())
  def delete_sku(self,sid):
+  row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
+  if row and row['scope_id']:
+   from services.mirrors import drop_namespace
+   with self.db.transaction():drop_namespace(self.db,sid);self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,))
+   self.publish({'type':'sku_changed','id':sid});return
   with self.db.transaction():
    r=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
    if r is None:raise ValueError('SKU不存在')
@@ -107,8 +154,9 @@ class Services:
    self.db.conn.execute('INSERT OR REPLACE INTO sku_history_reset(root_id,start_log_id) VALUES(?,0)',(root,))
    self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,))
   from infrastructure.events import WindowRefreshBus
-  WindowRefreshBus.publish({'type':'sku_changed','id':sid})
-  if not preserve_bom:WindowRefreshBus.publish({'type':'bom_changed','root':r['material_id']})
+  self.publish({'type':'sku_changed','id':sid})
+  if not preserve_bom:self.publish({'type':'bom_changed','root':r['material_id']})
+ def bom_graph_edges(self):return self.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items').fetchall()
  def bom(self,root):
   """递归展开物料关系表，返回兼容BOM编辑器的扁平树行。"""
   result=[]
@@ -200,7 +248,7 @@ class Services:
    def expand(parent):
     return [{'data':dict(data),'children':expand(data['material_id'])} for data in groups.get(parent,[])]
    return expand(root)
-  log_roots={sku['material_id']:{sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])} for sku in self.skus()}
+  log_roots={sku['material_id']:{sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])} for sku in self.bom_skus()}
   log_roots.setdefault(root,{root}|{row['material_id'] for row in old_rows})
   old_alternates={row['id']:[r['material_id'] for r in self.alternates(row['id'])] for row in old.values()}
   saved_at=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
@@ -236,14 +284,14 @@ class Services:
     relation=self.db.conn.execute('SELECT id FROM material_bom_items WHERE parent_material_id=? AND child_material_id=? AND position=?',key).fetchone()[0]
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(relation,))
     for order,mid in enumerate(alternates):self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',(relation,mid,order))
-   self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
+   if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
    # 使用保存前后包含的父物料判断影响范围，覆盖新增和删除共享分支。
    # 在同一事务内更新时间，保证界面收到通知时读取的是已提交数据。
-   for sku in self.skus():
+   for sku in self.bom_skus():
     sku_root=sku['material_id']
     contained=log_roots.get(sku_root,{sku_root})|{sku_root}|{row['material_id'] for row in self.bom(sku_root)}
     if contained & changed_parents:
-     self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(saved_at,sku_root))
+     if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(saved_at,sku_root))
      self.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(saved_at,sku['id']))
      affected_skus.append(sku['id'])
    after={ (r['parent_material_id'],r['child_material_id'],r['position'] or ''):dict(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items') }
@@ -280,9 +328,10 @@ class Services:
     log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     for affected,contained in log_roots.items():
      if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
+   if getattr(self,'scope_id',0):self.refresh_usage()
   from infrastructure.events import WindowRefreshBus
-  for parent in changed_parents: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
-  if affected_skus:WindowRefreshBus.publish({'type':'sku_changed','ids':affected_skus})
+  for parent in changed_parents: self.publish({'type':'bom_changed','root':parent})
+  if affected_skus:self.publish({'type':'sku_changed','ids':affected_skus})
  def validate_bom_rows(self,root,rows):
   """校验导入BOM与现有结构的子项、数量、位置一致性。"""
   old={(x['material_id'],str(x['position'])):float(x['quantity']) for x in self.bom(root)}; new={(x['material_id'],str(x.get('position',''))):float(x['quantity']) for x in rows}
@@ -297,11 +346,11 @@ class Services:
   if not r:return
   with self.db.transaction():
    self.db.conn.execute('DELETE FROM material_bom_items WHERE id=?',(bom_item_id,))
-   self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
+   if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
    self.log('bom',r['parent_material_id'],'delete',f'删除下阶物料{r["child_material_id"]}',snapshot=self.material_snapshot(r['child_material_id']))
   try:
    from infrastructure.events import WindowRefreshBus
-   WindowRefreshBus.publish({'type':'bom_changed','root':r['parent_material_id']})
+   self.publish({'type':'bom_changed','root':r['parent_material_id']})
   except Exception: pass
  BOM_HEADERS=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
  def import_bom(self,path,root=None,sheet_name=None,header_mapping=None,persist=True,conflict_resolver=None):
@@ -478,16 +527,25 @@ class Services:
   result=[]
   for parent in parents:
    usages=[]; sku_ids=[]
-   for sku in self.skus():
+   for sku in self.bom_skus():
     if any(row['material_id']==i and row['parent_material_id']==parent['id'] for row in self.bom(sku['material_id'])):
      usages.append(f"{sku['base_code']}{sku['version']} {sku['name']}"); sku_ids.append(sku['id'])
    parent_label=f"{parent['base_code']}{parent['version']} {parent['name']}"
    result.append({'parent_id':parent['id'],'sku_ids':sku_ids or [None],'sku_labels':usages or ['未包含在SKU中'],'parent_label':parent_label,'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
+  if not getattr(self,'scope_id',0):
+   for sku in self.skus():
+    if not sku['scope_id']:continue
+    service=self.for_sku(sku['id'])
+    parent_ids={row['parent_material_id'] for row in service.bom(sku['material_id']) if row['material_id']==i}
+    for parent_id in sorted(parent_ids):
+     parent=self.material_snapshot(parent_id);label=parent['base_code']+parent['version']+' '+parent['name']
+     sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}"
+     result.append(dict(parent_id=f"mirror:{sku['id']}:{parent_id}",material_parent_id=parent_id,sku_ids=[sku['id']],sku_labels=[sku_label],parent_label=label,labels=[sku_label+'/'+label]))
   return result
  def material_usage(self,i):
-  result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label'],'parent_id':reference['parent_id']} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
+  result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label'],'parent_id':reference.get('material_parent_id',reference['parent_id'])} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
   for sku in self.skus():
-   if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']}",'parent':'SKU根节点（无父级）'})
+   if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}",'parent':'SKU根节点（无父级）'})
   return result
  def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
   new_version=new_version.strip()
@@ -496,7 +554,7 @@ class Services:
    old=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
    if old is None: raise ValueError('物料不存在')
    if self.db.conn.execute('SELECT 1 FROM materials WHERE base_code=? AND version=?',(old['base_code'],new_version)).fetchone(): raise ValueError('目标版本已存在')
-   parents={r[0] for r in self.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items WHERE child_material_id=?',(i,))}
+   parents={reference['parent_id'] for reference in self.material_version_references(i)}
    if expected_parents is not None and parents!=set(expected_parents): raise ValueError('物料的BOM引用已变化，请重新打开版本变更窗口')
    selected=parents if selected_parents is None else set(selected_parents)
    if not selected<=parents: raise ValueError('所选BOM引用已变化，请重新选择')
@@ -511,12 +569,25 @@ class Services:
     for child in self.db.conn.execute('SELECT * FROM material_bom_items WHERE parent_material_id=?',(i,)).fetchall():
      relation=self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(new_id,child['child_material_id'],child['quantity'],child['unit'],child['position'],child['remark'],child['sort_no'])).lastrowid
      self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) SELECT ?,material_id,sort_no FROM alternates WHERE bom_item_id=?',(relation,child['id']))
+    cloned_mirrors=set()
     for parent in selected:
-     self.db.conn.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,parent,i))
-   self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={[str(self.material_snapshot(parent).get('base_code',''))+str(self.material_snapshot(parent).get('version',''))+' '+str(self.material_snapshot(parent).get('name','')) for parent in sorted(selected)]}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
+     if isinstance(parent,str) and parent.startswith('mirror:'):
+      _,sid,parent_id=parent.split(':');service=self.for_sku(int(sid));connection=service.db.conn
+      if sid not in cloned_mirrors:
+       # New identity inherits the old identity's private descendants in this mirror.
+       for child in connection.execute('SELECT * FROM material_bom_items WHERE parent_material_id=?',(i,)).fetchall():
+        relation=connection.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(new_id,child['child_material_id'],child['quantity'],child['unit'],child['position'],child['remark'],child['sort_no'])).lastrowid
+        connection.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) SELECT ?,material_id,sort_no FROM alternates WHERE bom_item_id=?',(relation,child['id']))
+       cloned_mirrors.add(sid)
+      connection.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,int(parent_id),i));service.refresh_usage()
+     else:self.db.conn.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,parent,i))
+   self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={[str(parent) if isinstance(parent,str) else str(self.material_snapshot(parent).get('base_code',''))+str(self.material_snapshot(parent).get('version',''))+' '+str(self.material_snapshot(parent).get('name','')) for parent in sorted(selected,key=str)]}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
   from infrastructure.events import WindowRefreshBus
-  WindowRefreshBus.publish({'type':'material_changed','id':new_id})
-  for parent in selected: WindowRefreshBus.publish({'type':'bom_changed','root':parent})
+  self.publish({'type':'material_changed','id':new_id})
+  for parent in selected:
+   if isinstance(parent,str):
+    _,sid,parent_id=parent.split(':');self.for_sku(int(sid)).publish({'type':'bom_changed','root':int(parent_id)})
+   else:self.publish({'type':'bom_changed','root':parent})
   return new_id
  def add_alternate(self,bom_item_id,material_id):
   with self.db.transaction(): self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,COALESCE((SELECT MAX(sort_no)+1 FROM alternates WHERE bom_item_id=?),0))',(bom_item_id,material_id,bom_item_id))
@@ -579,13 +650,13 @@ class Services:
    return ok,fail
   finally:wb.close()
  def export_database(self,path):
-  wb=Workbook(); ws=wb.active; ws.title='SKU清单'; ws.append(['序号','SKU编码','SKU名称','SKU描述','修改日期时间'])
-  for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['updated_at']])
+  wb=Workbook(); ws=wb.active; ws.title='SKU清单'; ws.append(['序号','SKU编码','SKU名称','SKU描述','版本号','修改日期时间'])
+  for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],r['updated_at']])
   self.format_export_sheet(ws,{'序号'})
   self.write_material_sheet(wb.create_sheet('物料库'))
   self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
   for r in self.skus():
-   self.write_bom_sheet(wb.create_sheet((r['base_code']+r['version'])[:31]),r['material_id'])
+   self.for_sku(r['id']).write_bom_sheet(wb.create_sheet((r['base_code']+r['version']+(' 镜像'+str(r['mirror_version']) if sum(x['material_id']==r['material_id'] for x in self.skus())>1 else ''))[:31]),r['material_id'])
   wb.save(path)
  def export_materials(self,path):
   wb=Workbook(); ws=wb.active; ws.title='变更记录'
@@ -647,7 +718,9 @@ class Services:
    object_name={'material':'物料','bom':'BOM','sku':'SKU','project':'项目'}.get(row['object_type'],row['object_type'] or '')
    action_name={'create':'新建','update':'修改','delete':'删除','version':'版本变更'}.get(row['action'],row['action'] or '')
    change_type=action_name+object_name if row['action']!='version' else object_name+action_name
-   prefixes={'新建物料','修改物料','删除物料','创建SKU','新建SKU','修改BOM','删除SKU','创建物料'}
+   if row['action']=='copy':change_type='复制BOM'
+   elif row['action']=='mirror_version':change_type='镜像版本变更'
+   prefixes={'复制BOM','新建物料','修改物料','删除物料','创建SKU','新建SKU','修改BOM','删除SKU','创建物料'}
    first,separator,remainder=detail.partition('\n')
    if first.strip() in prefixes:
     change_type=first.strip();detail=remainder if separator else ''
@@ -765,6 +838,9 @@ class Services:
    sheet.row_dimensions[cells[0].row].height=min(409,lines*16+6)
   sheet.freeze_panes='A2'
  def export_sku(self,sid,path):
+  if not getattr(self,'scope_id',0):
+   scoped=self.for_sku(sid)
+   if scoped is not self:return scoped.export_sku(sid,path)
   sku=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
   if sku is None:raise ValueError('SKU不存在')
   wb=Workbook(); w=wb.active; w.title='变更记录'

@@ -25,7 +25,7 @@ class WindowGeometryMemory(QObject):
     def key(self, window):
         identity = type(window).__module__ + '.' + type(window).__name__
         if hasattr(window, 'root') and hasattr(window, 'svc'):
-            identity += ':' + self.config.relative_path(window.svc.db.path) + ':' + str(window.root)
+            identity += ':' + self.config.relative_path(window.svc.db.path) + ':' + str(window.root) + (':' + str(window.svc.scope_id) if getattr(window.svc,'scope_id',0) else '')
         elif type(window).__name__ in ('QDialog', 'QFileDialog', 'QMessageBox'):
             identity += ':' + window.windowTitle()
         return hashlib.sha256(identity.encode('utf-8')).hexdigest()

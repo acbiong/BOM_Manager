@@ -42,7 +42,7 @@ class SkuTimestampTitleTests(unittest.TestCase):
     def assert_changed(self, *changed):
         for row in self.s.skus():
             self.assertEqual(row['updated_at'] != '2000-01-01 00:00:00', row['material_id'] in changed)
-        self.assertEqual([self.w.table.item(i, 4).text() for i in range(3)],
+        self.assertEqual([self.w.table.item(i, 5).text() for i in range(3)],
                          [r['updated_at'] for r in self.s.skus()])
 
     def test_local_quantity_does_not_touch_other_skus(self):
@@ -112,7 +112,7 @@ class SkuTimestampTitleTests(unittest.TestCase):
                 stored=self.db.conn.execute('SELECT updated_at FROM skus WHERE material_id=?',(root,)).fetchone()[0]
                 self.assertEqual(stored,current[root])
             self.assertEqual(current[self.unrelated],previous[self.unrelated])
-            displayed={int(self.w.table.item(i,5).text()):self.w.table.item(i,4).text() for i in range(self.w.table.rowCount())}
+            displayed={int(self.w.table.item(i,6).text()):self.w.table.item(i,5).text() for i in range(self.w.table.rowCount())}
             for sku in self.s.skus():self.assertEqual(displayed[sku['id']],sku['updated_at'])
             previous=current
         self.s.save_bom(self.parent,[dict(material_id=self.child,quantity=3,unit='pcs')])
