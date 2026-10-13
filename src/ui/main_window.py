@@ -17,6 +17,7 @@ from ui.frozen_table import FrozenMaterialTable
 from ui.import_paths import bom_import_directory, remember_bom_import
 from ui.replacement_selection import ReplacementSelectionDialog
 from ui.bom_view_state import preserve_bom_view
+from ui.material_enter import FirstMaterialOnEnter
 
 class WrappingTextEdit(QPlainTextEdit):
  def __init__(self):
@@ -238,6 +239,7 @@ class MaterialSelectionDialog(QInputDialog):
   combo=dialog.findChild(QComboBox); combo.setInsertPolicy(QComboBox.NoInsert)
   completer=QCompleter(items,dialog); completer.setCaseSensitivity(Qt.CaseInsensitive); completer.setFilterMode(Qt.MatchContains); completer.setCompletionMode(QCompleter.PopupCompletion); combo.setCompleter(completer)
   combo.setCurrentIndex(-1); combo.lineEdit().setPlaceholderText('输入物料编码、版本或名称筛选')
+  dialog._enter_selection=FirstMaterialOnEnter(combo)
   dialog._valid_choices=set(items)
   return (dialog.textValue(),True) if dialog.exec_()==QDialog.Accepted else ('',False)
  def accept(self):
@@ -257,6 +259,7 @@ class NewSkuDialog(QDialog):
   self.combo.setModel(self.model); self.combo.setCurrentIndex(-1); self.combo.lineEdit().setPlaceholderText('输入物料编码或名称')
   self.proxy=QSortFilterProxyModel(self); self.proxy.setSourceModel(self.model); self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
   self.completer=QCompleter(self.proxy,self); self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion); self.combo.setCompleter(self.completer)
+  self._enter_selection=FirstMaterialOnEnter(self.combo)
   self.combo.lineEdit().textEdited.connect(self.filter_materials); layout.addWidget(self.combo)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
  def filter_materials(self,text):
@@ -566,7 +569,10 @@ class BomWindow(QMainWindow):
   it=self.tree.itemAt(pos)
   if not it:return
   d=it.data(0,Qt.UserRole) or {}
-  if d.get('_deleted'):return
+  if d.get('_deleted'):
+   menu=QMenu(self);restore=menu.addAction('取消删除')
+   if menu.exec_(self.tree.viewport().mapToGlobal(pos))==restore:self.restore_relation(it)
+   return
   if it is getattr(self,'root_item',None):
    m=QMenu(self); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(self.root)) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
    if self.handle_clipboard_action(act,clipboard_actions,it):return
@@ -739,6 +745,8 @@ class BomWindow(QMainWindow):
   if relation_id and relation_id>0:
    original=self.svc.db.conn.execute('SELECT parent_material_id,child_material_id,position FROM material_bom_items WHERE id=?',(relation_id,)).fetchone()
    if original:self._deleted_relations.add((original[0],original[1],original[2] or ''))
+  import uuid
+  deletion_token=uuid.uuid4().hex
   self.current_item=None
   for node in matches:
    data=node.data(0,Qt.UserRole) or {}; current_key=self.relation_key(node)
@@ -747,9 +755,34 @@ class BomWindow(QMainWindow):
    pending=[node]
    while pending:
     removed=pending.pop(); removed_data=removed.data(0,Qt.UserRole) or {}
+    removed_data['_delete_stack']=list(removed_data.get('_delete_stack',[]))+[deletion_token]
     removed_data['_deleted']=True; removed.setData(0,Qt.UserRole,removed_data)
     pending.extend(removed.child(i) for i in range(removed.childCount()))
   self.mark_dirty(); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
+ @preserve_bom_view
+ def restore_relation(self,item):
+  data=item.data(0,Qt.UserRole) or {}
+  if not data.get('_deleted'):return
+  # An inherited deletion restores its owning branch, including shared copies.
+  stack=data.get('_delete_stack',[])
+  if not stack:return
+  token=stack[-1]
+  for _,node in self.expansion_nodes():
+   current=dict(node.data(0,Qt.UserRole) or {})
+   deletions=current.get('_delete_stack',[])
+   if token not in deletions:continue
+   current['_delete_stack']=[value for value in deletions if value!=token]
+   current['_deleted']=bool(current['_delete_stack']);node.setData(0,Qt.UserRole,current)
+  self._deleted_relations.clear()
+  for _,node in self.expansion_nodes():
+   current=node.data(0,Qt.UserRole) or {}
+   if node is self.root_item or not current.get('_deleted'):continue
+   self._deleted_relations.add(self.relation_key(node))
+   relation_id=current.get('id')
+   if isinstance(relation_id,int) and relation_id>0:
+    original=self.svc.db.conn.execute('SELECT parent_material_id,child_material_id,position FROM material_bom_items WHERE id=?',(relation_id,)).fetchone()
+    if original:self._deleted_relations.add(tuple(original))
+  self.mark_dirty();self.tree.setCurrentItem(item);self.show_item_info(item)
  def contains_material(self,material_id):
   if material_id is None:return False
   if material_id==self.root:return True
