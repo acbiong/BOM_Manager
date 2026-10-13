@@ -15,6 +15,7 @@ from ui.table_layout import fit_columns
 from ui.about_dialog import AboutDialog
 from ui.frozen_table import FrozenMaterialTable
 from ui.import_paths import bom_import_directory, remember_bom_import
+from ui.replacement_selection import ReplacementSelectionDialog
 
 class WrappingTextEdit(QPlainTextEdit):
  def __init__(self):
@@ -589,9 +590,24 @@ class BomWindow(QMainWindow):
   choice,ok=MaterialSelectionDialog.getItem(self,'替换物料','输入筛选替换物料（继承数量、位置、备注及替代料）',choices,0,False)
   if not ok:return
   material=rows[choices.index(choice)]
-  # Shared parent BOM occurrences must receive the same replacement before saving.
-  key=self.relation_key(item)
-  matches=[node for _,node in self.expansion_nodes() if node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted') and self.relation_key(node)==key]
+  old_id=(item.data(0,Qt.UserRole) or {})['material_id']
+  matches=[node for _,node in self.expansion_nodes() if node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted') and (node.data(0,Qt.UserRole) or {}).get('material_id')==old_id]
+  if len(matches)>1:
+   groups={}
+   for node in matches:
+    key=self.relation_key(node)
+    group=groups.setdefault(key,dict(nodes=[],paths=[],current=False,reason=''))
+    group['nodes'].append(node);group['current']=group['current'] or node is item
+    path=[];ancestor=node
+    while ancestor is not None:path.append(ancestor.text(0));ancestor=ancestor.parent()
+    group['paths'].append(' / '.join(reversed(path)))
+    reason=self.paste_block_reason(node,False,material['id'])
+    if material['id'] in self.alternate_ids(node):reason='目标物料也是此关系的替代料，不能继承为自身替代料'
+    if reason:group['reason']=reason.replace('粘贴','替换')
+   dialog=ReplacementSelectionDialog(list(groups.values()),self)
+   if dialog.exec_()!=QDialog.Accepted:return
+   matches=dialog.selected_nodes()
+   if not matches:return
   selected=None
   for old in matches:
    original=dict(old.data(0,Qt.UserRole) or {})
@@ -601,10 +617,11 @@ class BomWindow(QMainWindow):
     data[field]=original.get(field,1.0 if field=='quantity' else '')
     added.setText(column,f"{data[field]:.1f}" if field=='quantity' else str(data[field] or ''))
    added.setData(0,Qt.UserRole,data)
-   self._alternate_edits[self.alternate_key(added)]=list(alternates)
+   self._alternate_edits[self.alternate_key(added)]=self.alternate_ids(old)
    self._draft_baselines[data['id']]=self.capture_item(added)
-   if old is item:selected=added
-  self.remove_relation(item)
+   if selected is None or old is item:selected=added
+  for old in matches:
+   if not (old.data(0,Qt.UserRole) or {}).get('_deleted'):self.remove_relation(old)
   self.mark_dirty();fit_columns(self.tree)
   if selected is not None:self.tree.setCurrentItem(selected);self.show_item_info(selected);self.tree.scrollToItem(selected)
   return selected
