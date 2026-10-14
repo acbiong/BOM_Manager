@@ -366,3 +366,7 @@ SKU菜单栏新增筛选按钮，按SKU编码、名称、描述、版本号、�
 
 ### 2026-10-14 BOM对比递归匹配优化
 最新对比匹配规则：`align_children`同父项范围内先按物料ID/唯一基础编码配对，用SequenceMatcher建立顺序锚点，再按间隙顺序配对替换项，剩余新增按锚点位置插入，不集中放末尾。换父项继续递归子项，parent_code仅展示，不参与修改/字符标记。新增删除仍以空白行对齐。对比窗支持系统最小化最大化、F11全屏/Esc恢复；固定双侧滚动条占位，行高重算时屏蔽滚动条信号并恢复同一偏移。
+
+
+### 2026-10-14 BOM对比编码与选择
+UI使用DISPLAY_FIELDS合并基础编码+版本号为material_code，不改services.FIELDS及匹配。版本变化仍映射到合并编码的字符标记。双侧SelectRows+SingleSelection，通过sync_selection直接同步selectionModel（带重入保护），对侧空白行同样选中，不抢焦点、不主动滚动；重新compare先clear_results。

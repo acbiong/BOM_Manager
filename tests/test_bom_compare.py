@@ -62,7 +62,7 @@ class BomCompareTests(unittest.TestCase):
  def test_cell_only_colors_character_emphasis_and_parent_columns(self):
   from PyQt5.QtCore import Qt
   from ui.bom_compare import RICH_TEXT_ROLE
-  from services.bom_compare import FIELDS
+  from ui.bom_compare import DISPLAY_FIELDS
   self.put(self.s,self.r,[(self.p,2,dict(remark='相同前缀甲相同后缀'))])
   copy=self.s.copy_sku_bom(self.sid)
   self.put(self.s.for_sku(copy),self.r,[(self.p,2,dict(remark='相同前缀乙相同后缀'))])
@@ -72,7 +72,7 @@ class BomCompareTests(unittest.TestCase):
    self.assertEqual([left.horizontalHeaderItem(c).text() for c in range(4)],['状态','层级','父项物料编码','物料编码'])
    self.assertEqual(left.item(0,1).text(),'0');self.assertEqual(left.item(0,2).text(),'ROOT')
    self.assertEqual(left.item(1,1).text(),'1');self.assertEqual(left.item(1,2).text(),'R100')
-   remark=1+[k for k,_ in FIELDS].index('remark')
+   remark=1+[k for k,_ in DISPLAY_FIELDS].index('remark')
    for table,letter in ((left,'甲'),(right,'乙')):
     for c in range(table.columnCount()):
      item=table.item(1,c)
@@ -143,4 +143,39 @@ class BomCompareTests(unittest.TestCase):
    left.setColumnWidth(14,70);self.app.processEvents()
    self.assertEqual(left.verticalScrollBar().value(),right.verticalScrollBar().value())
    self.assertTrue(all(left.rowHeight(r)==right.rowHeight(r) for r in range(left.rowCount())))
+  finally:dialog.close();self.app.processEvents()
+ def test_merged_code_version_and_character_highlight(self):
+  from ui.bom_compare import RICH_TEXT_ROLE
+  self.put(self.s,self.r,[(self.c,1,{})]);copy=self.s.copy_sku_bom(self.sid)
+  new=self.s.create_material(dict(base_code='C',version='101',name='C',unit='pcs'))
+  self.put(self.s.for_sku(copy),self.r,[(new,1,{})])
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare();left,right=dialog.tables
+   self.assertNotIn('版本号',[left.horizontalHeaderItem(c).text() for c in range(left.columnCount())])
+   self.assertEqual(left.item(1,3).text(),'C100');self.assertEqual(right.item(1,3).text(),'C101')
+   self.assertEqual(left.item(1,3).data(RICH_TEXT_ROLE),'C10<b>0</b>')
+   self.assertEqual(right.item(1,3).data(RICH_TEXT_ROLE),'C10<b>1</b>')
+   self.assertEqual(left.item(1,3).background().color().name(),dialog.COLORS['modified'])
+  finally:dialog.close()
+ def test_click_keyboard_and_blank_partner_row_selection(self):
+  from PyQt5.QtCore import Qt
+  from PyQt5.QtTest import QTest
+  self.put(self.s,self.r,[(self.p,1,{}),(self.c,1,{})]);copy=self.s.copy_sku_bom(self.sid)
+  self.put(self.s.for_sku(copy),self.r,[(self.c,1,{})])
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare();dialog.show();self.app.processEvents();left,right=dialog.tables
+   def assert_row(row):
+    for table in dialog.tables:
+     self.assertEqual({i.row() for i in table.selectedIndexes()},{row})
+     self.assertEqual(len(table.selectedIndexes()),table.columnCount())
+   QTest.mouseClick(left.viewport(),Qt.LeftButton,pos=left.visualItemRect(left.item(1,3)).center());assert_row(1)
+   self.assertEqual(right.item(1,3).text(),'')
+   QTest.mouseClick(right.viewport(),Qt.LeftButton,pos=right.visualItemRect(right.item(2,2)).center());assert_row(2)
+   self.assertTrue(right.hasFocus())
+   QTest.keyClick(right,Qt.Key_Up);assert_row(1)
+   self.assertEqual(left.verticalScrollBar().value(),right.verticalScrollBar().value())
+   dialog.compare()
+   self.assertFalse(left.selectedIndexes());self.assertFalse(right.selectedIndexes())
   finally:dialog.close();self.app.processEvents()

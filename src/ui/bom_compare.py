@@ -1,13 +1,19 @@
 """Aligned, read-only side-by-side BOM comparison."""
 from difflib import SequenceMatcher
 from html import escape
-from PyQt5.QtCore import Qt, QSize, QTimer
+from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
 from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
     QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut)
 from services.bom_compare import FIELDS,compare_boms,value
 
 RICH_TEXT_ROLE = Qt.UserRole + 1
+DISPLAY_FIELDS = [('material_code','物料编码') if key=='base_code' else (key,label)
+                  for key,label in FIELDS if key!='version']
+
+def display_value(node, field):
+    if field=='material_code':return value(node,'base_code')+value(node,'version')
+    return value(node,field)
 
 def character_diff(text, other):
     """Escape literal material text; bold only nonmatching character spans."""
@@ -63,19 +69,23 @@ class BomCompareDialog(QDialog):
         tables=QHBoxLayout();layout.addLayout(tables,1)
         self.tables=[]
         for side in range(2):
-            table=QTableWidget(0,len(FIELDS)+1);self.tables.append(table);tables.addWidget(table,1)
-            table.setHorizontalHeaderLabels(['状态']+[label for _,label in FIELDS])
+            table=QTableWidget(0,len(DISPLAY_FIELDS)+1);self.tables.append(table);tables.addWidget(table,1)
+            table.setHorizontalHeaderLabels(['状态']+[label for _,label in DISPLAY_FIELDS])
             table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setSelectionMode(QAbstractItemView.SingleSelection)
             table.setItemDelegate(DifferenceDelegate(table))
             table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
             table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
             table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
             table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
             table.verticalHeader().hide();table.setColumnWidth(0,125)
-            for i in range(1,len(FIELDS)+1):table.setColumnWidth(i,150 if i in (1,3,4,13) else 95)
+            for i in range(1,len(DISPLAY_FIELDS)+1):table.setColumnWidth(i,150 if i in (1,3,4,13) else 95)
         self.row_timer=QTimer(self);self.row_timer.setSingleShot(True);self.row_timer.timeout.connect(self.align_rows)
+        self._syncing_selection=False
         a,b=self.tables
         for source,target in [(a,b),(b,a)]:
+            source.itemSelectionChanged.connect(lambda s=source,t=target:self.sync_selection(s,t))
             source.verticalScrollBar().valueChanged.connect(target.verticalScrollBar().setValue)
             source.horizontalScrollBar().valueChanged.connect(target.horizontalScrollBar().setValue)
             source.horizontalHeader().sectionResized.connect(lambda *args:self.row_timer.start(0))
@@ -83,6 +93,20 @@ class BomCompareDialog(QDialog):
         self.summary=QLabel('请选择左右BOM后点击对比。');layout.addWidget(self.summary)
         self.button=QPushButton('对比');self.button.clicked.connect(self.compare);layout.addWidget(self.button)
         self.reload_choices()
+    def sync_selection(self,source,target):
+        if self._syncing_selection:return
+        self._syncing_selection=True
+        try:
+            rows=source.selectionModel().selectedRows()
+            if not rows:
+                target.clearSelection();return
+            row=rows[0].row()
+            if row>=target.rowCount():return
+            first=target.model().index(row,0)
+            last=target.model().index(row,target.columnCount()-1)
+            target.selectionModel().select(QItemSelection(first,last),QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+            target.selectionModel().setCurrentIndex(first,QItemSelectionModel.NoUpdate)
+        finally:self._syncing_selection=False
     def clear_results(self,*args):
         if not hasattr(self,'tables'):return
         for table in self.tables:table.setRowCount(0)
@@ -101,18 +125,20 @@ class BomCompareDialog(QDialog):
         try:rows=compare_boms(self.service,self.left.currentData(),self.right.currentData())
         except Exception as exc:
             self.clear_results();QMessageBox.warning(self,'BOM对比失败',str(exc));self.reload_choices();return
+        self.clear_results()
         names={'added':'新增','deleted':'删除','modified':'修改','same':'相同'}
         for table in self.tables:table.setRowCount(len(rows))
         for r,diff in enumerate(rows):
             for table,node,other in ((self.tables[0],diff.left,diff.right),(self.tables[1],diff.right,diff.left)):
-                texts=([names[diff.status]]+[value(node,k) for k,_ in FIELDS]) if node else ['']*(len(FIELDS)+1)
+                texts=([names[diff.status]]+[display_value(node,k) for k,_ in DISPLAY_FIELDS]) if node else ['']*(len(DISPLAY_FIELDS)+1)
                 for c,text in enumerate(texts):
                     item=QTableWidgetItem(text);table.setItem(r,c,item);item.setToolTip(text)
                     # Status is metadata, not a changed BOM field. Empty/identical cells stay unstyled.
                     if c and node:
-                        peer=value(other,FIELDS[c-1][0]) if other else ''
-                        field=FIELDS[c-1][0]
-                        if text!=peer and (other is None or field in diff.changed):
+                        peer=display_value(other,DISPLAY_FIELDS[c-1][0]) if other else ''
+                        field=DISPLAY_FIELDS[c-1][0]
+                        changed=field in diff.changed or (field=='material_code' and bool({'base_code','version'}.intersection(diff.changed)))
+                        if text!=peer and (other is None or changed):
                             item.setBackground(QColor(self.COLORS['modified' if other else diff.status]))
                             item.setForeground(QColor('#202020'))
                             item.setData(RICH_TEXT_ROLE,character_diff(text,peer))
