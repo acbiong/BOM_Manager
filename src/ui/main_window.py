@@ -281,6 +281,7 @@ class MainWindow(QMainWindow):
   self.table=QTableWidget(); self.table.setColumnCount(7); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID']); self.table.hideColumn(6); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self._sku_sort=None;self._sku_filters={}
   filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
+  compare_action=bar.addAction('BOM对比');compare_action.triggered.connect(self.compare_boms)
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.table.horizontalHeader().setSectionsClickable(True);self.table.horizontalHeader().sectionClicked.connect(self.sort_skus)
   for column in (1,2,4,5):self.table.horizontalHeaderItem(column).setToolTip('点击升序/降序排序')
@@ -289,6 +290,9 @@ class MainWindow(QMainWindow):
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
   self.count_label=QLabel(''); self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(8,2,8,2); footer_l.addWidget(self.count_label); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().setSizeGripEnabled(False); self.statusBar().hide(); self.refresh()
+ def compare_boms(self):
+  from ui.bom_compare import BomCompareDialog
+  BomCompareDialog(self.svc,self).exec_()
  def show_about(self):
   AboutDialog(self.version,self).exec_()
  def set_theme(self,dark):

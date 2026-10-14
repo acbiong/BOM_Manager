@@ -354,3 +354,7 @@ SKU菜单栏新增筛选按钮，按SKU编码、名称、描述、版本号、�
 首次升级旧库前自动SQLite backup至“原数据库路径.pre-mirrors-时间戳.db”，再迁移SKU约束并保留ID。打开镜像库会检查镜像私有表是否完整。变更日志新记录采用电脑本地时区，格式YYYY-MM-DD HH:MM:SS.xx，秒后两位。旧版由SQLite CURRENT_TIMESTAMP写入的UTC历史按本机时区迁移一次，app_metadata.local_log_time_v1阻止重复转换；无法解析的历史不伪造。导出保留两位小数及中文复制/镜像版本变更类型。SKU修改时间内部仍沿用原UTC精度，不与日志本地存储混用。
 
 新增tests/test_sku_mirrors.py覆盖结构/替代料完整复制、双向独立编辑、独立窗口及通知、100默认/递增/重名校验、筛选、用量、Excel导出、独立删除和重开、旧库备份及ID保留、本地时间两位与迁移幂等、镜像引用保护及版本选择、新插入子BOM捕获和复制失败回滚。更新原SKU列下标、排序、日志导出时间断言；打包冒烟增加独立镜像检查。全量249项通过，报告test_reports/mirrors_full_initial.txt；最终收尾再次全量验证、升版、提交与AppImage构建。
+
+
+### 2026-10-14 BOM对比
+新增`services/bom_compare.py`与`ui/bom_compare.py`，SKU菜单“BOM对比”打开模态左右比较窗口。只比较保存内容，镜像必须经`for_sku`读取。按对应父项匹配，唯一基础编码可配对版本变化；不将排序算为属性变化。新增绿色、删除红色删除线、修改双方黄色，字段加粗，左右空白占位与同步滚动。测试`tests/test_bom_compare.py`。
