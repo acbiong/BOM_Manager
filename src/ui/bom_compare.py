@@ -58,7 +58,7 @@ class BomCompareDialog(QDialog):
         self.setSizeGripEnabled(True)
         self.service=service;self.setWindowTitle('BOM对比');self.resize(1400,800)
         layout=QVBoxLayout(self)
-        legend=QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。绿色：右侧新增；黄色：差异单元格；红色删除线：右侧删除；仅差异文字加粗。父项变化不计入子项差异。')
+        legend=QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。绿色：右侧新增；黄色：差异单元格；红色删除线：右侧删除；仅差异文字加粗。父项变化不计入子项差异。序号按对齐后的展示顺序生成，不改变原BOM。')
         legend.setWordWrap(True);layout.addWidget(legend)
         self.fullscreen_button=QPushButton('全屏（F11）');self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
         layout.addWidget(self.fullscreen_button)

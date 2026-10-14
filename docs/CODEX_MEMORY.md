@@ -374,3 +374,7 @@ UI使用DISPLAY_FIELDS合并基础编码+版本号为material_code，不改servi
 
 ### 2026-10-14 对比格式及相似名称
 FIELDS增加serial（level后），snapshot从1按各侧实际子项顺序生成，serial/parent_code不计差异。align_children身份/唯一基础编码优先，其余名称相似度>=0.6贪心配对，再序列位置补齐。不同base_code为replaced，UI左deleted右added，仅不同单元格红/绿及删除线，子树递归、汇总分别计增删。auto_columns按双侧内容用加粗字体测宽，最多40中文字符像素；富文本代理遵循居中和换行。
+
+
+### 2026-10-14 对齐后统一编号
+最新规则：对比完成兄弟配对后，以统一展示位置递归赋serial（1、1.1、1.1.1），左右同排同序号，空白占位占一个展示编号；不再显示各侧原始序号。只修改snapshot分离字典，禁止写回BOM顺序。多个未匹配版本也优先同base_code配对，再名称相似。测试明确检查compare前后数据库total_changes及完整BOM/SKU数据不变。

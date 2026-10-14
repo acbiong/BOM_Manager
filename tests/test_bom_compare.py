@@ -187,7 +187,7 @@ class BomCompareTests(unittest.TestCase):
   rows=compare_boms(self.s,self.sid,copy)
   self.assertTrue(all(d.status=='same' for d in rows))
   self.assertEqual([d.left['serial'] for d in rows],['1','1.1','1.1.1','1.2'])
-  self.assertEqual([d.right['serial'] for d in rows],['1','1.2','1.2.1','1.1'])
+  self.assertEqual([d.right['serial'] for d in rows],['1','1.1','1.1.1','1.2'])
   dialog=BomCompareDialog(self.s)
   try:
    dialog.compare()
@@ -216,3 +216,31 @@ class BomCompareTests(unittest.TestCase):
    self.assertEqual(right.item(1,4).background().color().name(),dialog.COLORS['added'])
    self.assertIn('新增：2',dialog.summary.text());self.assertIn('删除：2',dialog.summary.text())
   finally:dialog.close()
+ def test_aligned_serials_are_display_only_and_preserve_database_order(self):
+  self.put(self.s,self.r,[(self.p,1,{}),(self.c,1,{})]);self.put(self.s,self.p,[(self.a,1,{})])
+  copied=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copied)
+  self.put(mirror,self.r,[(self.c,1,{}),(self.p,1,{})]);self.put(mirror,self.p,[(self.a,1,{})])
+  def state():return ([dict(r) for r in self.s.bom(self.r)],[dict(r) for r in mirror.bom(self.r)],[dict(r) for r in self.s.skus()])
+  before=state();changes=self.db.conn.total_changes
+  first=compare_boms(self.s,self.sid,copied);second=compare_boms(self.s,self.sid,copied)
+  self.assertEqual(before,state());self.assertEqual(changes,self.db.conn.total_changes)
+  self.assertEqual(first,second)
+  self.assertEqual([(d.left['serial'],d.right['serial']) for d in first],[('1','1'),('1.1','1.1'),('1.1.1','1.1.1'),('1.2','1.2')])
+  self.assertTrue(all(d.status=='same' for d in first))
+ def test_similar_name_alignment_numbering_and_single_side_slots(self):
+  def new(code,name):return self.s.create_material(dict(base_code=code,version='100',name=name,unit='pcs'))
+  old=new('OLD','连接器白色');replacement=new('NEW','连接器黑色')
+  self.put(self.s,self.r,[(old,1,{}),(self.p,1,{})]);copied=self.s.copy_sku_bom(self.sid)
+  self.put(self.s.for_sku(copied),self.r,[(self.p,1,{}),(replacement,1,{}),(self.c,1,{})])
+  rows=compare_boms(self.s,self.sid,copied)
+  self.assertEqual([(d.left and d.left['serial'],d.right and d.right['serial']) for d in rows],[('1','1'),('1.1','1.1'),('1.2','1.2'),(None,'1.3')])
+  self.assertEqual(rows[1].status,'replaced');self.assertEqual(rows[1].right['material_id'],replacement)
+ def test_multiple_versions_pair_by_code_before_similar_names(self):
+  from services.bom_compare import align_children
+  left=[dict(material_id=i,base_code='SAME',name='旧名称') for i in (1,2)]
+  right=[dict(material_id=i,base_code='SAME',name='新名称') for i in (4,3)]
+  right.insert(0,dict(material_id=5,base_code='OTHER',name='旧名称'))
+  pairs=list(align_children(left,right))
+  matched=[(a,b) for a,b in pairs if a is not None]
+  self.assertTrue(all(a['base_code']==b['base_code']=='SAME' for a,b in matched))
+  self.assertEqual(len(matched),2)

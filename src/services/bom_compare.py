@@ -1,5 +1,4 @@
 """Read-only, parent-local comparison of saved SKU/mirror graphs."""
-from collections import Counter
 from difflib import SequenceMatcher
 from dataclasses import dataclass
 
@@ -50,11 +49,13 @@ def align_children(left, right):
     for i,node in enumerate(left):
         j = next((j for j in sorted(unused) if right[j]['material_id']==node['material_id']),None)
         if j is not None:pairs[i]=j;unused.remove(j)
-    lc=Counter(n['base_code'] for i,n in enumerate(left) if i not in pairs)
-    rc=Counter(right[j]['base_code'] for j in unused)
+    # Exact versions have already matched. Pair remaining versions by base code,
+    # even when several versions of the same material occur under one parent.
     for i,node in enumerate(left):
-        if i not in pairs and lc[node['base_code']]==rc[node['base_code']]==1:
-            j=next(j for j in unused if right[j]['base_code']==node['base_code'])
+        if i in pairs:continue
+        matches=[j for j in unused if right[j]['base_code']==node['base_code']]
+        if matches:
+            j=min(matches,key=lambda j:(abs(i-j),j))
             pairs[i]=j;unused.remove(j)
     # Similar names align for inspection, but never establish material identity.
     candidates=[]
@@ -93,12 +94,17 @@ def compare_boms(service, left_id, right_id):
     if left_id not in skus or right_id not in skus:
         raise ValueError('所选SKU或镜像已不存在，请重新选择。')
     result = []
-    def visit(left, right, depth):
+    def visit(left, right, depth, serial):
+        # Number aligned display slots, not original BOM positions. Only detached
+        # snapshot dictionaries are changed; no database or editor state is written.
+        if left is not None:left['serial']=serial
+        if right is not None:right['serial']=serial
         changed = tuple(key for key, _ in FIELDS if key not in ('parent_code','serial') and left and right and value(left,key) != value(right,key))
         status = 'added' if left is None else 'deleted' if right is None else 'replaced' if left['base_code']!=right['base_code'] else 'modified' if changed else 'same'
         result.append(Difference(left,right,depth,status,changed))
         ls = left['children'] if left else []
         rs = right['children'] if right else []
-        for l,r in align_children(ls,rs):visit(l,r,depth+1)
-    visit(snapshot(service,skus[left_id]),snapshot(service,skus[right_id]),0)
+        for index,(l,r) in enumerate(align_children(ls,rs),1):
+            visit(l,r,depth+1,serial+'.'+str(index))
+    visit(snapshot(service,skus[left_id]),snapshot(service,skus[right_id]),0,'1')
     return result
