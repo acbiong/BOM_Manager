@@ -638,13 +638,15 @@ class BomWindow(QMainWindow):
    if menu.exec_(self.tree.viewport().mapToGlobal(pos))==restore:self.restore_relation(it)
    return
   if it is getattr(self,'root_item',None):
-   m=QMenu(self); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(self.root)) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+   m=QMenu(self); edit=m.addAction('编辑此物料'); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(self.root)) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
    if self.handle_clipboard_action(act,clipboard_actions,it):return
-   if act==child:self.add_relative(d,True)
+   if act==edit:self.edit_tree_material(it)
+   elif act==child:self.add_relative(d,True)
    elif act==imp:self.import_bom(it)
    return
-  m=QMenu(self); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); replace=m.addAction('替换物料'); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); edit=m.addAction('编辑此物料'); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); replace=m.addAction('替换物料'); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
   if self.handle_clipboard_action(act,clipboard_actions,it):return
+  if act==edit:self.edit_tree_material(it);return
   if act==replace:self.replace_material(it);return
   if act==up:self.move_item(it,-1); return
   if act==down:self.move_item(it,1); return
@@ -654,6 +656,18 @@ class BomWindow(QMainWindow):
   if act in (same,child): self.add_relative(d, act==child); return
   if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
    self.remove_relation(it)
+ def edit_tree_material(self,item):
+  data=item.data(0,Qt.UserRole) or {}
+  if data.get('_deleted'):return
+  material_id=data.get('material_id',self.root if item is self.root_item else None)
+  material=self.svc.material_snapshot(material_id)
+  if not material:
+   QMessageBox.warning(self,'物料不存在','目标物料已不存在，请刷新BOM后重试。');return
+  dialog=MaterialDialog(self,material,readonly_keys={'base_code','version'})
+  dialog.setWindowTitle('编辑此物料')
+  if dialog.exec_()!=QDialog.Accepted:return
+  try:self.svc.update_material(material_id,dialog.data())
+  except Exception as error:QMessageBox.warning(self,'保存失败',str(error))
  def replacement_blocked_materials(self,item,child=False):
   # Reverse reachability computes all cyclic candidates in one graph traversal.
   target=item if child else item.parent();blocked={target.child(i).data(0,Qt.UserRole)['material_id'] for i in range(target.childCount())}
