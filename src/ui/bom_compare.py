@@ -4,7 +4,7 @@ from html import escape
 from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
 from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence, QFontMetrics, QFont, QTextOption
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
-    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy,QMenu)
+    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy,QMenu,QCheckBox)
 from ui.bom_compare_table import BomCompareTable
 from services.bom_compare import FIELDS,compare_boms,value,snapshot
 from infrastructure.events import WindowRefreshBus
@@ -106,7 +106,11 @@ class BomCompareDialog(QDialog):
             source.horizontalScrollBar().valueChanged.connect(target.horizontalScrollBar().setValue)
             source.horizontalHeader().sectionResized.connect(lambda *args:self.row_timer.start(0))
             source.horizontalHeader().sectionResized.connect(lambda col,old,new,t=target:t.setColumnWidth(col,new))
-        self.summary=QLabel('请选择左右BOM后点击对比。');layout.addWidget(self.summary)
+        self.summary=QLabel('请选择左右BOM后点击对比。')
+        footer=QHBoxLayout();footer.addWidget(self.summary,1)
+        self.differences_only=QCheckBox('只显示变更差异');self.differences_only.setChecked(False)
+        self.differences_only.toggled.connect(self.apply_difference_filter)
+        footer.addWidget(self.differences_only,0,Qt.AlignRight);layout.addLayout(footer)
         self.button=QPushButton('对比');self.button.clicked.connect(self.compare);layout.addWidget(self.button)
         self.live_timer=QTimer(self);self.live_timer.setSingleShot(True);self.live_timer.timeout.connect(self.live_refresh)
         self._rows=[];self._compared=False
@@ -259,8 +263,32 @@ class BomCompareDialog(QDialog):
         self._rows=rows;self._compared=True
         self.auto_columns()
         self.align_rows()
+        self.apply_difference_filter()
         counts={s:sum(d.status==s for d in rows) for s in names}
         self.summary.setText('；'.join(f'{names[s]}：{counts[s]}' for s in names)+'（含根节点，排序变化不作为内容差异）')
+
+    def apply_difference_filter(self,*args):
+        if not hasattr(self,'_rows'):return
+        only=self.differences_only.isChecked()
+        # Both primary and frozen views retain identical physical row indexes.
+        # Do not rebuild snapshots: toggling must preserve order and editor links.
+        for table in self.tables:table.setUpdatesEnabled(False)
+        bars=[table.verticalScrollBar() for table in self.tables]
+        position=bars[0].value()
+        for bar in bars:bar.blockSignals(True)
+        try:
+            for row,diff in enumerate(self._rows):
+                hidden=only and diff.status=='same'
+                for table in self.tables:
+                    table.setRowHidden(row,hidden);table.frozen.setRowHidden(row,hidden)
+                    if hidden and table.currentRow()==row:table.clearSelection()
+            for table in self.tables:
+                table.doItemsLayout();table.frozen.doItemsLayout()
+            for bar in bars:bar.setValue(position)
+            for table in self.tables:table.sync_frozen()
+        finally:
+            for bar in bars:bar.blockSignals(False)
+            for table in self.tables:table.setUpdatesEnabled(True)
 
     def auto_columns(self):
         font=QFont(self.font());font.setBold(True);metrics=QFontMetrics(font)

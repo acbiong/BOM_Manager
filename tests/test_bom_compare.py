@@ -386,3 +386,23 @@ class BomCompareTests(unittest.TestCase):
    with patch.object(MaterialDialog,'exec_',edit),patch.object(self.s,'update_material',side_effect=ValueError('invalid')),patch('ui.bom_compare.QMessageBox.warning') as warning:
     dialog.edit_material(0,1);warning.assert_called_once()
   finally:dialog.close();self.app.processEvents()
+ def test_difference_only_filter_restore_frozen_and_live_refresh(self):
+  self.put(self.s,self.r,[(self.p,1,{}),(self.c,1,{})]);copied=self.s.copy_sku_bom(self.sid)
+  self.put(self.s.for_sku(copied),self.r,[(self.p,2,{}),(self.c,1,{})])
+  dialog=BomCompareDialog(self.s);dialog.left.setCurrentIndex(1);dialog.right.setCurrentIndex(2)
+  try:
+   self.assertFalse(dialog.differences_only.isChecked());dialog.compare();dialog.show();self.app.processEvents()
+   original=[d.left['serial'] for d in dialog._rows]
+   dialog.differences_only.setChecked(True)
+   for table in dialog.tables:
+    self.assertEqual([table.isRowHidden(r) for r in range(3)],[True,False,True])
+    self.assertEqual([table.frozen.isRowHidden(r) for r in range(3)],[True,False,True])
+   dialog.compare()
+   self.assertTrue(dialog.tables[0].isRowHidden(0));self.assertEqual([d.left['serial'] for d in dialog._rows],original)
+   self.put(self.s.for_sku(copied),self.r,[(self.p,1,{}),(self.c,1,{})]);self.app.processEvents();self.app.processEvents()
+   self.assertTrue(all(dialog.tables[0].isRowHidden(r) for r in range(3)))
+   dialog.differences_only.setChecked(False)
+   for table in dialog.tables:
+    self.assertTrue(all(not table.isRowHidden(r) and not table.frozen.isRowHidden(r) for r in range(3)))
+   self.assertEqual([d.left['serial'] for d in dialog._rows],original)
+  finally:dialog.close();self.app.processEvents()
