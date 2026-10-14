@@ -366,3 +366,23 @@ class BomCompareTests(unittest.TestCase):
    if getattr(main,'_compare_dialog',None):main._compare_dialog.close()
    for w in list(main._bom_windows.values()):w.dirty=False;w.close()
    main.close();self.app.processEvents()
+ def test_compare_direct_material_edit_updates_both_sides_and_cancel(self):
+  from unittest.mock import patch
+  from ui.main_window import MaterialDialog
+  from PyQt5.QtWidgets import QDialog,QLabel
+  self.put(self.s,self.r,[(self.p,2,{})]);self.s.copy_sku_bom(self.sid)
+  dialog=BomCompareDialog(self.s);dialog.left.setCurrentIndex(1);dialog.right.setCurrentIndex(2)
+  try:
+   dialog.compare();dialog.show();self.app.processEvents()
+   def edit(form):
+    self.assertIsInstance(form.e['base_code'],QLabel);self.assertIsInstance(form.e['version'],QLabel)
+    form.e['name'].setText('对比中编辑名称');return QDialog.Accepted
+   with patch.object(MaterialDialog,'exec_',edit):dialog.edit_material(1,1)
+   self.app.processEvents();self.app.processEvents()
+   self.assertEqual(self.s.material_snapshot(self.p)['name'],'对比中编辑名称')
+   self.assertEqual(dialog._rows[1].left['name'],'对比中编辑名称');self.assertEqual(dialog._rows[1].right['name'],'对比中编辑名称')
+   with patch.object(MaterialDialog,'exec_',return_value=QDialog.Rejected),patch.object(self.s,'update_material') as update:
+    dialog.edit_material(0,1);update.assert_not_called()
+   with patch.object(MaterialDialog,'exec_',edit),patch.object(self.s,'update_material',side_effect=ValueError('invalid')),patch('ui.bom_compare.QMessageBox.warning') as warning:
+    dialog.edit_material(0,1);warning.assert_called_once()
+  finally:dialog.close();self.app.processEvents()

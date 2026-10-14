@@ -61,7 +61,7 @@ class BomCompareDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
         self.setSizeGripEnabled(True)
-        self.service=service;self.setWindowTitle('BOM对比');self.resize(1400,800)
+        self.service=service;self.svc=service;self.setWindowTitle('BOM对比');self.resize(1400,800)
         layout=QVBoxLayout(self)
         legend=QLabel('实时对比BOM（已打开编辑窗口的未保存修改也会同步显示）。淡黄色行：存在差异；变化文字背景绿色：新增，红色：删除，橙黄色：修改，并加粗。父项变化不计入子项差异。序号按对齐后的展示顺序生成，不改变原BOM。')
         legend.setWordWrap(True)
@@ -138,7 +138,9 @@ class BomCompareDialog(QDialog):
         def node(item,parent=None,path=()):
             data=dict(item.data(0,Qt.UserRole) or {})
             mid=data.get('material_id',window.root)
-            result=dict(window.svc.material_snapshot(mid));result.update(data)
+            result=dict(data);result.update(window.svc.material_snapshot(mid))
+            for key in ('quantity','position','remark'):
+                if key in data:result[key]=data[key]
             ids=window.alternate_ids(item) if parent else []
             alternatives=[window.svc.material_snapshot(i) for i in ids]
             result.update(material_id=mid,children=[],alternate_ids=frozenset(ids),
@@ -156,7 +158,24 @@ class BomCompareDialog(QDialog):
         node=diff.left if side==0 else diff.right
         if node is None:return
         menu=QMenu(self);edit=menu.addAction('打开BOM进行编辑')
-        if menu.exec_(global_pos)==edit:self.open_editor(side,index.row())
+        material_edit=menu.addAction('编辑此物料')
+        action=menu.exec_(global_pos)
+        if action==edit:self.open_editor(side,index.row())
+        elif action==material_edit:self.edit_material(side,index.row())
+    def edit_material(self,side,row):
+        from ui.main_window import MaterialDialog
+        if row<0 or row>=len(self._rows):return
+        node=self._rows[row].left if side==0 else self._rows[row].right
+        if node is None:return
+        material_id=node['material_id'];material=self.service.material_snapshot(material_id)
+        if not material:
+            QMessageBox.warning(self,'物料不存在','目标物料已不存在，请重新对比。');return
+        dialog=MaterialDialog(self,material,readonly_keys={'base_code','version'})
+        dialog.setWindowTitle('编辑此物料')
+        if dialog.exec_()!=QDialog.Accepted:return
+        try:self.service.update_material(material_id,dialog.data())
+        except Exception as error:QMessageBox.warning(self,'保存失败',str(error));return
+        self.live_timer.start(0)
     def open_editor(self,side,row):
         main=self.parent()
         if not hasattr(main,'open_bom_id') or row>=len(self._rows):return
