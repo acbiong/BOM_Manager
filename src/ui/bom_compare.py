@@ -4,9 +4,9 @@ from html import escape
 from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
 from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence, QFontMetrics, QFont, QTextOption
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
-    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy,QMenu,QCheckBox)
+    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy,QMenu,QCheckBox,QFileDialog,QInputDialog)
 from ui.bom_compare_table import BomCompareTable
-from services.bom_compare import FIELDS,compare_boms,value,snapshot
+from services.bom_compare import FIELDS,compare_boms,value,snapshot,compare_trees
 from infrastructure.events import WindowRefreshBus
 
 RICH_TEXT_ROLE = Qt.UserRole + 1
@@ -75,7 +75,7 @@ class BomCompareDialog(QDialog):
         for label,combo in [('左侧基准BOM',self.left),('右侧目标BOM',self.right)]:
             selectors.addWidget(QLabel(label));selectors.addWidget(combo,1)
             combo.setMinimumWidth(0);combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-            combo.currentIndexChanged.connect(self.clear_results)
+            combo.currentIndexChanged.connect(self.source_changed)
         tables=QHBoxLayout();layout.addLayout(tables,1)
         self.tables=[]
         for side in range(2):
@@ -114,6 +114,9 @@ class BomCompareDialog(QDialog):
         self.button=QPushButton('对比');self.button.clicked.connect(self.compare);layout.addWidget(self.button)
         self.live_timer=QTimer(self);self.live_timer.setSingleShot(True);self.live_timer.timeout.connect(self.live_refresh)
         self._rows=[];self._compared=False
+        self.external_sources={};self._chosen=[None,None]
+        for side,combo in enumerate((self.left,self.right)):
+            combo.activated.connect(lambda index,s=side:self.choose_source(s))
         self.reload_choices()
     def showEvent(self,event):
         super().showEvent(event);WindowRefreshBus.subscribe(self.on_change)
@@ -121,6 +124,8 @@ class BomCompareDialog(QDialog):
     def closeEvent(self,event):
         WindowRefreshBus.unsubscribe(self.on_change);self.live_timer.stop();super().closeEvent(event)
     def on_change(self,event):
+        if event.get('type')=='sku_order_changed':
+            self.reload_choices();return
         if event.get('type') in ('bom_draft_changed','bom_changed','material_changed','sku_changed'):
             self.live_timer.start(0)
     def live_refresh(self):
@@ -147,7 +152,7 @@ class BomCompareDialog(QDialog):
                 if key in data:result[key]=data[key]
             ids=window.alternate_ids(item) if parent else []
             alternatives=[window.svc.material_snapshot(i) for i in ids]
-            result.update(material_id=mid,children=[],alternate_ids=frozenset(ids),
+            result.update(material_id=mid,children=[],alternate_ids=frozenset(ids),alternate_codes=frozenset((a['base_code'],a['version']) for a in alternatives),
                 alternates='\n'.join(sorted(' | '.join(str(a.get(k) or '') for k in ('base_code','version','name','description','manufacturer','mpn')) for a in alternatives)),
                 level=len(path),parent_code=(str(parent['base_code'])+str(parent['version'])) if parent else 'ROOT',_material_path=path)
             if parent is None:result['quantity']=1
@@ -160,7 +165,7 @@ class BomCompareDialog(QDialog):
         if not index.isValid() or index.row()>=len(self._rows):return
         side=self.tables.index(table);diff=self._rows[index.row()]
         node=diff.left if side==0 else diff.right
-        if node is None:return
+        if node is None or node.get('_external'):return
         menu=QMenu(self);edit=menu.addAction('打开BOM进行编辑')
         material_edit=menu.addAction('编辑此物料')
         action=menu.exec_(global_pos)
@@ -170,7 +175,7 @@ class BomCompareDialog(QDialog):
         from ui.main_window import MaterialDialog
         if row<0 or row>=len(self._rows):return
         node=self._rows[row].left if side==0 else self._rows[row].right
-        if node is None:return
+        if node is None or node.get('_external'):return
         material_id=node['material_id'];material=self.service.material_snapshot(material_id)
         if not material:
             QMessageBox.warning(self,'物料不存在','目标物料已不存在，请重新对比。');return
@@ -184,7 +189,7 @@ class BomCompareDialog(QDialog):
         main=self.parent()
         if not hasattr(main,'open_bom_id') or row>=len(self._rows):return
         node=self._rows[row].left if side==0 else self._rows[row].right
-        if node is None:return
+        if node is None or node.get('_external'):return
         sid=(self.left,self.right)[side].currentData();window=main.open_bom_id(sid)
         if window is None:return
         # Material path disambiguates repeated materials under repeated parents.
@@ -224,17 +229,82 @@ class BomCompareDialog(QDialog):
     def reload_choices(self):
         previous=[self.left.currentData(),self.right.currentData()]
         rows=list(self.service.skus())
+        order=getattr(self.service,'sku_display_order',[]);rank={sid:i for i,sid in enumerate(order)}
+        rows.sort(key=lambda row:rank.get(row['id'],len(rank)))
         for index,combo in enumerate((self.left,self.right)):
             combo.blockSignals(True);combo.clear()
             combo.addItem('请显示对比的BOM',None)
             for row in rows:
                 combo.addItem(f"{row['base_code']}{row['version']} {row['name']}  镜像{row['mirror_version']}",row['id'])
+            for key,source in self.external_sources.items():combo.addItem(source['label'],key)
+            combo.addItem('载入其他BOM','load_external')
             chosen=combo.findData(previous[index])
             combo.setCurrentIndex(chosen if chosen>=0 else 0);combo.blockSignals(False)
-        self.button.setEnabled(bool(rows))
+        self.button.setEnabled(True)
+    def source_changed(self,*args):
+        combo=self.sender()
+        if combo.currentData()=='load_external':return
+        if hasattr(self,'_chosen'):self._chosen[(self.left,self.right).index(combo)]=combo.currentData()
+        self.clear_results()
+
+    def selected_snapshot(self,key):
+        if key in self.external_sources:
+            from copy import deepcopy
+            return deepcopy(self.external_sources[key]['tree'])
+        sku=next((dict(row) for row in self.service.skus() if row['id']==key),None)
+        if sku is None:raise ValueError('所选SKU不存在，请重新选择')
+        return self.live_snapshot(sku)
+    def choose_source(self,side):
+        combo=(self.left,self.right)[side]
+        if combo.currentData()!='load_external':self._chosen[side]=combo.currentData();return
+        previous=self._chosen[side];was_compared=self._compared
+        try:
+            from services.external_bom import ExcelSource,COLUMNS,REQUIRED,ALT_SUFFIXES,ALIASES,build_external_bom,text
+            from ui.main_window import MaterialHeaderMappingDialog
+            path,_=QFileDialog.getOpenFileName(self,'载入其他BOM','','Excel (*.xlsx *.xls)')
+            if not path:return
+            source=ExcelSource(path)
+            try:
+                sheet,ok=QInputDialog.getItem(self,'选择BOM工作表','选择BOM所在的sheet',source.names,0,False)
+                if not ok:return
+                rows=source.rows(sheet)
+            finally:source.close()
+            headers=[text(v) for v in rows[0]] if rows else []
+            fields=[label for label,_ in COLUMNS]
+            dialog=MaterialHeaderMappingDialog(path,headers,[f for f in fields if f not in headers],self,sheet_name=sheet,
+                required=fields,optional_fields=set(fields)-REQUIRED,preview_rows=rows[1:],mapping_kind='compare_bom',alternate_suffixes=ALT_SUFFIXES)
+            import re
+            numbers=sorted({int(m.group(1)) for h in headers for m in [re.match(r'替代料(\d+)',h)] if m})
+            for n in numbers:
+                if not any(g[0]==f'替代料{n}编码' for g in dialog.alternate_groups):dialog.add_alternate_mapping(number=n)
+            remembered=dialog.mapping_config.import_mapping('compare_bom') if dialog.mapping_config else {}
+            for field,widget in dialog.combos.items():
+                if widget.currentIndex()>0 or field in remembered:continue
+                aliases=list(ALIASES.get(field,[]))
+                match=re.fullmatch(r'替代料(\d+)(编码|版本号|名称|规格|制造商|MPN)',field)
+                if match:
+                    n,suffix=match.groups();aliases+=[f'替代料{n}物料{suffix}']
+                    if suffix=='制造商':aliases+=[f'替代料{n}供应商']
+                for alias in aliases:
+                    if headers.count(alias)==1:widget.setCurrentText(alias);break
+            if dialog.exec_()!=QDialog.Accepted:return
+            tree=build_external_bom(rows,dialog.mapping())
+            from pathlib import Path
+            import uuid
+            key='external:'+uuid.uuid4().hex
+            self.external_sources[key]={'tree':tree,'label':f'外部：{Path(path).name} / {sheet}'}
+            self.reload_choices();combo.setCurrentIndex(combo.findData(key));self._chosen[side]=key
+            previous=key
+        except Exception as error:QMessageBox.warning(self,'外部BOM载入失败',str(error))
+        finally:
+            if combo.currentData()=='load_external':
+                combo.setCurrentIndex(max(0,combo.findData(previous)))
+                if was_compared:self.compare()
+
     def compare(self):
         if self.left.currentData() is None or self.right.currentData() is None:return
-        try:rows=compare_boms(self.service,self.left.currentData(),self.right.currentData(),self.live_snapshot)
+        if 'load_external' in (self.left.currentData(),self.right.currentData()):return
+        try:rows=compare_trees(self.selected_snapshot(self.left.currentData()),self.selected_snapshot(self.right.currentData()))
         except Exception as exc:
             self.clear_results();QMessageBox.warning(self,'BOM对比失败',str(exc));self.reload_choices();return
         self.clear_results()

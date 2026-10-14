@@ -19,7 +19,7 @@ class Difference:
 def snapshot(service, sku):
     scoped = service.for_sku(sku['id'])
     root = dict(scoped.material_snapshot(sku['material_id']))
-    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', alternate_ids=frozenset(), level=0, serial='1', parent_code='ROOT')
+    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', alternate_ids=frozenset(), alternate_codes=frozenset(), level=0, serial='1', parent_code='ROOT')
     nodes = {None: root}
     alternate_cache = {}
     for source in scoped.bom(sku['material_id']):
@@ -29,8 +29,8 @@ def snapshot(service, sku):
             alternate_cache[row['id']] = ('\n'.join(sorted(
                 ' | '.join(str(a.get(k) or '') for k in
                            ('base_code','version','name','description','manufacturer','mpn'))
-                for a in alternatives)),frozenset(a['material_id'] for a in alternatives))
-        row.update(children=[], alternates=alternate_cache[row['id']][0], alternate_ids=alternate_cache[row['id']][1])
+                for a in alternatives)),frozenset(a['material_id'] for a in alternatives),frozenset((a['base_code'],a['version']) for a in alternatives))
+        row.update(children=[], alternates=alternate_cache[row['id']][0], alternate_ids=alternate_cache[row['id']][1],alternate_codes=alternate_cache[row['id']][2])
         parent = nodes[row['parent_node_id']]
         row.update(serial=parent['serial']+'.'+str(len(parent['children'])+1), level=parent['level']+1, parent_code=str(parent['base_code'])+str(parent['version']))
         parent['children'].append(row)
@@ -43,6 +43,10 @@ def value(node, field):
 
 def is_exchange(left,right):
     """A reciprocal main/alternate change, not merely an alternate addition."""
+    if 'alternate_codes' in left and 'alternate_codes' in right:
+        return ((left['base_code'],left['version'])!=(right['base_code'],right['version'])
+                and (right['base_code'],right['version']) in left['alternate_codes']
+                and (left['base_code'],left['version']) in right['alternate_codes'])
     return (left['material_id']!=right['material_id']
             and right['material_id'] in left.get('alternate_ids',())
             and left['material_id'] in right.get('alternate_ids',()))
@@ -55,7 +59,7 @@ def align_children(left, right):
     """
     pairs = {}; unused = set(range(len(right)))
     for i,node in enumerate(left):
-        j = next((j for j in sorted(unused) if right[j]['material_id']==node['material_id']),None)
+        j = next((j for j in sorted(unused) if (right[j]['base_code'],right[j].get('version'))==(node['base_code'],node.get('version'))),None)
         if j is not None:pairs[i]=j;unused.remove(j)
     # Explicit reciprocal main/alternate identities outrank names or positions.
     for i,node in enumerate(left):
@@ -107,6 +111,10 @@ def compare_boms(service, left_id, right_id, snapshot_provider=None):
     skus = {s['id']: dict(s) for s in service.skus()}
     if left_id not in skus or right_id not in skus:
         raise ValueError('所选SKU或镜像已不存在，请重新选择。')
+    provider=snapshot_provider or (lambda sku:snapshot(service,sku))
+    return compare_trees(provider(skus[left_id]),provider(skus[right_id]))
+
+def compare_trees(left_tree,right_tree):
     result = []
     def visit(left, right, depth, serial):
         # Number aligned display slots, not original BOM positions. Only detached
@@ -120,6 +128,5 @@ def compare_boms(service, left_id, right_id, snapshot_provider=None):
         rs = right['children'] if right else []
         for index,(l,r) in enumerate(align_children(ls,rs),1):
             visit(l,r,depth+1,serial+'.'+str(index))
-    provider=snapshot_provider or (lambda sku:snapshot(service,sku))
-    visit(provider(skus[left_id]),provider(skus[right_id]),0,'1')
+    visit(left_tree,right_tree,0,'1')
     return result

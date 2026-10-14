@@ -426,3 +426,7 @@ SKU右键新增编辑变更描述，使用可保存/取消的多行纯文本编�
 
 ### 2026-10-14 BOM对比仅显示差异
 底部统计提示行最右侧增加“只显示变更差异”复选框，默认不勾选。选中按Difference.status隐藏same行，左右主表和冻结视图同时隐藏；包括所有层级的相同行，不保留无变化祖先占位。新增/删除/修改/换料/交换保持显示。取消恢复完整清单，不重建快照，不改变序号或右键行索引。实时更新与重新比较继续应用当前开关；全相同时可为空表。测试覆盖默认、双侧冻结隐藏、重新比较与实时变化、全相同以及恢复完整序号，针对性25项通过，报告test_reports/bom_compare_targeted.log；收尾全量测试和打包。
+
+
+### 2026-10-14 外部BOM对比
+比较拆成compare_boms和compare_trees；跨来源匹配用base_code/version，交换用alternate_codes（数据库快照和草稿均提供）。external_bom.ExcelSource用openpyxl/xlrd，build_external_bom仅构造内存dict，不访问DB。外部节点_external=True，禁止数据库编辑菜单。BOM候选按sku_display_order更新，末尾load_external；external_sources保存树和标签，selected_snapshot深拷贝。映射全字段，REQUIRED七项，ALT_SUFFIXES六项，optional_fields/preview_rows/mapping_kind/alternate_suffixes为映射窗新增兼容参数。compare_bom配置键独立记忆。真实xls测试样本tests/fixtures/external_bom.xls；xlrd运行依赖，xlwt不需随软件安装。

@@ -50,7 +50,7 @@ python3 -m pip install -r requirements.txt
 python3 -m pip check
 ```
 
-依赖含 PyQt5（界面）、openpyxl（Excel）、PyInstaller（打包）、Pillow（生成打包图标）；SQLite 属于 Python 标准库。当前开发环境已使用 PyQt5 5.15.10、openpyxl 3.1.5、PyInstaller 6.22.3、Pillow 11.3.0。`requirements.txt` 使用最低版本约束，并非锁定环境；升级依赖后须重新测试。
+依赖含 PyQt5（界面）、openpyxl（.xlsx）、xlrd（.xls）、PyInstaller（打包）、Pillow（生成打包图标）；SQLite 属于 Python 标准库。当前开发环境已使用 PyQt5 5.15.10、openpyxl 3.1.5、PyInstaller 6.22.3、Pillow 11.3.0。`requirements.txt` 使用最低版本约束，并非锁定环境；升级依赖后须重新测试。
 
 Linux每次开启新终端可先进入项目并执行 `. .venv/bin/activate`。测试与收尾脚本优先使用项目 `.venv`，也可通过 `BOM_PYTHON` 指定解释器；Windows统一入口见第11节。
 
@@ -328,3 +328,5 @@ SKU清单与物料库分别支持 `Ctrl+N` 新建SKU、新建物料，仅在当�
 SKU清单的“版本号”是BOM镜像版本，与物料编码中的SKU版本不同。现有和新建SKU默认镜像100；右键“复制BOM”生成编号递增的独立镜像，结构、数量、位置、备注和替代料完整复制。修改或删除某个镜像不影响其他镜像；物料库基础信息仍统一维护。若源窗口有未保存内容，先保存再复制。菜单栏“筛选”可按版本等字段筛选SKU。
 
 首次升级旧数据库会自动在数据库旁生成 `.pre-mirrors-时间戳.db` 备份。镜像库需使用支持镜像版本的新程序读写；如需回退旧程序，请使用迁移前备份。新变更日志按当前电脑本地时间记录，秒后两位；旧UTC日志首次升级时转换，后续不重复转换。
+
+BOM对比支持通过“载入其他BOM”选择 .xlsx/.xls，选择工作表并映射字段，仅在内存中比较，不导入物料库。外部文件没有ROOT声明时，只有唯一缺失父项可作为推断根节点；建议提供完整ROOT行以显示根物料名称。

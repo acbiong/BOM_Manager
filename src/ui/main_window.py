@@ -63,10 +63,10 @@ def choose_material_sheet(path,parent=None,kind='物料库'):
  return sheet
 
 class MaterialHeaderMappingDialog(QDialog):
- def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None,config_service=None):
-  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=list(required) if required else list(MATERIAL_IMPORT_HEADERS); self.combos={}; self.optional=set() if required else set(MATERIAL_IMPORT_DEFAULTS)
+ def __init__(self,path,headers,missing,parent=None,sheet_name=None,required=None,config_service=None,optional_fields=None,preview_rows=None,mapping_kind=None,alternate_suffixes=None):
+  super().__init__(parent); self.setWindowTitle(('BOM表头映射' if required else '物料表头映射')+(' — '+sheet_name if sheet_name else '')); self.resize(1000,620); self.required=list(required) if required else list(MATERIAL_IMPORT_HEADERS); self.combos={}; self.optional=set(optional_fields or ()) if required else set(MATERIAL_IMPORT_DEFAULTS); self.alternate_suffixes=alternate_suffixes or ('编码','版本号')
   self.mapping_config=config_service or getattr(getattr(parent,'svc',None),'config_service',None)
-  self.mapping_kind='bom' if required else 'materials'
+  self.mapping_kind=mapping_kind or ('bom' if required else 'materials')
   remembered=self.mapping_config.import_mapping(self.mapping_kind) if self.mapping_config else {}
   self.source_headers=headers; self.alternate_groups=[]
   layout=QVBoxLayout(self); layout.addWidget(QLabel('请确认需求字段与文件列的映射关系（* 为必选）：'))
@@ -85,11 +85,13 @@ class MaterialHeaderMappingDialog(QDialog):
   layout.addWidget(QLabel('文件读取预览（前20行）：'))
   self.preview=QTableWidget(); self.preview.setColumnCount(len(headers)); self.preview.setHorizontalHeaderLabels(headers); self.preview.setWordWrap(True); self.preview.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.preview.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
   try:
-   from openpyxl import load_workbook
-   wb=load_workbook(path,read_only=True,data_only=True)
-   try:
-    ws=wb[sheet_name] if sheet_name is not None else wb.active; rows=list(ws.iter_rows(min_row=2,max_row=21,values_only=True))
-   finally:wb.close()
+   if preview_rows is not None:rows=preview_rows[:20]
+   else:
+    from openpyxl import load_workbook
+    wb=load_workbook(path,read_only=True,data_only=True)
+    try:
+     ws=wb[sheet_name] if sheet_name is not None else wb.active; rows=list(ws.iter_rows(min_row=2,max_row=21,values_only=True))
+    finally:wb.close()
    self.preview.setRowCount(len(rows))
    for r,row in enumerate(rows):
     for c in range(len(headers)): self.preview.setItem(r,c,QTableWidgetItem(str(row[c] or '') if c<len(row) else ''))
@@ -114,10 +116,11 @@ class MaterialHeaderMappingDialog(QDialog):
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
  def add_alternate_mapping(self,number=None):
   if number is None or isinstance(number,bool):number=max([int(group[0].split('替代料')[1].split('编码')[0]) for group in self.alternate_groups] or [0])+1
-  group=[f'替代料{number}编码',f'替代料{number}版本号']; self.alternate_groups.append(group)
+  group=[f'替代料{number}{suffix}' for suffix in self.alternate_suffixes]; self.alternate_groups.append(group)
   for field in group:
    column=self.mapping_table.columnCount(); self.mapping_table.insertColumn(column); self.required.append(field)
-   item=QTableWidgetItem(field+' *'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
+   if field.endswith(('名称','规格','制造商','MPN')):self.optional.add(field)
+   item=QTableWidgetItem(field if field in self.optional else field+' *'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
    combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems([h for h in self.source_headers if h.strip()]); self.combos[field]=combo
    if field in self.source_headers:combo.setCurrentText(field)
    combo.setContextMenuPolicy(Qt.CustomContextMenu); combo.customContextMenuRequested.connect(lambda pos,f=field,w=combo:self.alternate_mapping_menu(f,w.mapToGlobal(pos)))

@@ -19,6 +19,8 @@ def run_smoke_test(report_path):
         from infrastructure.build_info import load_build_info
         from infrastructure.single_instance import SingleInstance
         from openpyxl import load_workbook
+        import xlrd
+        from services.external_bom import ExcelSource,build_external_bom,ALIASES
         app = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory(prefix='bom-smoke-') as tmp:
             guard = SingleInstance(Path(tmp)/'app', tmp)
@@ -37,13 +39,23 @@ def run_smoke_test(report_path):
             wb = load_workbook(path)
             try:assert wb['SKU'].cell(3,10).value==1.5
             finally:wb.close()
+            external=ExcelSource(path)
+            try:external_rows=external.rows('SKU')
+            finally:external.close()
+            headers=external_rows[0];mapping={h:h for h in headers}
+            for field,aliases in ALIASES.items():
+                if field not in mapping:
+                    for alias in aliases:
+                        if alias in headers:mapping[field]=alias;mapping.pop(alias,None);break
+            tree=build_external_bom(external_rows,mapping)
+            assert tree['children'][0]['quantity']==1.5 and xlrd.__version__, '外部Excel读取依赖不可用'
             mirror_id=svc.copy_sku_bom(sid);mirror=svc.for_sku(mirror_id)
             mirror.save_bom(root,[dict(material_id=child,quantity=2.5,unit='pcs')])
             assert svc.bom(root)[0]['quantity']==1.5 and mirror.bom(root)[0]['quantity']==2.5, '镜像BOM未隔离'
             windows = [BomWindow(mirror,root),MainWindow(svc,get_version()),MaterialWindow(svc),BomWindow(svc,root),AboutDialog(get_version())]
             for window in windows:window.show()
             app.processEvents()
-            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['single_instance','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror'])
+            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['single_instance','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader'])
             for window in windows:window.close()
             windows=[];db.close();db=None
     except Exception:
