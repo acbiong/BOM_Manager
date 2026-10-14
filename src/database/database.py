@@ -38,6 +38,7 @@ class Database:
    self.conn.execute("CREATE TABLE skus(id INTEGER PRIMARY KEY AUTOINCREMENT,material_id INTEGER,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,mirror_version INTEGER NOT NULL DEFAULT 100,scope_id INTEGER NOT NULL DEFAULT 0,UNIQUE(material_id,mirror_version))")
    self.conn.execute('INSERT INTO skus(id,material_id,updated_at) SELECT id,material_id,updated_at FROM skus_legacy')
    self.conn.execute('DROP TABLE skus_legacy')
+  if 'change_description' not in {r[1] for r in self.conn.execute('PRAGMA table_info(skus)')}:self.conn.execute("ALTER TABLE skus ADD COLUMN change_description TEXT NOT NULL DEFAULT ''")
   self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_material_usage(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,parent_id INTEGER NOT NULL,role TEXT NOT NULL,PRIMARY KEY(sku_id,material_id,parent_id,role))')
   self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_captured_materials(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,PRIMARY KEY(sku_id,material_id))')
   self.conn.execute('CREATE INDEX IF NOT EXISTS mirror_usage_material ON mirror_material_usage(material_id)')

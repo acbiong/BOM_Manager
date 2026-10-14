@@ -1,3 +1,4 @@
+from ui.sku_change_description import ChangeDescriptionDialog, VersionDescriptionHover, DESCRIPTION_ROLE
 from PyQt5.QtCore import QEventLoop
 from domain.quantity import format_quantity
 from ui.time_display import sku_timestamp
@@ -285,6 +286,7 @@ class MainWindow(QMainWindow):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku); a=bar.addAction('关于'); a.triggered.connect(self.show_about)
   self.table=QTableWidget(); self.table.setColumnCount(7); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID']); self.table.hideColumn(6); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self._sku_sort=None;self._sku_filters={}
+  self._description_hover=VersionDescriptionHover(self.table)
   filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
   compare_action=bar.addAction('BOM对比');compare_action.triggered.connect(self.compare_boms)
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -321,6 +323,7 @@ class MainWindow(QMainWindow):
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(sku_timestamp(r['updated_at']))); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
+   self.table.item(i,4).setData(DESCRIPTION_ROLE,r['change_description'])
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
   self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
@@ -474,13 +477,21 @@ class MainWindow(QMainWindow):
    window=self._bom_windows.get(sid)
    if window and not window.close():return
    self.svc.delete_sku(sid);self.refresh()
+ def edit_sku_change_description(self,sid):
+  row=next((r for r in self.svc.skus() if r['id']==sid),None)
+  if row is None:return
+  dialog=ChangeDescriptionDialog(row['change_description'],self)
+  if dialog.exec_()!=QDialog.Accepted:return
+  try:self.svc.update_sku_change_description(sid,dialog.description())
+  except Exception as error:QMessageBox.warning(self,'保存失败',str(error))
  def sku_context_menu(self,pos):
   row=self.table.rowAt(pos.y())
   if row<0:return
   self.table.selectRow(row); sid=int(self.table.item(row,6).text())
-  menu=QMenu(self); version=menu.addAction('SKU版本变更');mirror=menu.addAction('镜像版本变更');copy=menu.addAction('复制BOM'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
+  menu=QMenu(self); description=menu.addAction('编辑变更描述'); version=menu.addAction('SKU版本变更');mirror=menu.addAction('镜像版本变更');copy=menu.addAction('复制BOM'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
-  if action==copy:self.copy_sku_bom(sid)
+  if action==description:self.edit_sku_change_description(sid)
+  elif action==copy:self.copy_sku_bom(sid)
   elif action==mirror:self.change_mirror_version(sid)
   elif action==version:self.change_sku_version(sid)
   elif action==export_action:self.export_sku_id(sid)

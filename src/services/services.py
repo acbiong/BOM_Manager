@@ -74,6 +74,16 @@ class Services:
    if not row['scope_id']:self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,row['material_id']))
    self.for_sku(sid).log('sku',sid,'mirror_version',f'镜像版本号：{row["mirror_version"]} → {value}')
   self.publish({'type':'sku_changed','id':sid})
+ def update_sku_change_description(self,sid,text):
+  row=self.db.conn.execute('SELECT change_description,material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
+  if row is None:raise ValueError('SKU不存在')
+  if row['change_description']==text:return
+  stamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]
+  with self.db.transaction():
+   self.db.conn.execute('UPDATE skus SET change_description=?,updated_at=? WHERE id=?',(text,stamp,sid))
+   if not row['scope_id']:self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,row['material_id']))
+   self.for_sku(sid).log('sku',sid,'change_description','变更描述：'+(row['change_description'] or '（空）')+' → '+(text or '（空）'))
+  self.publish({'type':'sku_changed','id':sid})
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；SKU、有效BOM主料或替代料引用均为非呆滞。
   q=f'%{query}%'; return self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
@@ -102,7 +112,7 @@ class Services:
   if self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=?',(i,)).fetchone():raise ValueError('物料仍被BOM作为替代料引用，请先删除引用')
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
- def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+ def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,s.change_description,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
  def sku_material_quantities(self,skus=None):
   """每个SKU数量为1；仅累计主BOM，Decimal保留路径连乘精度。"""
   from decimal import Decimal
