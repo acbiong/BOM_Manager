@@ -2,7 +2,7 @@
 from difflib import SequenceMatcher
 from html import escape
 from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
-from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence
+from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence, QFontMetrics, QFont, QTextOption
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
     QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut)
 from services.bom_compare import FIELDS,compare_boms,value
@@ -31,6 +31,9 @@ class DifferenceDelegate(QStyledItemDelegate):
         if text is None:text=escape(str(index.data() or '')).replace('\n','<br>')
         if option.font.strikeOut():text='<s>'+text+'</s>'
         doc.setHtml('<div style="white-space: pre-wrap;">'+text+'</div>')
+        text_option=doc.defaultTextOption()
+        text_option.setAlignment(option.displayAlignment & Qt.AlignHorizontal_Mask)
+        text_option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere);doc.setDefaultTextOption(text_option)
         doc.setTextWidth(max(1,option.rect.width()-6))
         return doc
     def paint(self,painter,option,index):
@@ -38,7 +41,7 @@ class DifferenceDelegate(QStyledItemDelegate):
         doc=self.document(opt,index);opt.text=''
         style=opt.widget.style() if opt.widget else QApplication.style()
         style.drawControl(QStyle.CE_ItemViewItem,opt,painter,opt.widget)
-        painter.save();painter.setClipRect(opt.rect);painter.translate(opt.rect.left()+3,opt.rect.top())
+        painter.save();painter.setClipRect(opt.rect);painter.translate(opt.rect.left()+3,opt.rect.top()+max(0,(opt.rect.height()-doc.size().height())/2))
         context=doc.documentLayout().PaintContext()
         context.palette.setColor(QPalette.Text,opt.palette.color(QPalette.HighlightedText if opt.state & QStyle.State_Selected else QPalette.Text))
         doc.documentLayout().draw(painter,context);painter.restore()
@@ -126,26 +129,44 @@ class BomCompareDialog(QDialog):
         except Exception as exc:
             self.clear_results();QMessageBox.warning(self,'BOM对比失败',str(exc));self.reload_choices();return
         self.clear_results()
-        names={'added':'新增','deleted':'删除','modified':'修改','same':'相同'}
+        names={'added':'新增','deleted':'删除','modified':'修改','same':'相同','replaced':'删除/新增'}
         for table in self.tables:table.setRowCount(len(rows))
         for r,diff in enumerate(rows):
             for table,node,other in ((self.tables[0],diff.left,diff.right),(self.tables[1],diff.right,diff.left)):
-                texts=([names[diff.status]]+[display_value(node,k) for k,_ in DISPLAY_FIELDS]) if node else ['']*(len(DISPLAY_FIELDS)+1)
+                side_status=('deleted' if table is self.tables[0] else 'added') if diff.status=='replaced' else diff.status
+                texts=([names[side_status]]+[display_value(node,k) for k,_ in DISPLAY_FIELDS]) if node else ['']*(len(DISPLAY_FIELDS)+1)
                 for c,text in enumerate(texts):
                     item=QTableWidgetItem(text);table.setItem(r,c,item);item.setToolTip(text)
+                    field=DISPLAY_FIELDS[c-1][0] if c else 'status'
+                    if field in ('status','level','serial','unit','quantity','mp_flag'):item.setTextAlignment(Qt.AlignCenter)
                     # Status is metadata, not a changed BOM field. Empty/identical cells stay unstyled.
                     if c and node:
                         peer=display_value(other,DISPLAY_FIELDS[c-1][0]) if other else ''
                         field=DISPLAY_FIELDS[c-1][0]
                         changed=field in diff.changed or (field=='material_code' and bool({'base_code','version'}.intersection(diff.changed)))
                         if text!=peer and (other is None or changed):
-                            item.setBackground(QColor(self.COLORS['modified' if other else diff.status]))
+                            item.setBackground(QColor(self.COLORS[side_status if diff.status=='replaced' or other is None else 'modified']))
                             item.setForeground(QColor('#202020'))
                             item.setData(RICH_TEXT_ROLE,character_diff(text,peer))
-                            font=item.font();font.setStrikeOut(diff.status=='deleted');item.setFont(font)
+                            font=item.font();font.setStrikeOut(side_status=='deleted');item.setFont(font)
+        self.auto_columns()
         self.align_rows()
         counts={s:sum(d.status==s for d in rows) for s in names}
+        counts['added']+=counts['replaced'];counts['deleted']+=counts['replaced']
+        names.pop('replaced')
         self.summary.setText('；'.join(f'{names[s]}：{counts[s]}' for s in names)+'（含根节点，排序变化不作为内容差异）')
+
+    def auto_columns(self):
+        font=QFont(self.font());font.setBold(True);metrics=QFontMetrics(font)
+        self.max_column_width=metrics.horizontalAdvance('中')*40
+        for table in self.tables:table.horizontalHeader().setMaximumSectionSize(self.max_column_width)
+        for col in range(self.tables[0].columnCount()):
+            width=metrics.horizontalAdvance(self.tables[0].horizontalHeaderItem(col).text())+20
+            for table in self.tables:
+                for row in range(table.rowCount()):
+                    for line in table.item(row,col).text().splitlines():
+                        width=max(width,metrics.horizontalAdvance(line)+12)
+            for table in self.tables:table.setColumnWidth(col,min(self.max_column_width,width))
 
     def toggle_fullscreen(self):
         if self.isFullScreen():

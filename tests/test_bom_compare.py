@@ -69,9 +69,9 @@ class BomCompareTests(unittest.TestCase):
   dialog=BomCompareDialog(self.s)
   try:
    dialog.compare();left,right=dialog.tables
-   self.assertEqual([left.horizontalHeaderItem(c).text() for c in range(4)],['状态','层级','父项物料编码','物料编码'])
-   self.assertEqual(left.item(0,1).text(),'0');self.assertEqual(left.item(0,2).text(),'ROOT')
-   self.assertEqual(left.item(1,1).text(),'1');self.assertEqual(left.item(1,2).text(),'R100')
+   self.assertEqual([left.horizontalHeaderItem(c).text() for c in range(5)],['状态','层级','序号','父项物料编码','物料编码'])
+   self.assertEqual(left.item(0,1).text(),'0');self.assertEqual(left.item(0,3).text(),'ROOT')
+   self.assertEqual(left.item(1,1).text(),'1');self.assertEqual(left.item(1,3).text(),'R100')
    remark=1+[k for k,_ in DISPLAY_FIELDS].index('remark')
    for table,letter in ((left,'甲'),(right,'乙')):
     for c in range(table.columnCount()):
@@ -100,7 +100,7 @@ class BomCompareTests(unittest.TestCase):
   copy=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copy)
   self.put(mirror,self.n,[(self.c,2,{}),(self.a,4,{})]);self.put(mirror,self.r,[(self.n,1,{})])
   rows=compare_boms(self.s,self.sid,copy)
-  self.assertEqual([d.status for d in rows],['same','modified','same','modified'])
+  self.assertEqual([d.status for d in rows],['same','replaced','same','modified'])
   self.assertEqual(rows[1].left['material_id'],self.p);self.assertEqual(rows[1].right['material_id'],self.n)
   self.assertEqual(rows[3].changed,('quantity',))
   from PyQt5.QtCore import Qt
@@ -108,9 +108,9 @@ class BomCompareTests(unittest.TestCase):
   try:
    dialog.compare()
    for table in dialog.tables:
-    self.assertEqual(table.item(2,2).background().style(),Qt.NoBrush)
-    self.assertEqual(table.item(3,2).background().style(),Qt.NoBrush)
-   self.assertNotEqual(dialog.tables[0].item(2,2).text(),dialog.tables[1].item(2,2).text())
+    self.assertEqual(table.item(2,3).background().style(),Qt.NoBrush)
+    self.assertEqual(table.item(3,3).background().style(),Qt.NoBrush)
+   self.assertNotEqual(dialog.tables[0].item(2,3).text(),dialog.tables[1].item(2,3).text())
   finally:dialog.close()
  def test_sequence_alignment_keeps_insertions_by_anchor_and_replacements_together(self):
   from services.bom_compare import align_children
@@ -153,10 +153,10 @@ class BomCompareTests(unittest.TestCase):
   try:
    dialog.compare();left,right=dialog.tables
    self.assertNotIn('版本号',[left.horizontalHeaderItem(c).text() for c in range(left.columnCount())])
-   self.assertEqual(left.item(1,3).text(),'C100');self.assertEqual(right.item(1,3).text(),'C101')
-   self.assertEqual(left.item(1,3).data(RICH_TEXT_ROLE),'C10<b>0</b>')
-   self.assertEqual(right.item(1,3).data(RICH_TEXT_ROLE),'C10<b>1</b>')
-   self.assertEqual(left.item(1,3).background().color().name(),dialog.COLORS['modified'])
+   self.assertEqual(left.item(1,4).text(),'C100');self.assertEqual(right.item(1,4).text(),'C101')
+   self.assertEqual(left.item(1,4).data(RICH_TEXT_ROLE),'C10<b>0</b>')
+   self.assertEqual(right.item(1,4).data(RICH_TEXT_ROLE),'C10<b>1</b>')
+   self.assertEqual(left.item(1,4).background().color().name(),dialog.COLORS['modified'])
   finally:dialog.close()
  def test_click_keyboard_and_blank_partner_row_selection(self):
   from PyQt5.QtCore import Qt
@@ -170,12 +170,49 @@ class BomCompareTests(unittest.TestCase):
     for table in dialog.tables:
      self.assertEqual({i.row() for i in table.selectedIndexes()},{row})
      self.assertEqual(len(table.selectedIndexes()),table.columnCount())
-   QTest.mouseClick(left.viewport(),Qt.LeftButton,pos=left.visualItemRect(left.item(1,3)).center());assert_row(1)
-   self.assertEqual(right.item(1,3).text(),'')
-   QTest.mouseClick(right.viewport(),Qt.LeftButton,pos=right.visualItemRect(right.item(2,2)).center());assert_row(2)
+   QTest.mouseClick(left.viewport(),Qt.LeftButton,pos=left.visualItemRect(left.item(1,4)).center());assert_row(1)
+   self.assertEqual(right.item(1,4).text(),'')
+   QTest.mouseClick(right.viewport(),Qt.LeftButton,pos=right.visualItemRect(right.item(2,3)).center());assert_row(2)
    self.assertTrue(right.hasFocus())
    QTest.keyClick(right,Qt.Key_Up);assert_row(1)
    self.assertEqual(left.verticalScrollBar().value(),right.verticalScrollBar().value())
    dialog.compare()
    self.assertFalse(left.selectedIndexes());self.assertFalse(right.selectedIndexes())
   finally:dialog.close();self.app.processEvents()
+ def test_serial_reordering_width_limit_wrapping_and_centering(self):
+  from PyQt5.QtCore import Qt
+  from ui.bom_compare import DISPLAY_FIELDS
+  self.put(self.s,self.r,[(self.p,1,{}),(self.c,2,dict(remark='很长的备注'*70))]);self.put(self.s,self.p,[(self.a,1,{})])
+  copy=self.s.copy_sku_bom(self.sid);self.put(self.s.for_sku(copy),self.r,[(self.c,2,dict(remark='很长的备注'*70)),(self.p,1,{})]);self.put(self.s.for_sku(copy),self.p,[(self.a,1,{})])
+  rows=compare_boms(self.s,self.sid,copy)
+  self.assertTrue(all(d.status=='same' for d in rows))
+  self.assertEqual([d.left['serial'] for d in rows],['1','1.1','1.1.1','1.2'])
+  self.assertEqual([d.right['serial'] for d in rows],['1','1.2','1.2.1','1.1'])
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare()
+   for table in dialog.tables:
+    self.assertTrue(all(table.columnWidth(c)<=dialog.max_column_width for c in range(table.columnCount())))
+    for c,key in enumerate(['status']+[k for k,_ in DISPLAY_FIELDS]):
+     if key in ('status','level','unit','quantity','mp_flag'):
+      self.assertEqual(table.item(0,c).textAlignment(),Qt.AlignCenter)
+    self.assertEqual(table.item(1,2).background().style(),Qt.NoBrush)
+    self.assertGreater(table.rowHeight(3),table.rowHeight(0))
+    self.assertGreater(table.columnWidth(1+[k for k,_ in DISPLAY_FIELDS].index('remark')),table.columnWidth(1))
+  finally:dialog.close()
+ def test_similar_names_pair_across_order_but_are_delete_add(self):
+  def create(code,name):return self.s.create_material(dict(base_code=code,version='100',name=name,unit='pcs'))
+  bolt=create('B1','固定螺钉M3');wire=create('W1','电源连接线');new_bolt=create('B2','固定螺钉M4');new_wire=create('W2','电源连接线新版')
+  self.put(self.s,self.r,[(bolt,1,{}),(wire,1,{})]);copy=self.s.copy_sku_bom(self.sid)
+  self.put(self.s.for_sku(copy),self.r,[(new_wire,1,{}),(new_bolt,1,{})])
+  rows=compare_boms(self.s,self.sid,copy)
+  self.assertEqual([(d.left['material_id'],d.right['material_id'],d.status) for d in rows[1:]],[(bolt,new_bolt,'replaced'),(wire,new_wire,'replaced')])
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare();left,right=dialog.tables
+   self.assertEqual(left.item(1,0).text(),'删除');self.assertEqual(right.item(1,0).text(),'新增')
+   self.assertEqual(left.item(1,4).background().color().name(),dialog.COLORS['deleted'])
+   self.assertTrue(left.item(1,4).font().strikeOut())
+   self.assertEqual(right.item(1,4).background().color().name(),dialog.COLORS['added'])
+   self.assertIn('新增：2',dialog.summary.text());self.assertIn('删除：2',dialog.summary.text())
+  finally:dialog.close()

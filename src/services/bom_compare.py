@@ -3,7 +3,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from dataclasses import dataclass
 
-FIELDS = [('level','层级'),('parent_code','父项物料编码'),('base_code','物料编码'),('version','版本号'),('name','物料名称'),
+FIELDS = [('level','层级'),('serial','序号'),('parent_code','父项物料编码'),('base_code','物料编码'),('version','版本号'),('name','物料名称'),
           ('description','规格'),('quantity','用量'),('unit','单位'),('grade','物料等级'),
           ('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P'),
           ('position','物料位置'),('remark','备注'),('alternates','替代料')]
@@ -19,7 +19,7 @@ class Difference:
 def snapshot(service, sku):
     scoped = service.for_sku(sku['id'])
     root = dict(scoped.material_snapshot(sku['material_id']))
-    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', level=0, parent_code='ROOT')
+    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', level=0, serial='1', parent_code='ROOT')
     nodes = {None: root}
     alternate_cache = {}
     for source in scoped.bom(sku['material_id']):
@@ -31,7 +31,7 @@ def snapshot(service, sku):
                 for a in (dict(x) for x in scoped.alternates(row['id']))))
         row.update(children=[], alternates=alternate_cache[row['id']])
         parent = nodes[row['parent_node_id']]
-        row.update(level=parent['level']+1, parent_code=str(parent['base_code'])+str(parent['version']))
+        row.update(serial=parent['serial']+'.'+str(len(parent['children'])+1), level=parent['level']+1, parent_code=str(parent['base_code'])+str(parent['version']))
         parent['children'].append(row)
         nodes[row['node_id']] = row
     return root
@@ -56,6 +56,18 @@ def align_children(left, right):
         if i not in pairs and lc[node['base_code']]==rc[node['base_code']]==1:
             j=next(j for j in unused if right[j]['base_code']==node['base_code'])
             pairs[i]=j;unused.remove(j)
+    # Similar names align for inspection, but never establish material identity.
+    candidates=[]
+    for i,node in enumerate(left):
+        if i in pairs:continue
+        name=''.join(str(node.get('name','')).casefold().split())
+        if not name:continue
+        for j in unused:
+            other=''.join(str(right[j].get('name','')).casefold().split())
+            score=SequenceMatcher(None,name,other,autojunk=False).ratio()
+            if score>=0.6:candidates.append((-score,abs(i-j),i,j))
+    for _,_,i,j in sorted(candidates):
+        if i not in pairs and j in unused:pairs[i]=j;unused.remove(j)
     reverse={j:i for i,j in pairs.items()}
     # Unique tokens prevent incidental identical text from pairing different branches.
     blocks=SequenceMatcher(None,list(range(len(left))),
@@ -82,8 +94,8 @@ def compare_boms(service, left_id, right_id):
         raise ValueError('所选SKU或镜像已不存在，请重新选择。')
     result = []
     def visit(left, right, depth):
-        changed = tuple(key for key, _ in FIELDS if key != 'parent_code' and left and right and value(left,key) != value(right,key))
-        status = 'added' if left is None else 'deleted' if right is None else 'modified' if changed else 'same'
+        changed = tuple(key for key, _ in FIELDS if key not in ('parent_code','serial') and left and right and value(left,key) != value(right,key))
+        status = 'added' if left is None else 'deleted' if right is None else 'replaced' if left['base_code']!=right['base_code'] else 'modified' if changed else 'same'
         result.append(Difference(left,right,depth,status,changed))
         ls = left['children'] if left else []
         rs = right['children'] if right else []
