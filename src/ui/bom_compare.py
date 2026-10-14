@@ -4,7 +4,7 @@ from html import escape
 from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
 from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence, QFontMetrics, QFont, QTextOption
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
-    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut)
+    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy)
 from ui.bom_compare_table import BomCompareTable
 from services.bom_compare import FIELDS,compare_boms,value
 
@@ -63,9 +63,11 @@ class BomCompareDialog(QDialog):
         self.service=service;self.setWindowTitle('BOM对比');self.resize(1400,800)
         layout=QVBoxLayout(self)
         legend=QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。淡黄色行：存在差异；变化文字背景绿色：新增，红色：删除，橙黄色：修改，并加粗。父项变化不计入子项差异。序号按对齐后的展示顺序生成，不改变原BOM。')
-        legend.setWordWrap(True);layout.addWidget(legend)
+        legend.setWordWrap(True)
+        hint_row=QHBoxLayout();hint_row.addWidget(legend,1);layout.addLayout(hint_row)
         self.fullscreen_button=QPushButton('全屏（F11）');self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
-        layout.addWidget(self.fullscreen_button)
+        self.fullscreen_button.setSizePolicy(QSizePolicy.Fixed,QSizePolicy.Fixed)
+        hint_row.addWidget(self.fullscreen_button,0,Qt.AlignTop | Qt.AlignRight)
         QShortcut(QKeySequence('F11'),self,activated=self.toggle_fullscreen)
         selectors=QHBoxLayout();layout.addLayout(selectors)
         self.left=QComboBox();self.right=QComboBox()
@@ -114,7 +116,8 @@ class BomCompareDialog(QDialog):
             first=target.model().index(row,0)
             last=target.model().index(row,target.columnCount()-1)
             target.selectionModel().select(QItemSelection(first,last),QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
-            target.selectionModel().setCurrentIndex(first,QItemSelectionModel.NoUpdate)
+            # Synchronize selection only: moving the other current index can
+            # schedule Qt auto-scroll and change the shared frozen viewport later.
         finally:self._syncing_selection=False
     def clear_results(self,*args):
         if not hasattr(self,'tables'):return

@@ -386,3 +386,7 @@ BOM对比默认列宽上限改30字符。BomCompareTable在水平offset>=状态+
 
 ### 2026-10-14 状态新规则
 replaced现在左右统一显示换料，独立计数不计增删；新增exchanged显示交换。snapshot保留alternate_ids，is_exchange要求左右主料不同且互为对方替代料；精确身份后交换优先于版本/名称配对。换料/交换采用修改色无删除线。material_code变化对整段料号标色加粗，不再按其单字符；其他文本仍字符差异。
+
+
+### 2026-10-14 对比点击稳定性
+全屏按钮改为与legend同排右上角Fixed尺寸。sync_selection只同步selection，禁止为对侧设置currentIndex（可能引发Qt延迟滚动）。FrozenComparisonView.scrollTo不执行定位，由主体控制滚动；双方setAutoScroll(False)，主表鼠标点击期间忽略scrollTo但键盘仍正常。新增即时/等待1.2秒视口和行高不变测试。

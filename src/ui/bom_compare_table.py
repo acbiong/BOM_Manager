@@ -2,17 +2,25 @@
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QTableWidget,QTableView,QAbstractItemView,QFrame
 
+class FrozenComparisonView(QTableView):
+    def scrollTo(self,index,hint=QAbstractItemView.EnsureVisible):
+        # Shared selection/current-index notifications must not independently
+        # scroll the overlay. The owning table alone controls vertical position.
+        pass
+
 class BomCompareTable(QTableWidget):
     layoutChanged=pyqtSignal()
     FROZEN_COLUMNS=(2,3,4,5)  # serial, parent code, material code, name
     def __init__(self,*args):
         super().__init__(*args)
-        self.frozen=QTableView(self);self.frozen.setModel(self.model())
+        self.setAutoScroll(False)
+        self.frozen=FrozenComparisonView(self);self.frozen.setModel(self.model())
         self.frozen.setSelectionModel(self.selectionModel())
         self.frozen.setFrameShape(QFrame.NoFrame);self.frozen.setFocusPolicy(Qt.NoFocus)
         self.frozen.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.frozen.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.frozen.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.frozen.setAutoScroll(False)
         self.frozen.setWordWrap(True);self.frozen.verticalHeader().hide()
         self.frozen.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frozen.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -25,6 +33,12 @@ class BomCompareTable(QTableWidget):
         self.horizontalHeader().sectionResized.connect(self.sync_frozen)
         self.frozen.horizontalHeader().sectionResized.connect(lambda c,o,n:self.setColumnWidth(c,n) if self.columnWidth(c)!=n else None)
         self.verticalHeader().sectionResized.connect(lambda r,o,n:self.frozen.setRowHeight(r,n))
+    def mousePressEvent(self,event):
+        self._mouse_selecting=True
+        try:super().mousePressEvent(event)
+        finally:self._mouse_selecting=False
+    def scrollTo(self,index,hint=QAbstractItemView.EnsureVisible):
+        if not getattr(self,'_mouse_selecting',False):super().scrollTo(index,hint)
     def resizeEvent(self,event):
         super().resizeEvent(event)
         if hasattr(self,'frozen'):self.sync_frozen()

@@ -306,3 +306,36 @@ class BomCompareTests(unittest.TestCase):
   self.assertEqual(compare_boms(self.s,self.sid,copied)[1].status,'replaced')
   self.put(mirror,self.r,[(self.p,1,{})]);mirror.add_alternate(mirror.bom(self.r)[0]['id'],self.c)
   self.assertEqual(compare_boms(self.s,self.sid,copied)[1].status,'modified')
+ def test_click_has_no_delayed_scroll_or_layout_and_compact_fullscreen(self):
+  from PyQt5.QtCore import Qt
+  from PyQt5.QtTest import QTest
+  from unittest.mock import patch
+  children=[(self.s.create_material(dict(base_code=f'J{i}',version='100',name='很长的物料名称'*12,unit='pcs')),1,dict(remark='多行备注'*20)) for i in range(35)]
+  self.put(self.s,self.r,children);self.s.copy_sku_bom(self.sid)
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare();dialog.show();dialog.resize(1100,650);self.app.processEvents()
+   layout=dialog.layout().itemAt(0).layout()
+   self.assertIs(layout.itemAt(1).widget(),dialog.fullscreen_button)
+   self.assertLess(dialog.fullscreen_button.width(),dialog.width()//3)
+   left,right=dialog.tables
+   left.horizontalScrollBar().setValue(left.columnWidth(0)+left.columnWidth(1)+60)
+   self.app.processEvents();self.app.processEvents()
+   left.verticalScrollBar().setValue(100);self.app.processEvents()
+   def state():return [(t.horizontalScrollBar().value(),t.verticalScrollBar().value(),tuple(t.rowHeight(r) for r in range(t.rowCount())),t.frozen.isVisible()) for t in dialog.tables]
+   before=state()
+   # The frozen view shares a current index with the main table; selecting it
+   # must not schedule a later ensureVisible/auto-scroll on either side.
+   point=left.frozen.viewport().rect().center()
+   row=left.frozen.rowAt(point.y())
+   with patch.object(dialog,'align_rows',wraps=dialog.align_rows) as align:
+    QTest.mouseClick(left.frozen.viewport(),Qt.LeftButton,pos=point)
+    self.assertEqual(state(),before)
+    for t in dialog.tables:self.assertEqual({i.row() for i in t.selectedIndexes()},{row})
+    QTest.qWait(1200)
+    self.assertEqual(state(),before);align.assert_not_called()
+   # Clicking the right-hand scrolling properties also keeps both viewports stable.
+   point=right.viewport().rect().topRight();point.setX(point.x()-8);point.setY(35)
+   before=state();QTest.mouseClick(right.viewport(),Qt.LeftButton,pos=point)
+   self.assertEqual(state(),before);QTest.qWait(1200);self.assertEqual(state(),before)
+  finally:dialog.close();self.app.processEvents()
