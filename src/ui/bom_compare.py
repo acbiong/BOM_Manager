@@ -2,9 +2,9 @@
 from difflib import SequenceMatcher
 from html import escape
 from PyQt5.QtCore import Qt, QSize, QTimer
-from PyQt5.QtGui import QColor, QTextDocument, QPalette
+from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
-    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication)
+    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut)
 from services.bom_compare import FIELDS,compare_boms,value
 
 RICH_TEXT_ROLE = Qt.UserRole + 1
@@ -45,9 +45,15 @@ class BomCompareDialog(QDialog):
     COLORS={'added':'#b9e9c3','deleted':'#f2b4b4','modified':'#ffe49a'}
     def __init__(self,service,parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
+        self.setSizeGripEnabled(True)
         self.service=service;self.setWindowTitle('BOM对比');self.resize(1400,800)
         layout=QVBoxLayout(self)
-        layout.addWidget(QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。绿色：右侧新增；黄色：差异单元格；红色删除线：右侧删除；仅差异文字加粗。'))
+        legend=QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。绿色：右侧新增；黄色：差异单元格；红色删除线：右侧删除；仅差异文字加粗。父项变化不计入子项差异。')
+        legend.setWordWrap(True);layout.addWidget(legend)
+        self.fullscreen_button=QPushButton('全屏（F11）');self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
+        layout.addWidget(self.fullscreen_button)
+        QShortcut(QKeySequence('F11'),self,activated=self.toggle_fullscreen)
         selectors=QHBoxLayout();layout.addLayout(selectors)
         self.left=QComboBox();self.right=QComboBox()
         for label,combo in [('左侧基准BOM',self.left),('右侧目标BOM',self.right)]:
@@ -63,6 +69,8 @@ class BomCompareDialog(QDialog):
             table.setItemDelegate(DifferenceDelegate(table))
             table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
             table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+            table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
             table.verticalHeader().hide();table.setColumnWidth(0,125)
             for i in range(1,len(FIELDS)+1):table.setColumnWidth(i,150 if i in (1,3,4,13) else 95)
         self.row_timer=QTimer(self);self.row_timer.setSingleShot(True);self.row_timer.timeout.connect(self.align_rows)
@@ -103,7 +111,8 @@ class BomCompareDialog(QDialog):
                     # Status is metadata, not a changed BOM field. Empty/identical cells stay unstyled.
                     if c and node:
                         peer=value(other,FIELDS[c-1][0]) if other else ''
-                        if text!=peer:
+                        field=FIELDS[c-1][0]
+                        if text!=peer and (other is None or field in diff.changed):
                             item.setBackground(QColor(self.COLORS['modified' if other else diff.status]))
                             item.setForeground(QColor('#202020'))
                             item.setData(RICH_TEXT_ROLE,character_diff(text,peer))
@@ -112,8 +121,25 @@ class BomCompareDialog(QDialog):
         counts={s:sum(d.status==s for d in rows) for s in names}
         self.summary.setText('；'.join(f'{names[s]}：{counts[s]}' for s in names)+'（含根节点，排序变化不作为内容差异）')
 
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            if self._was_maximized:self.showMaximized()
+            else:self.showNormal()
+        else:
+            self._was_maximized=self.isMaximized();self.showFullScreen()
+        self.fullscreen_button.setText('退出全屏（F11）' if self.isFullScreen() else '全屏（F11）')
+    def keyPressEvent(self,event):
+        if event.key()==Qt.Key_Escape and self.isFullScreen():
+            self.toggle_fullscreen();event.accept();return
+        super().keyPressEvent(event)
     def align_rows(self):
+        if not self.tables or not self.tables[0].rowCount():return
+        # Block intermediate scrollbar range/value updates while recomputing heights.
+        position=self.tables[0].verticalScrollBar().value()
+        bars=[t.verticalScrollBar() for t in self.tables]
+        for bar in bars:bar.blockSignals(True)
         for table in self.tables:table.resizeRowsToContents()
         for row in range(self.tables[0].rowCount()):
             height=max(t.rowHeight(row) for t in self.tables)
             for table in self.tables:table.setRowHeight(row,height)
+        for bar in bars:bar.setValue(position);bar.blockSignals(False)

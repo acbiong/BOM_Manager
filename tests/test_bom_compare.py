@@ -28,18 +28,18 @@ class BomCompareTests(unittest.TestCase):
   self.assertEqual(set(rows[-1].changed),{'quantity','position','remark','alternates'})
   self.assertEqual(self.s.bom(self.p)[0]['quantity'],3)
  def test_deleted_and_added_subtrees_and_ui(self):
-  self.put(self.s,self.r,[(self.p,1,{})]);self.put(self.s,self.p,[(self.c,1,{})])
+  self.put(self.s,self.r,[(self.p,1,{}),(self.a,1,{})]);self.put(self.s,self.p,[(self.c,1,{})])
   copy=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copy)
-  self.put(mirror,self.r,[(self.n,1,{})])
+  self.put(mirror,self.r,[(self.a,1,{}),(self.n,1,{})])
   rows=compare_boms(self.s,self.sid,copy)
-  self.assertEqual([d.status for d in rows],['same','deleted','deleted','added'])
+  self.assertEqual([d.status for d in rows],['same','deleted','deleted','same','added'])
   dialog=BomCompareDialog(self.s)
   try:
    dialog.compare();a,b=dialog.tables
-   self.assertEqual(a.rowCount(),4);self.assertTrue(a.item(1,1).font().strikeOut())
+   self.assertEqual(a.rowCount(),5);self.assertTrue(a.item(1,1).font().strikeOut())
    self.assertEqual(a.item(2,1).background().color().name(),dialog.COLORS['deleted'])
-   self.assertEqual(b.item(3,1).background().color().name(),dialog.COLORS['added'])
-   self.assertEqual(a.item(3,1).text(),'');self.assertEqual(b.item(1,1).text(),'')
+   self.assertEqual(b.item(4,1).background().color().name(),dialog.COLORS['added'])
+   self.assertEqual(a.item(4,1).text(),'');self.assertEqual(b.item(1,1).text(),'')
    self.assertEqual(a.rowHeight(1),b.rowHeight(1))
    dialog.right.setCurrentIndex(0);self.assertEqual(a.rowCount(),0)
    dialog.compare();self.assertIn('修改：0',dialog.summary.text())
@@ -95,3 +95,52 @@ class BomCompareTests(unittest.TestCase):
   self.assertEqual(character_diff('<甲>\n&','<乙>\n&'),'&lt;<b>甲</b>&gt;<br>&amp;')
   self.assertEqual(character_diff('相同','相同'),'相同')
   self.assertEqual(character_diff('新增',''),'<b>新增</b>')
+ def test_parent_replacement_compares_descendants_and_ignores_parent_code(self):
+  self.put(self.s,self.r,[(self.p,1,{})]);self.put(self.s,self.p,[(self.c,2,{}),(self.a,3,{})])
+  copy=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copy)
+  self.put(mirror,self.n,[(self.c,2,{}),(self.a,4,{})]);self.put(mirror,self.r,[(self.n,1,{})])
+  rows=compare_boms(self.s,self.sid,copy)
+  self.assertEqual([d.status for d in rows],['same','modified','same','modified'])
+  self.assertEqual(rows[1].left['material_id'],self.p);self.assertEqual(rows[1].right['material_id'],self.n)
+  self.assertEqual(rows[3].changed,('quantity',))
+  from PyQt5.QtCore import Qt
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare()
+   for table in dialog.tables:
+    self.assertEqual(table.item(2,2).background().style(),Qt.NoBrush)
+    self.assertEqual(table.item(3,2).background().style(),Qt.NoBrush)
+   self.assertNotEqual(dialog.tables[0].item(2,2).text(),dialog.tables[1].item(2,2).text())
+  finally:dialog.close()
+ def test_sequence_alignment_keeps_insertions_by_anchor_and_replacements_together(self):
+  from services.bom_compare import align_children
+  def nodes(*names):return [dict(material_id=n,base_code=n) for n in names]
+  def names(pairs):return [(a['base_code'] if a else None,b['base_code'] if b else None) for a,b in pairs]
+  self.assertEqual(names(align_children(nodes('A','B','C'),nodes('X','A','N','C','Z'))),[(None,'X'),('A','A'),('B','N'),('C','C'),(None,'Z')])
+  self.assertEqual(names(align_children(nodes('A','B','C'),nodes('C','A','B'))),[('A','A'),('B','B'),('C','C')])
+  self.assertEqual(names(align_children(nodes('A','B','C'),nodes('A','C'))),[('A','A'),('B',None),('C','C')])
+ def test_window_modes_and_scroll_alignment_after_wrapped_rows(self):
+  from PyQt5.QtCore import Qt
+  from PyQt5.QtGui import QKeyEvent
+  from PyQt5.QtCore import QEvent
+  children=[(self.s.create_material(dict(base_code=f'T{i}',version='1',name=f'测试物料{i}',unit='pcs')),1,dict(remark='多行说明'*20)) for i in range(30)]
+  self.put(self.s,self.r,children);copy=self.s.copy_sku_bom(self.sid)
+  dialog=BomCompareDialog(self.s)
+  try:
+   self.assertTrue(dialog.windowFlags() & Qt.WindowMaximizeButtonHint)
+   self.assertTrue(dialog.windowFlags() & Qt.WindowMinimizeButtonHint)
+   dialog.compare();dialog.show();self.app.processEvents()
+   dialog.showMaximized();self.app.processEvents();self.assertTrue(dialog.isMaximized())
+   dialog.toggle_fullscreen();self.app.processEvents();self.assertTrue(dialog.isFullScreen())
+   dialog.keyPressEvent(QKeyEvent(QEvent.KeyPress,Qt.Key_Escape,Qt.NoModifier));self.app.processEvents();self.assertTrue(dialog.isMaximized())
+   dialog.showNormal();dialog.resize(900,500);self.app.processEvents()
+   left,right=dialog.tables
+   for source,target in ((left,right),(right,left)):
+    source.verticalScrollBar().setValue(source.verticalScrollBar().maximum()//2)
+    self.assertGreater(source.verticalScrollBar().value(),0)
+    self.assertEqual(source.rowAt(0),target.rowAt(0))
+    row=source.rowAt(0);self.assertEqual(source.rowViewportPosition(row),target.rowViewportPosition(row))
+   left.setColumnWidth(14,70);self.app.processEvents()
+   self.assertEqual(left.verticalScrollBar().value(),right.verticalScrollBar().value())
+   self.assertTrue(all(left.rowHeight(r)==right.rowHeight(r) for r in range(left.rowCount())))
+  finally:dialog.close();self.app.processEvents()

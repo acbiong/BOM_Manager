@@ -1,5 +1,6 @@
 """Read-only, parent-local comparison of saved SKU/mirror graphs."""
 from collections import Counter
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 
 FIELDS = [('level','层级'),('parent_code','父项物料编码'),('base_code','物料编码'),('version','版本号'),('name','物料名称'),
@@ -39,29 +40,53 @@ def value(node, field):
     raw = node.get(field)
     return f'{float(raw or 0):.1f}' if field == 'quantity' else str(raw if raw is not None else '')
 
+def align_children(left, right):
+    """Keep identity anchors; align replacements inside the intervening sibling gaps.
+
+    Matching never crosses a parent boundary. Existing identities still match after
+    reordering; positional replacement is only used for otherwise unmatched rows.
+    """
+    pairs = {}; unused = set(range(len(right)))
+    for i,node in enumerate(left):
+        j = next((j for j in sorted(unused) if right[j]['material_id']==node['material_id']),None)
+        if j is not None:pairs[i]=j;unused.remove(j)
+    lc=Counter(n['base_code'] for i,n in enumerate(left) if i not in pairs)
+    rc=Counter(right[j]['base_code'] for j in unused)
+    for i,node in enumerate(left):
+        if i not in pairs and lc[node['base_code']]==rc[node['base_code']]==1:
+            j=next(j for j in unused if right[j]['base_code']==node['base_code'])
+            pairs[i]=j;unused.remove(j)
+    reverse={j:i for i,j in pairs.items()}
+    # Unique tokens prevent incidental identical text from pairing different branches.
+    blocks=SequenceMatcher(None,list(range(len(left))),
+                           [reverse.get(j,('new',j)) for j in range(len(right))],
+                           autojunk=False).get_matching_blocks()
+    li=ri=0
+    for block in blocks:
+        missing_left=[i for i in range(li,block.a) if i not in pairs]
+        missing_right=[j for j in range(ri,block.b) if j in unused]
+        for i,j in zip(missing_left,missing_right):pairs[i]=j;unused.remove(j)
+        li=block.a+block.size;ri=block.b+block.size
+    pending=sorted(unused);cursor=0
+    for i,node in enumerate(left):
+        j=pairs.get(i)
+        if j is not None:
+            while cursor<len(pending) and pending[cursor]<j:
+                yield None,right[pending[cursor]];cursor+=1
+        yield node,right[j] if j is not None else None
+    for j in pending[cursor:]:yield None,right[j]
+
 def compare_boms(service, left_id, right_id):
     skus = {s['id']: dict(s) for s in service.skus()}
     if left_id not in skus or right_id not in skus:
         raise ValueError('所选SKU或镜像已不存在，请重新选择。')
     result = []
     def visit(left, right, depth):
-        changed = tuple(key for key, _ in FIELDS if left and right and value(left,key) != value(right,key))
+        changed = tuple(key for key, _ in FIELDS if key != 'parent_code' and left and right and value(left,key) != value(right,key))
         status = 'added' if left is None else 'deleted' if right is None else 'modified' if changed else 'same'
         result.append(Difference(left,right,depth,status,changed))
         ls = left['children'] if left else []
         rs = right['children'] if right else []
-        # Exact identity first; only unambiguous version changes are paired by base code.
-        pairs = {}; unused = set(range(len(rs)))
-        for i,l in enumerate(ls):
-            j = next((j for j in sorted(unused) if rs[j]['material_id']==l['material_id']),None)
-            if j is not None:pairs[i]=j;unused.remove(j)
-        lc = Counter(l['base_code'] for i,l in enumerate(ls) if i not in pairs)
-        rc = Counter(rs[j]['base_code'] for j in unused)
-        for i,l in enumerate(ls):
-            if i not in pairs and lc[l['base_code']]==rc[l['base_code']]==1:
-                j=next(j for j in unused if rs[j]['base_code']==l['base_code'])
-                pairs[i]=j;unused.remove(j)
-        for i,l in enumerate(ls):visit(l,rs[pairs[i]] if i in pairs else None,depth+1)
-        for j in sorted(unused):visit(None,rs[j],depth+1)
+        for l,r in align_children(ls,rs):visit(l,r,depth+1)
     visit(snapshot(service,skus[left_id]),snapshot(service,skus[right_id]),0)
     return result
