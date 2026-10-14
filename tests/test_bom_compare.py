@@ -154,8 +154,8 @@ class BomCompareTests(unittest.TestCase):
    dialog.compare();left,right=dialog.tables
    self.assertNotIn('版本号',[left.horizontalHeaderItem(c).text() for c in range(left.columnCount())])
    self.assertEqual(left.item(1,4).text(),'C100');self.assertEqual(right.item(1,4).text(),'C101')
-   self.assertEqual(left.item(1,4).data(RICH_TEXT_ROLE),'C10<span style="background-color: '+dialog.COLORS['modified']+'; color: #202020;"><b>0</b></span>')
-   self.assertEqual(right.item(1,4).data(RICH_TEXT_ROLE),'C10<span style="background-color: '+dialog.COLORS['modified']+'; color: #202020;"><b>1</b></span>')
+   self.assertEqual(left.item(1,4).data(RICH_TEXT_ROLE),'<span style="background-color: '+dialog.COLORS['modified']+'; color: #202020;"><b>C100</b></span>')
+   self.assertEqual(right.item(1,4).data(RICH_TEXT_ROLE),'<span style="background-color: '+dialog.COLORS['modified']+'; color: #202020;"><b>C101</b></span>')
    self.assertEqual(left.item(1,4).background().color().name(),dialog.ROW_COLOR)
   finally:dialog.close()
  def test_click_keyboard_and_blank_partner_row_selection(self):
@@ -210,11 +210,11 @@ class BomCompareTests(unittest.TestCase):
   dialog=BomCompareDialog(self.s)
   try:
    dialog.compare();left,right=dialog.tables
-   self.assertEqual(left.item(1,0).text(),'删除');self.assertEqual(right.item(1,0).text(),'新增')
+   self.assertEqual(left.item(1,0).text(),'换料');self.assertEqual(right.item(1,0).text(),'换料')
    self.assertEqual(left.item(1,4).background().color().name(),dialog.ROW_COLOR)
-   self.assertTrue(left.item(1,4).font().strikeOut())
+   self.assertFalse(left.item(1,4).font().strikeOut())
    self.assertEqual(right.item(1,4).background().color().name(),dialog.ROW_COLOR)
-   self.assertIn('新增：2',dialog.summary.text());self.assertIn('删除：2',dialog.summary.text())
+   self.assertIn('换料：2',dialog.summary.text());self.assertIn('新增：0',dialog.summary.text());self.assertIn('删除：0',dialog.summary.text())
   finally:dialog.close()
  def test_aligned_serials_are_display_only_and_preserve_database_order(self):
   self.put(self.s,self.r,[(self.p,1,{}),(self.c,1,{})]);self.put(self.s,self.p,[(self.a,1,{})])
@@ -277,3 +277,32 @@ class BomCompareTests(unittest.TestCase):
    fmt=cursor.charFormat()
    if pos==1:self.assertEqual(fmt.background().color(),QColor('#ffc35c'));self.assertGreater(fmt.fontWeight(),50)
    else:self.assertEqual(fmt.background().style(),0);self.assertEqual(fmt.fontWeight(),50)
+ def test_main_alternate_exchange_identity_overrides_names_and_order(self):
+  from ui.bom_compare import RICH_TEXT_ROLE
+  self.put(self.s,self.r,[(self.p,2,{}),(self.c,3,{})])
+  self.s.add_alternate(self.s.bom(self.r)[0]['id'],self.a)
+  self.s.add_alternate(self.s.bom(self.r)[0]['id'],self.n)
+  copied=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copied)
+  self.put(mirror,self.r,[(self.c,3,{}),(self.a,2,{})])
+  relation=next(r for r in mirror.bom(self.r) if r['material_id']==self.a)
+  mirror.add_alternate(relation['id'],self.p);mirror.add_alternate(relation['id'],self.n)
+  rows=compare_boms(self.s,self.sid,copied)
+  self.assertEqual([d.status for d in rows],['same','exchanged','same'])
+  self.assertEqual(rows[1].right['material_id'],self.a)
+  self.assertEqual(compare_boms(self.s,copied,self.sid)[2].status,'exchanged')
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare()
+   for table in dialog.tables:
+    self.assertEqual(table.item(1,0).text(),'交换')
+    self.assertFalse(table.item(1,4).font().strikeOut())
+    self.assertIn('<b>'+table.item(1,4).text()+'</b>',table.item(1,4).data(RICH_TEXT_ROLE))
+   self.assertIn('交换：1',dialog.summary.text());self.assertIn('换料：0',dialog.summary.text())
+  finally:dialog.close()
+ def test_one_way_alternate_reference_is_not_exchange(self):
+  self.put(self.s,self.r,[(self.p,1,{})]);self.s.add_alternate(self.s.bom(self.r)[0]['id'],self.a)
+  copied=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copied)
+  self.put(mirror,self.r,[(self.a,1,{})])
+  self.assertEqual(compare_boms(self.s,self.sid,copied)[1].status,'replaced')
+  self.put(mirror,self.r,[(self.p,1,{})]);mirror.add_alternate(mirror.bom(self.r)[0]['id'],self.c)
+  self.assertEqual(compare_boms(self.s,self.sid,copied)[1].status,'modified')

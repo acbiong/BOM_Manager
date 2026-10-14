@@ -18,17 +18,18 @@ class Difference:
 def snapshot(service, sku):
     scoped = service.for_sku(sku['id'])
     root = dict(scoped.material_snapshot(sku['material_id']))
-    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', level=0, serial='1', parent_code='ROOT')
+    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', alternate_ids=frozenset(), level=0, serial='1', parent_code='ROOT')
     nodes = {None: root}
     alternate_cache = {}
     for source in scoped.bom(sku['material_id']):
         row = dict(source)
         if row['id'] not in alternate_cache:
-            alternate_cache[row['id']] = '\n'.join(sorted(
+            alternatives=[dict(x) for x in scoped.alternates(row['id'])]
+            alternate_cache[row['id']] = ('\n'.join(sorted(
                 ' | '.join(str(a.get(k) or '') for k in
                            ('base_code','version','name','description','manufacturer','mpn'))
-                for a in (dict(x) for x in scoped.alternates(row['id']))))
-        row.update(children=[], alternates=alternate_cache[row['id']])
+                for a in alternatives)),frozenset(a['material_id'] for a in alternatives))
+        row.update(children=[], alternates=alternate_cache[row['id']][0], alternate_ids=alternate_cache[row['id']][1])
         parent = nodes[row['parent_node_id']]
         row.update(serial=parent['serial']+'.'+str(len(parent['children'])+1), level=parent['level']+1, parent_code=str(parent['base_code'])+str(parent['version']))
         parent['children'].append(row)
@@ -38,6 +39,12 @@ def snapshot(service, sku):
 def value(node, field):
     raw = node.get(field)
     return f'{float(raw or 0):.1f}' if field == 'quantity' else str(raw if raw is not None else '')
+
+def is_exchange(left,right):
+    """A reciprocal main/alternate change, not merely an alternate addition."""
+    return (left['material_id']!=right['material_id']
+            and right['material_id'] in left.get('alternate_ids',())
+            and left['material_id'] in right.get('alternate_ids',()))
 
 def align_children(left, right):
     """Keep identity anchors; align replacements inside the intervening sibling gaps.
@@ -49,6 +56,12 @@ def align_children(left, right):
     for i,node in enumerate(left):
         j = next((j for j in sorted(unused) if right[j]['material_id']==node['material_id']),None)
         if j is not None:pairs[i]=j;unused.remove(j)
+    # Explicit reciprocal main/alternate identities outrank names or positions.
+    for i,node in enumerate(left):
+        if i in pairs:continue
+        matches=[j for j in unused if is_exchange(node,right[j])]
+        if matches:
+            j=min(matches,key=lambda j:(abs(i-j),j));pairs[i]=j;unused.remove(j)
     # Exact versions have already matched. Pair remaining versions by base code,
     # even when several versions of the same material occur under one parent.
     for i,node in enumerate(left):
@@ -100,7 +113,7 @@ def compare_boms(service, left_id, right_id):
         if left is not None:left['serial']=serial
         if right is not None:right['serial']=serial
         changed = tuple(key for key, _ in FIELDS if key not in ('parent_code','serial') and left and right and value(left,key) != value(right,key))
-        status = 'added' if left is None else 'deleted' if right is None else 'replaced' if left['base_code']!=right['base_code'] else 'modified' if changed else 'same'
+        status = 'added' if left is None else 'deleted' if right is None else 'exchanged' if is_exchange(left,right) else 'replaced' if left['base_code']!=right['base_code'] else 'modified' if changed else 'same'
         result.append(Difference(left,right,depth,status,changed))
         ls = left['children'] if left else []
         rs = right['children'] if right else []

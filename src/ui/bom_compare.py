@@ -135,11 +135,11 @@ class BomCompareDialog(QDialog):
         except Exception as exc:
             self.clear_results();QMessageBox.warning(self,'BOM对比失败',str(exc));self.reload_choices();return
         self.clear_results()
-        names={'added':'新增','deleted':'删除','modified':'修改','same':'相同','replaced':'删除/新增'}
+        names={'added':'新增','deleted':'删除','modified':'修改','same':'相同','replaced':'换料','exchanged':'交换'}
         for table in self.tables:table.setRowCount(len(rows))
         for r,diff in enumerate(rows):
             for table,node,other in ((self.tables[0],diff.left,diff.right),(self.tables[1],diff.right,diff.left)):
-                side_status=('deleted' if table is self.tables[0] else 'added') if diff.status=='replaced' else diff.status
+                side_status=diff.status
                 texts=([names[side_status]]+[display_value(node,k) for k,_ in DISPLAY_FIELDS]) if node else ['']*(len(DISPLAY_FIELDS)+1)
                 for c,text in enumerate(texts):
                     item=QTableWidgetItem(text);table.setItem(r,c,item);item.setToolTip(text)
@@ -153,15 +153,13 @@ class BomCompareDialog(QDialog):
                         field=DISPLAY_FIELDS[c-1][0]
                         changed=field in diff.changed or (field=='material_code' and bool({'base_code','version'}.intersection(diff.changed)))
                         if text!=peer and (other is None or changed):
-                            color=self.COLORS[side_status if diff.status=='replaced' or other is None else 'modified']
+                            color=self.COLORS[side_status if other is None else 'modified']
                             item.setForeground(QColor('#202020'))
-                            item.setData(RICH_TEXT_ROLE,character_diff(text,peer,color))
+                            item.setData(RICH_TEXT_ROLE,character_diff(text,'' if field=='material_code' else peer,color))
                             font=item.font();font.setStrikeOut(side_status=='deleted');item.setFont(font)
         self.auto_columns()
         self.align_rows()
         counts={s:sum(d.status==s for d in rows) for s in names}
-        counts['added']+=counts['replaced'];counts['deleted']+=counts['replaced']
-        names.pop('replaced')
         self.summary.setText('；'.join(f'{names[s]}：{counts[s]}' for s in names)+'（含根节点，排序变化不作为内容差异）')
 
     def auto_columns(self):
