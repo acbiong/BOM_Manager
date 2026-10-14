@@ -102,7 +102,7 @@ def align_children(left, right):
         yield node,right[j] if j is not None else None
     for j in pending[cursor:]:yield None,right[j]
 
-def compare_boms(service, left_id, right_id):
+def compare_boms(service, left_id, right_id, snapshot_provider=None):
     skus = {s['id']: dict(s) for s in service.skus()}
     if left_id not in skus or right_id not in skus:
         raise ValueError('所选SKU或镜像已不存在，请重新选择。')
@@ -119,5 +119,6 @@ def compare_boms(service, left_id, right_id):
         rs = right['children'] if right else []
         for index,(l,r) in enumerate(align_children(ls,rs),1):
             visit(l,r,depth+1,serial+'.'+str(index))
-    visit(snapshot(service,skus[left_id]),snapshot(service,skus[right_id]),0,'1')
+    provider=snapshot_provider or (lambda sku:snapshot(service,sku))
+    visit(provider(skus[left_id]),provider(skus[right_id]),0,'1')
     return result

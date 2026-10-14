@@ -275,6 +275,7 @@ class MainWindow(QMainWindow):
  def on_data_change(self,event):
   if event.get('type') in ('bom_changed','material_changed','sku_changed'):self.refresh()
  def closeEvent(self,event):
+  if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku); a=bar.addAction('关于'); a.triggered.connect(self.show_about)
@@ -292,7 +293,8 @@ class MainWindow(QMainWindow):
   self.count_label=QLabel(''); self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(8,2,8,2); footer_l.addWidget(self.count_label); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().setSizeGripEnabled(False); self.statusBar().hide(); self.refresh()
  def compare_boms(self):
   from ui.bom_compare import BomCompareDialog
-  BomCompareDialog(self.svc,self).exec_()
+  if not getattr(self,'_compare_dialog',None):self._compare_dialog=BomCompareDialog(self.svc,self)
+  self._compare_dialog.reload_choices();self._compare_dialog.show();self._compare_dialog.raise_();self._compare_dialog.activateWindow()
  def show_about(self):
   AboutDialog(self.version,self).exec_()
  def set_theme(self,dark):
@@ -352,6 +354,7 @@ class MainWindow(QMainWindow):
    try:self.svc.change_mirror_version(sid,value)
    except Exception as error:QMessageBox.warning(self,'镜像版本变更失败',str(error))
  def select_database(self):
+  if getattr(self,'_compare_dialog',None):self._compare_dialog.close();self._compare_dialog.deleteLater();self._compare_dialog=None
   current=Path(self.svc.db.path).expanduser()
   # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
   # 这样已有文件会直接作为候选数据库打开，输入新文件名仍可创建数据库。
@@ -609,6 +612,7 @@ class BomWindow(QMainWindow):
   self.save_action.setEnabled(True)
   self.export_action.setEnabled(False)
   self.refresh_styles()
+  WindowRefreshBus.publish({'type':'bom_draft_changed'})
  def on_external_change(self,event):
   if self._saving: return
   if event.get('type')=='sku_changed':
@@ -617,12 +621,12 @@ class BomWindow(QMainWindow):
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
    self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
  def closeEvent(self,event):
-  if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); event.accept(); return
+  if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept(); return
   box=QMessageBox(self); box.setWindowTitle('BOM未保存'); box.setText('BOM结构或物料信息已修改，是否保存？'); save=box.addButton('保存并退出',QMessageBox.AcceptRole); discard=box.addButton('不保存退出',QMessageBox.DestructiveRole); cancel=box.addButton('取消',QMessageBox.RejectRole); box.exec_()
   if box.clickedButton()==save:
-   if self.save(): WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); event.accept()
+   if self.save(): WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept()
    else: event.ignore()
-  elif box.clickedButton()==discard: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); event.accept()
+  elif box.clickedButton()==discard: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept()
   else: event.ignore()
 
  def context_menu(self,pos):
@@ -1417,7 +1421,7 @@ class MaterialWindow(QMainWindow):
  def closeEvent(self,event):
   for window in list(self._local_bom_windows.values()):
    if not window.close(): event.ignore(); return
-  WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); event.accept()
+  WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept()
  def refresh(self):
   from decimal import Decimal,ROUND_HALF_UP
   project=self.svc.project();self.setWindowTitle(' '.join(str(project[key] or '').strip() for key in ('project_code','project_name') if str(project[key] or '').strip())+' 物料库')

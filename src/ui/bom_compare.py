@@ -4,9 +4,10 @@ from html import escape
 from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
 from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence, QFontMetrics, QFont, QTextOption
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
-    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy)
+    QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy,QMenu)
 from ui.bom_compare_table import BomCompareTable
-from services.bom_compare import FIELDS,compare_boms,value
+from services.bom_compare import FIELDS,compare_boms,value,snapshot
+from infrastructure.events import WindowRefreshBus
 
 RICH_TEXT_ROLE = Qt.UserRole + 1
 DISPLAY_FIELDS = [('material_code','物料编码') if key=='base_code' else (key,label)
@@ -62,7 +63,7 @@ class BomCompareDialog(QDialog):
         self.setSizeGripEnabled(True)
         self.service=service;self.setWindowTitle('BOM对比');self.resize(1400,800)
         layout=QVBoxLayout(self)
-        legend=QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。淡黄色行：存在差异；变化文字背景绿色：新增，红色：删除，橙黄色：修改，并加粗。父项变化不计入子项差异。序号按对齐后的展示顺序生成，不改变原BOM。')
+        legend=QLabel('实时对比BOM（已打开编辑窗口的未保存修改也会同步显示）。淡黄色行：存在差异；变化文字背景绿色：新增，红色：删除，橙黄色：修改，并加粗。父项变化不计入子项差异。序号按对齐后的展示顺序生成，不改变原BOM。')
         legend.setWordWrap(True)
         hint_row=QHBoxLayout();hint_row.addWidget(legend,1);layout.addLayout(hint_row)
         self.fullscreen_button=QPushButton('全屏（F11）');self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
@@ -80,6 +81,10 @@ class BomCompareDialog(QDialog):
         for side in range(2):
             table=BomCompareTable(0,len(DISPLAY_FIELDS)+1);self.tables.append(table);tables.addWidget(table,1)
             table.setHorizontalHeaderLabels(['状态']+[label for _,label in DISPLAY_FIELDS])
+            table.setContextMenuPolicy(Qt.CustomContextMenu)
+            table.customContextMenuRequested.connect(lambda pos,t=table:self.context_menu(t,t.indexAt(pos),t.viewport().mapToGlobal(pos)))
+            table.frozen.setContextMenuPolicy(Qt.CustomContextMenu)
+            table.frozen.customContextMenuRequested.connect(lambda pos,t=table:self.context_menu(t,t.frozen.indexAt(pos),t.frozen.viewport().mapToGlobal(pos)))
             table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
             table.setSelectionBehavior(QAbstractItemView.SelectRows)
             table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -103,7 +108,76 @@ class BomCompareDialog(QDialog):
             source.horizontalHeader().sectionResized.connect(lambda col,old,new,t=target:t.setColumnWidth(col,new))
         self.summary=QLabel('请选择左右BOM后点击对比。');layout.addWidget(self.summary)
         self.button=QPushButton('对比');self.button.clicked.connect(self.compare);layout.addWidget(self.button)
+        self.live_timer=QTimer(self);self.live_timer.setSingleShot(True);self.live_timer.timeout.connect(self.live_refresh)
+        self._rows=[];self._compared=False
         self.reload_choices()
+    def showEvent(self,event):
+        super().showEvent(event);WindowRefreshBus.subscribe(self.on_change)
+        if self._compared:self.live_timer.start(0)
+    def closeEvent(self,event):
+        WindowRefreshBus.unsubscribe(self.on_change);self.live_timer.stop();super().closeEvent(event)
+    def on_change(self,event):
+        if event.get('type') in ('bom_draft_changed','bom_changed','material_changed','sku_changed'):
+            self.live_timer.start(0)
+    def live_refresh(self):
+        compared=self._compared
+        self.reload_choices()
+        if self.left.currentData() is None or self.right.currentData() is None:self.clear_results();return
+        if compared:
+            positions=[(t.horizontalScrollBar().value(),t.verticalScrollBar().value()) for t in self.tables]
+            for table in self.tables:table.setUpdatesEnabled(False)
+            try:
+                self.compare()
+                for table,(x,y) in zip(self.tables,positions):
+                    table.horizontalScrollBar().setValue(x);table.verticalScrollBar().setValue(y)
+            finally:
+                for table in self.tables:table.setUpdatesEnabled(True)
+    def live_snapshot(self,sku):
+        main=self.parent();window=getattr(main,'_bom_windows',{}).get(sku['id'])
+        if window is None or not window.dirty:return snapshot(self.service,sku)
+        def node(item,parent=None,path=()):
+            data=dict(item.data(0,Qt.UserRole) or {})
+            mid=data.get('material_id',window.root)
+            result=dict(window.svc.material_snapshot(mid));result.update(data)
+            ids=window.alternate_ids(item) if parent else []
+            alternatives=[window.svc.material_snapshot(i) for i in ids]
+            result.update(material_id=mid,children=[],alternate_ids=frozenset(ids),
+                alternates='\n'.join(sorted(' | '.join(str(a.get(k) or '') for k in ('base_code','version','name','description','manufacturer','mpn')) for a in alternatives)),
+                level=len(path),parent_code=(str(parent['base_code'])+str(parent['version'])) if parent else 'ROOT',_material_path=path)
+            if parent is None:result['quantity']=1
+            for i in range(item.childCount()):
+                child=item.child(i);d=child.data(0,Qt.UserRole) or {}
+                if not d.get('_deleted'):result['children'].append(node(child,result,path+(d['material_id'],)))
+            return result
+        return node(window.root_item)
+    def context_menu(self,table,index,global_pos):
+        if not index.isValid() or index.row()>=len(self._rows):return
+        side=self.tables.index(table);diff=self._rows[index.row()]
+        node=diff.left if side==0 else diff.right
+        if node is None:return
+        menu=QMenu(self);edit=menu.addAction('打开BOM进行编辑')
+        if menu.exec_(global_pos)==edit:self.open_editor(side,index.row())
+    def open_editor(self,side,row):
+        main=self.parent()
+        if not hasattr(main,'open_bom_id') or row>=len(self._rows):return
+        node=self._rows[row].left if side==0 else self._rows[row].right
+        if node is None:return
+        sid=(self.left,self.right)[side].currentData();window=main.open_bom_id(sid)
+        if window is None:return
+        # Material path disambiguates repeated materials under repeated parents.
+        path=node.get('_material_path')
+        if path is None:
+            path=[];depth=self._rows[row].depth
+            for previous in reversed(self._rows[:row+1]):
+                candidate=previous.left if side==0 else previous.right
+                if candidate and previous.depth==depth and depth>0:path.insert(0,candidate['material_id']);depth-=1
+        item=window.root_item
+        for mid in path:
+            child=next((item.child(i) for i in range(item.childCount()) if (item.child(i).data(0,Qt.UserRole) or {}).get('material_id')==mid and not (item.child(i).data(0,Qt.UserRole) or {}).get('_deleted')),None)
+            if child is None:return
+            item.setExpanded(True);item=child
+        window.tree.setCurrentItem(item);window.show_item_info(item);window.tree.scrollToItem(item,QAbstractItemView.PositionAtCenter)
+
     def sync_selection(self,source,target):
         if self._syncing_selection:return
         self._syncing_selection=True
@@ -121,20 +195,23 @@ class BomCompareDialog(QDialog):
         finally:self._syncing_selection=False
     def clear_results(self,*args):
         if not hasattr(self,'tables'):return
+        self._rows=[];self._compared=False
         for table in self.tables:table.setRowCount(0)
         self.summary.setText('请选择左右BOM后点击对比。')
     def reload_choices(self):
         previous=[self.left.currentData(),self.right.currentData()]
         rows=list(self.service.skus())
         for index,combo in enumerate((self.left,self.right)):
-            combo.clear()
+            combo.blockSignals(True);combo.clear()
+            combo.addItem('请显示对比的BOM',None)
             for row in rows:
                 combo.addItem(f"{row['base_code']}{row['version']} {row['name']}  镜像{row['mirror_version']}",row['id'])
             chosen=combo.findData(previous[index])
-            combo.setCurrentIndex(chosen if chosen>=0 else min(index,len(rows)-1))
+            combo.setCurrentIndex(chosen if chosen>=0 else 0);combo.blockSignals(False)
         self.button.setEnabled(bool(rows))
     def compare(self):
-        try:rows=compare_boms(self.service,self.left.currentData(),self.right.currentData())
+        if self.left.currentData() is None or self.right.currentData() is None:return
+        try:rows=compare_boms(self.service,self.left.currentData(),self.right.currentData(),self.live_snapshot)
         except Exception as exc:
             self.clear_results();QMessageBox.warning(self,'BOM对比失败',str(exc));self.reload_choices();return
         self.clear_results()
@@ -160,6 +237,7 @@ class BomCompareDialog(QDialog):
                             item.setForeground(QColor('#202020'))
                             item.setData(RICH_TEXT_ROLE,character_diff(text,'' if field=='material_code' else peer,color))
                             font=item.font();font.setStrikeOut(side_status=='deleted');item.setFont(font)
+        self._rows=rows;self._compared=True
         self.auto_columns()
         self.align_rows()
         counts={s:sum(d.status==s for d in rows) for s in names}
