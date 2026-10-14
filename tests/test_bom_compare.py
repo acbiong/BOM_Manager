@@ -59,3 +59,39 @@ class BomCompareTests(unittest.TestCase):
   self.put(self.s,self.r,[(self.p,1,{}),(self.c,1,{})]);copy=self.s.copy_sku_bom(self.sid)
   self.put(self.s.for_sku(copy),self.r,[(self.c,1,{}),(self.p,1,{})])
   self.assertTrue(all(d.status=='same' for d in compare_boms(self.s,self.sid,copy)))
+ def test_cell_only_colors_character_emphasis_and_parent_columns(self):
+  from PyQt5.QtCore import Qt
+  from ui.bom_compare import RICH_TEXT_ROLE
+  from services.bom_compare import FIELDS
+  self.put(self.s,self.r,[(self.p,2,dict(remark='相同前缀甲相同后缀'))])
+  copy=self.s.copy_sku_bom(self.sid)
+  self.put(self.s.for_sku(copy),self.r,[(self.p,2,dict(remark='相同前缀乙相同后缀'))])
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare();left,right=dialog.tables
+   self.assertEqual([left.horizontalHeaderItem(c).text() for c in range(4)],['状态','层级','父项物料编码','物料编码'])
+   self.assertEqual(left.item(0,1).text(),'0');self.assertEqual(left.item(0,2).text(),'ROOT')
+   self.assertEqual(left.item(1,1).text(),'1');self.assertEqual(left.item(1,2).text(),'R100')
+   remark=1+[k for k,_ in FIELDS].index('remark')
+   for table,letter in ((left,'甲'),(right,'乙')):
+    for c in range(table.columnCount()):
+     item=table.item(1,c)
+     if c==remark:
+      self.assertEqual(item.background().color().name(),dialog.COLORS['modified'])
+      self.assertEqual(item.data(RICH_TEXT_ROLE),'相同前缀<b>'+letter+'</b>相同后缀')
+      self.assertFalse(item.font().bold())
+     else:
+      self.assertEqual(item.background().style(),Qt.NoBrush)
+      self.assertIsNone(item.data(RICH_TEXT_ROLE));self.assertFalse(item.font().bold())
+   dialog.show();self.app.processEvents()
+   self.assertFalse(dialog.grab().isNull())
+   left.setColumnWidth(remark,70);self.app.processEvents()
+   self.assertEqual(left.rowHeight(1),right.rowHeight(1))
+  finally:dialog.close();self.app.processEvents()
+ def test_character_diff_insert_delete_escape_multiline(self):
+  from ui.bom_compare import character_diff
+  self.assertEqual(character_diff('AB新CD','ABCD'),'AB<b>新</b>CD')
+  self.assertEqual(character_diff('ABCD','AB新CD'),'ABCD')
+  self.assertEqual(character_diff('<甲>\n&','<乙>\n&'),'&lt;<b>甲</b>&gt;<br>&amp;')
+  self.assertEqual(character_diff('相同','相同'),'相同')
+  self.assertEqual(character_diff('新增',''),'<b>新增</b>')

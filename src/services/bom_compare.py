@@ -2,7 +2,7 @@
 from collections import Counter
 from dataclasses import dataclass
 
-FIELDS = [('base_code','物料编码'),('version','版本号'),('name','物料名称'),
+FIELDS = [('level','层级'),('parent_code','父项物料编码'),('base_code','物料编码'),('version','版本号'),('name','物料名称'),
           ('description','规格'),('quantity','用量'),('unit','单位'),('grade','物料等级'),
           ('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P'),
           ('position','物料位置'),('remark','备注'),('alternates','替代料')]
@@ -18,7 +18,7 @@ class Difference:
 def snapshot(service, sku):
     scoped = service.for_sku(sku['id'])
     root = dict(scoped.material_snapshot(sku['material_id']))
-    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='')
+    root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', level=0, parent_code='ROOT')
     nodes = {None: root}
     alternate_cache = {}
     for source in scoped.bom(sku['material_id']):
@@ -29,13 +29,15 @@ def snapshot(service, sku):
                            ('base_code','version','name','description','manufacturer','mpn'))
                 for a in (dict(x) for x in scoped.alternates(row['id']))))
         row.update(children=[], alternates=alternate_cache[row['id']])
-        nodes[row['parent_node_id']]['children'].append(row)
+        parent = nodes[row['parent_node_id']]
+        row.update(level=parent['level']+1, parent_code=str(parent['base_code'])+str(parent['version']))
+        parent['children'].append(row)
         nodes[row['node_id']] = row
     return root
 
 def value(node, field):
     raw = node.get(field)
-    return f'{float(raw or 0):.1f}' if field == 'quantity' else str(raw or '')
+    return f'{float(raw or 0):.1f}' if field == 'quantity' else str(raw if raw is not None else '')
 
 def compare_boms(service, left_id, right_id):
     skus = {s['id']: dict(s) for s in service.skus()}
