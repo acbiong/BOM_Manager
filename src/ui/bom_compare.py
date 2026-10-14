@@ -5,6 +5,7 @@ from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
 from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence, QFontMetrics, QFont, QTextOption
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
     QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut)
+from ui.bom_compare_table import BomCompareTable
 from services.bom_compare import FIELDS,compare_boms,value
 
 RICH_TEXT_ROLE = Qt.UserRole + 1
@@ -15,13 +16,15 @@ def display_value(node, field):
     if field=='material_code':return value(node,'base_code')+value(node,'version')
     return value(node,field)
 
-def character_diff(text, other):
+def character_diff(text, other, color=None):
     """Escape literal material text; bold only nonmatching character spans."""
     chunks = []
     for operation, start, end, _, _ in SequenceMatcher(None,text,other,autojunk=False).get_opcodes():
         if start == end:continue
         fragment = escape(text[start:end])
-        chunks.append(fragment if operation == 'equal' else '<b>'+fragment+'</b>')
+        highlight='<b>'+fragment+'</b>'
+        if color:highlight='<span style="background-color: '+color+'; color: #202020;">'+highlight+'</span>'
+        chunks.append(fragment if operation == 'equal' else highlight)
     return ''.join(chunks).replace('\n','<br>')
 
 class DifferenceDelegate(QStyledItemDelegate):
@@ -51,14 +54,15 @@ class DifferenceDelegate(QStyledItemDelegate):
         return QSize(opt.rect.width(),int(self.document(opt,index).size().height())+6)
 
 class BomCompareDialog(QDialog):
-    COLORS={'added':'#b9e9c3','deleted':'#f2b4b4','modified':'#ffe49a'}
+    COLORS={'added':'#82d99b','deleted':'#f28b82','modified':'#ffc35c'}
+    ROW_COLOR='#fff6cf'
     def __init__(self,service,parent=None):
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
         self.setSizeGripEnabled(True)
         self.service=service;self.setWindowTitle('BOM对比');self.resize(1400,800)
         layout=QVBoxLayout(self)
-        legend=QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。绿色：右侧新增；黄色：差异单元格；红色删除线：右侧删除；仅差异文字加粗。父项变化不计入子项差异。序号按对齐后的展示顺序生成，不改变原BOM。')
+        legend=QLabel('对比已保存的BOM（不包含编辑窗口中未保存的修改）。淡黄色行：存在差异；变化文字背景绿色：新增，红色：删除，橙黄色：修改，并加粗。父项变化不计入子项差异。序号按对齐后的展示顺序生成，不改变原BOM。')
         legend.setWordWrap(True);layout.addWidget(legend)
         self.fullscreen_button=QPushButton('全屏（F11）');self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
         layout.addWidget(self.fullscreen_button)
@@ -72,12 +76,13 @@ class BomCompareDialog(QDialog):
         tables=QHBoxLayout();layout.addLayout(tables,1)
         self.tables=[]
         for side in range(2):
-            table=QTableWidget(0,len(DISPLAY_FIELDS)+1);self.tables.append(table);tables.addWidget(table,1)
+            table=BomCompareTable(0,len(DISPLAY_FIELDS)+1);self.tables.append(table);tables.addWidget(table,1)
             table.setHorizontalHeaderLabels(['状态']+[label for _,label in DISPLAY_FIELDS])
             table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
             table.setSelectionBehavior(QAbstractItemView.SelectRows)
             table.setSelectionMode(QAbstractItemView.SingleSelection)
             table.setItemDelegate(DifferenceDelegate(table))
+            table.frozen.setItemDelegate(DifferenceDelegate(table.frozen))
             table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
             table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
             table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -88,6 +93,7 @@ class BomCompareDialog(QDialog):
         self._syncing_selection=False
         a,b=self.tables
         for source,target in [(a,b),(b,a)]:
+            source.layoutChanged.connect(lambda:self.row_timer.start(0))
             source.itemSelectionChanged.connect(lambda s=source,t=target:self.sync_selection(s,t))
             source.verticalScrollBar().valueChanged.connect(target.verticalScrollBar().setValue)
             source.horizontalScrollBar().valueChanged.connect(target.horizontalScrollBar().setValue)
@@ -139,15 +145,17 @@ class BomCompareDialog(QDialog):
                     item=QTableWidgetItem(text);table.setItem(r,c,item);item.setToolTip(text)
                     field=DISPLAY_FIELDS[c-1][0] if c else 'status'
                     if field in ('status','level','serial','unit','quantity','mp_flag'):item.setTextAlignment(Qt.AlignCenter)
-                    # Status is metadata, not a changed BOM field. Empty/identical cells stay unstyled.
+                    if diff.status!='same':
+                        item.setBackground(QColor(self.ROW_COLOR));item.setForeground(QColor('#202020'))
+                    # Only differing character spans get a stronger highlight.
                     if c and node:
                         peer=display_value(other,DISPLAY_FIELDS[c-1][0]) if other else ''
                         field=DISPLAY_FIELDS[c-1][0]
                         changed=field in diff.changed or (field=='material_code' and bool({'base_code','version'}.intersection(diff.changed)))
                         if text!=peer and (other is None or changed):
-                            item.setBackground(QColor(self.COLORS[side_status if diff.status=='replaced' or other is None else 'modified']))
+                            color=self.COLORS[side_status if diff.status=='replaced' or other is None else 'modified']
                             item.setForeground(QColor('#202020'))
-                            item.setData(RICH_TEXT_ROLE,character_diff(text,peer))
+                            item.setData(RICH_TEXT_ROLE,character_diff(text,peer,color))
                             font=item.font();font.setStrikeOut(side_status=='deleted');item.setFont(font)
         self.auto_columns()
         self.align_rows()
@@ -158,7 +166,7 @@ class BomCompareDialog(QDialog):
 
     def auto_columns(self):
         font=QFont(self.font());font.setBold(True);metrics=QFontMetrics(font)
-        self.max_column_width=metrics.horizontalAdvance('中')*40
+        self.max_column_width=metrics.horizontalAdvance('中')*30
         for table in self.tables:table.horizontalHeader().setMaximumSectionSize(self.max_column_width)
         for col in range(self.tables[0].columnCount()):
             width=metrics.horizontalAdvance(self.tables[0].horizontalHeaderItem(col).text())+20
@@ -188,5 +196,11 @@ class BomCompareDialog(QDialog):
         for table in self.tables:table.resizeRowsToContents()
         for row in range(self.tables[0].rowCount()):
             height=max(t.rowHeight(row) for t in self.tables)
+            for table in self.tables:
+                if table.frozen.isVisible():
+                    option=QStyleOptionViewItem();option.widget=table.frozen
+                    for col in table.FROZEN_COLUMNS:
+                        height=max(height,table.frozen.itemDelegate().sizeHint(option,table.model().index(row,col)).height())
             for table in self.tables:table.setRowHeight(row,height)
         for bar in bars:bar.setValue(position);bar.blockSignals(False)
+        for table in self.tables:table.sync_frozen()

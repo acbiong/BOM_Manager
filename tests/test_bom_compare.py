@@ -37,8 +37,8 @@ class BomCompareTests(unittest.TestCase):
   try:
    dialog.compare();a,b=dialog.tables
    self.assertEqual(a.rowCount(),5);self.assertTrue(a.item(1,1).font().strikeOut())
-   self.assertEqual(a.item(2,1).background().color().name(),dialog.COLORS['deleted'])
-   self.assertEqual(b.item(4,1).background().color().name(),dialog.COLORS['added'])
+   self.assertEqual(a.item(2,1).background().color().name(),dialog.ROW_COLOR)
+   self.assertEqual(b.item(4,1).background().color().name(),dialog.ROW_COLOR)
    self.assertEqual(a.item(4,1).text(),'');self.assertEqual(b.item(1,1).text(),'')
    self.assertEqual(a.rowHeight(1),b.rowHeight(1))
    dialog.right.setCurrentIndex(0);self.assertEqual(a.rowCount(),0)
@@ -77,11 +77,11 @@ class BomCompareTests(unittest.TestCase):
     for c in range(table.columnCount()):
      item=table.item(1,c)
      if c==remark:
-      self.assertEqual(item.background().color().name(),dialog.COLORS['modified'])
-      self.assertEqual(item.data(RICH_TEXT_ROLE),'相同前缀<b>'+letter+'</b>相同后缀')
+      self.assertEqual(item.background().color().name(),dialog.ROW_COLOR)
+      self.assertEqual(item.data(RICH_TEXT_ROLE),'相同前缀<span style="background-color: '+dialog.COLORS['modified']+'; color: #202020;"><b>'+letter+'</b></span>相同后缀')
       self.assertFalse(item.font().bold())
      else:
-      self.assertEqual(item.background().style(),Qt.NoBrush)
+      self.assertEqual(item.background().color().name(),dialog.ROW_COLOR)
       self.assertIsNone(item.data(RICH_TEXT_ROLE));self.assertFalse(item.font().bold())
    dialog.show();self.app.processEvents()
    self.assertFalse(dialog.grab().isNull())
@@ -109,7 +109,7 @@ class BomCompareTests(unittest.TestCase):
    dialog.compare()
    for table in dialog.tables:
     self.assertEqual(table.item(2,3).background().style(),Qt.NoBrush)
-    self.assertEqual(table.item(3,3).background().style(),Qt.NoBrush)
+    self.assertEqual(table.item(3,3).background().color().name(),dialog.ROW_COLOR)
    self.assertNotEqual(dialog.tables[0].item(2,3).text(),dialog.tables[1].item(2,3).text())
   finally:dialog.close()
  def test_sequence_alignment_keeps_insertions_by_anchor_and_replacements_together(self):
@@ -154,9 +154,9 @@ class BomCompareTests(unittest.TestCase):
    dialog.compare();left,right=dialog.tables
    self.assertNotIn('版本号',[left.horizontalHeaderItem(c).text() for c in range(left.columnCount())])
    self.assertEqual(left.item(1,4).text(),'C100');self.assertEqual(right.item(1,4).text(),'C101')
-   self.assertEqual(left.item(1,4).data(RICH_TEXT_ROLE),'C10<b>0</b>')
-   self.assertEqual(right.item(1,4).data(RICH_TEXT_ROLE),'C10<b>1</b>')
-   self.assertEqual(left.item(1,4).background().color().name(),dialog.COLORS['modified'])
+   self.assertEqual(left.item(1,4).data(RICH_TEXT_ROLE),'C10<span style="background-color: '+dialog.COLORS['modified']+'; color: #202020;"><b>0</b></span>')
+   self.assertEqual(right.item(1,4).data(RICH_TEXT_ROLE),'C10<span style="background-color: '+dialog.COLORS['modified']+'; color: #202020;"><b>1</b></span>')
+   self.assertEqual(left.item(1,4).background().color().name(),dialog.ROW_COLOR)
   finally:dialog.close()
  def test_click_keyboard_and_blank_partner_row_selection(self):
   from PyQt5.QtCore import Qt
@@ -211,9 +211,9 @@ class BomCompareTests(unittest.TestCase):
   try:
    dialog.compare();left,right=dialog.tables
    self.assertEqual(left.item(1,0).text(),'删除');self.assertEqual(right.item(1,0).text(),'新增')
-   self.assertEqual(left.item(1,4).background().color().name(),dialog.COLORS['deleted'])
+   self.assertEqual(left.item(1,4).background().color().name(),dialog.ROW_COLOR)
    self.assertTrue(left.item(1,4).font().strikeOut())
-   self.assertEqual(right.item(1,4).background().color().name(),dialog.COLORS['added'])
+   self.assertEqual(right.item(1,4).background().color().name(),dialog.ROW_COLOR)
    self.assertIn('新增：2',dialog.summary.text());self.assertIn('删除：2',dialog.summary.text())
   finally:dialog.close()
  def test_aligned_serials_are_display_only_and_preserve_database_order(self):
@@ -244,3 +244,36 @@ class BomCompareTests(unittest.TestCase):
   matched=[(a,b) for a,b in pairs if a is not None]
   self.assertTrue(all(a['base_code']==b['base_code']=='SAME' for a,b in matched))
   self.assertEqual(len(matched),2)
+ def test_sticky_columns_threshold_selection_and_scroll(self):
+  from PyQt5.QtCore import Qt
+  from PyQt5.QtTest import QTest
+  from PyQt5.QtGui import QFontMetrics,QFont
+  children=[(self.s.create_material(dict(base_code=f'X{i}',version='100',name='物料'+str(i),unit='pcs')),1,{}) for i in range(40)]
+  self.put(self.s,self.r,children);self.s.copy_sku_bom(self.sid)
+  dialog=BomCompareDialog(self.s)
+  try:
+   dialog.compare();dialog.show();self.app.processEvents();left,right=dialog.tables
+   font=QFont(dialog.font());font.setBold(True)
+   self.assertEqual(dialog.max_column_width,QFontMetrics(font).horizontalAdvance('中')*30)
+   threshold=left.columnWidth(0)+left.columnWidth(1)
+   left.horizontalScrollBar().setValue(threshold-1);self.assertFalse(left.frozen.isVisible())
+   left.horizontalScrollBar().setValue(threshold);self.app.processEvents()
+   for table in dialog.tables:
+    self.assertTrue(table.frozen.isVisible())
+    self.assertEqual([c for c in range(table.columnCount()) if not table.frozen.isColumnHidden(c)],[2,3,4,5])
+   index=left.model().index(2,4)
+   QTest.mouseClick(left.frozen.viewport(),Qt.LeftButton,pos=left.frozen.visualRect(index).center())
+   for table in dialog.tables:self.assertEqual({i.row() for i in table.selectedIndexes()},{2})
+   left.verticalScrollBar().setValue(200);self.app.processEvents()
+   self.assertEqual(left.frozen.rowAt(0),left.rowAt(0));self.assertEqual(right.frozen.rowAt(0),right.rowAt(0))
+   left.horizontalScrollBar().setValue(0);self.assertFalse(left.frozen.isVisible());self.assertFalse(right.frozen.isVisible())
+  finally:dialog.close();self.app.processEvents()
+ def test_character_background_only_changes_and_row_hint(self):
+  from ui.bom_compare import character_diff,RICH_TEXT_ROLE
+  from PyQt5.QtGui import QTextDocument,QTextCursor,QColor
+  html=character_diff('前甲后','前乙后','#ffc35c');doc=QTextDocument();doc.setHtml(html)
+  for pos in range(3):
+   cursor=QTextCursor(doc);cursor.setPosition(pos);cursor.movePosition(QTextCursor.Right,QTextCursor.KeepAnchor)
+   fmt=cursor.charFormat()
+   if pos==1:self.assertEqual(fmt.background().color(),QColor('#ffc35c'));self.assertGreater(fmt.fontWeight(),50)
+   else:self.assertEqual(fmt.background().style(),0);self.assertEqual(fmt.fontWeight(),50)
