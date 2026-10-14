@@ -167,7 +167,7 @@ class BomCompareDialog(QDialog):
 
     def auto_columns(self):
         font=QFont(self.font());font.setBold(True);metrics=QFontMetrics(font)
-        self.max_column_width=metrics.horizontalAdvance('中')*30
+        self.max_column_width=metrics.horizontalAdvance('中')*20
         for table in self.tables:table.horizontalHeader().setMaximumSectionSize(self.max_column_width)
         for col in range(self.tables[0].columnCount()):
             width=metrics.horizontalAdvance(self.tables[0].horizontalHeaderItem(col).text())+20

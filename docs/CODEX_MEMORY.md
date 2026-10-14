@@ -390,3 +390,7 @@ replaced现在左右统一显示换料，独立计数不计增删；新增exchan
 
 ### 2026-10-14 对比点击稳定性
 全屏按钮改为与legend同排右上角Fixed尺寸。sync_selection只同步selection，禁止为对侧设置currentIndex（可能引发Qt延迟滚动）。FrozenComparisonView.scrollTo不执行定位，由主体控制滚动；双方setAutoScroll(False)，主表鼠标点击期间忽略scrollTo但键盘仍正常。新增即时/等待1.2秒视口和行高不变测试。
+
+
+### 2026-10-14 BOM对比最大列宽更新
+BOM对比窗口默认最大列宽由30字符调整为20字符（按当前字体中文字符宽度计算），保留自动换行、同步行高和冻结列。更新现有列宽上限回归断言，收尾流程执行全量测试及AppImage打包。此规则覆盖此前30字符设置。

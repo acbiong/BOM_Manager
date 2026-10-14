@@ -254,7 +254,7 @@ class BomCompareTests(unittest.TestCase):
   try:
    dialog.compare();dialog.show();self.app.processEvents();left,right=dialog.tables
    font=QFont(dialog.font());font.setBold(True)
-   self.assertEqual(dialog.max_column_width,QFontMetrics(font).horizontalAdvance('中')*30)
+   self.assertEqual(dialog.max_column_width,QFontMetrics(font).horizontalAdvance('中')*20)
    threshold=left.columnWidth(0)+left.columnWidth(1)
    left.horizontalScrollBar().setValue(threshold-1);self.assertFalse(left.frozen.isVisible())
    left.horizontalScrollBar().setValue(threshold);self.app.processEvents()
