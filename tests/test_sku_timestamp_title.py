@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 from PyQt5.QtWidgets import QApplication, QFileDialog
 from database.database import Database
 from services.services import Services
+from ui.time_display import sku_timestamp
 from ui.main_window import MainWindow, MaterialWindow
 
 
@@ -43,7 +44,7 @@ class SkuTimestampTitleTests(unittest.TestCase):
         for row in self.s.skus():
             self.assertEqual(row['updated_at'] != '2000-01-01 00:00:00', row['material_id'] in changed)
         self.assertEqual([self.w.table.item(i, 5).text() for i in range(3)],
-                         [r['updated_at'] for r in self.s.skus()])
+                         [sku_timestamp(r['updated_at']) for r in self.s.skus()])
 
     def test_local_quantity_does_not_touch_other_skus(self):
         self.reset_times()
@@ -113,7 +114,7 @@ class SkuTimestampTitleTests(unittest.TestCase):
                 self.assertEqual(stored,current[root])
             self.assertEqual(current[self.unrelated],previous[self.unrelated])
             displayed={int(self.w.table.item(i,6).text()):self.w.table.item(i,5).text() for i in range(self.w.table.rowCount())}
-            for sku in self.s.skus():self.assertEqual(displayed[sku['id']],sku['updated_at'])
+            for sku in self.s.skus():self.assertEqual(displayed[sku['id']],sku_timestamp(sku['updated_at']))
             previous=current
         self.s.save_bom(self.parent,[dict(material_id=self.child,quantity=3,unit='pcs')])
         self.assertEqual({row['material_id']:row['updated_at'] for row in self.s.skus()},previous)

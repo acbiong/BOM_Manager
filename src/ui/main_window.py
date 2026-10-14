@@ -1,3 +1,4 @@
+from ui.time_display import sku_timestamp
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, pyqtSignal, QSettings, QTimer, QEvent, QSize, QSortFilterProxyModel
@@ -316,7 +317,7 @@ class MainWindow(QMainWindow):
   self.setWindowTitle(title)
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
-   btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(r['updated_at'] or '')); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
+   btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(sku_timestamp(r['updated_at']))); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
   self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
