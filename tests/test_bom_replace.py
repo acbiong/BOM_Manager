@@ -80,7 +80,7 @@ class BomReplaceTests(unittest.TestCase):
     with patch.object(MaterialSelectionDialog,'getItem',return_value=('N1 N',True)),patch.object(ReplacementSelectionDialog,'exec_',choose):w.replace_material(old)
     for index in (0,1):
      parent=w.root_item.child(index);new=parent.child(1)
-     self.assertTrue(parent.child(0).data(0,Qt.UserRole)['_deleted']);self.assertEqual(new.text(1),f'{index+1}.0')
+     self.assertTrue(parent.child(0).data(0,Qt.UserRole)['_deleted']);self.assertEqual(new.text(1),f'{index+1}')
      self.assertEqual(new.text(3),('A','B')[index]);self.assertEqual(w.alternate_ids(new),[ids[('ALT1','ALT2')[index]]])
     for index in (2,3):self.assertFalse(w.root_item.child(index).child(0).data(0,Qt.UserRole).get('_deleted',False))
     with patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning') as warning:self.assertTrue(w.save());warning.assert_not_called()

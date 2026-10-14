@@ -1,3 +1,4 @@
+from domain.quantity import format_quantity
 """Read-only, parent-local comparison of saved SKU/mirror graphs."""
 from difflib import SequenceMatcher
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ def snapshot(service, sku):
 
 def value(node, field):
     raw = node.get(field)
-    return f'{float(raw or 0):.1f}' if field == 'quantity' else str(raw if raw is not None else '')
+    return format_quantity(raw) if field == 'quantity' else str(raw if raw is not None else '')
 
 def is_exchange(left,right):
     """A reciprocal main/alternate change, not merely an alternate addition."""

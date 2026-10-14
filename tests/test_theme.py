@@ -27,5 +27,5 @@ class ThemeTests(unittest.TestCase):
     for widget in (main,material,bom):self.assertEqual(widget.palette().color(QPalette.Window),QColor('#24262b'))
     dialog=QDialog(main);field=QLineEdit(dialog);self.assertEqual(field.palette().color(QPalette.Base),QColor('#1c1e22'));dialog.close()
     self.assertIn('月亮',main.theme_button.toolTip());self.assertFalse(main.theme_button.icon().isNull())
-    main.theme_button.click();self.app.processEvents();self.assertEqual(bom.palette().color(QPalette.Window),QColor('#f5f6f8'));self.assertEqual(node.text(1),'2.0');self.assertTrue(bom.dirty);self.assertIn('太阳',main.theme_button.toolTip())
+    main.theme_button.click();self.app.processEvents();self.assertEqual(bom.palette().color(QPalette.Window),QColor('#f5f6f8'));self.assertEqual(node.text(1),'2');self.assertTrue(bom.dirty);self.assertIn('太阳',main.theme_button.toolTip())
    finally:bom.dirty=False;bom.close();material.close();main.set_theme(False);main.close();db.close()

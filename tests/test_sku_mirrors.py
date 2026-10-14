@@ -82,7 +82,7 @@ class MirrorTests(unittest.TestCase):
    s.save_bom(p,[dict(material_id=c,quantity=3,unit='pcs')])
    w=BomWindow(mirror,r)
    try:
-    node=w.insert_material(w.root_item,s.material_snapshot(p));self.assertEqual(node.childCount(),1);self.assertEqual(node.child(0).text(1),'3.0')
+    node=w.insert_material(w.root_item,s.material_snapshot(p));self.assertEqual(node.childCount(),1);self.assertEqual(node.child(0).text(1),'3')
     self.assertEqual(mirror.bom(r),[])
     with patch.object(QMessageBox,'information'):self.assertTrue(w.save())
     s.save_bom(p,[dict(material_id=c,quantity=9,unit='pcs')]);self.assertEqual(mirror.bom(p)[0]['quantity'],3)

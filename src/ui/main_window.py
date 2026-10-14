@@ -1,3 +1,5 @@
+from PyQt5.QtCore import QEventLoop
+from domain.quantity import format_quantity
 from ui.time_display import sku_timestamp
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
@@ -28,11 +30,12 @@ class WrappingTextEdit(QPlainTextEdit):
 
 class QuantityEdit(QDoubleSpinBox):
  def __init__(self):
-  super().__init__(); self.setDecimals(1); self.setRange(0.1,1e12); self.setSingleStep(0.1); self.setValue(1.0)
+  super().__init__(); self.setDecimals(12); self.setRange(0.000000000001,1e12); self.setSingleStep(0.1); self.setValue(1.0)
  def setText(self,value):
   self.setValue(float(value or 1.0))
  def text(self):
-  return f'{self.value():.1f}'
+  return format_quantity(self.value())
+ def textFromValue(self,value):return format_quantity(value)
 
 class MaterialDialog(QDialog):
  def __init__(self,parent=None,data=None,readonly_keys=None):
@@ -723,7 +726,7 @@ class BomWindow(QMainWindow):
    data=dict(added.data(0,Qt.UserRole) or {})
    for field,column in [('quantity',1),('position',3),('remark',4)]:
     data[field]=original.get(field,1.0 if field=='quantity' else '')
-    added.setText(column,f"{data[field]:.1f}" if field=='quantity' else str(data[field] or ''))
+    added.setText(column,format_quantity(data[field]) if field=='quantity' else str(data[field] or ''))
    added.setData(0,Qt.UserRole,data)
    alternates=self.alternate_ids(old)
    if swap_alternate:alternates=[original['material_id'] if mid==material['id'] else mid for mid in alternates]
@@ -837,7 +840,7 @@ class BomWindow(QMainWindow):
     removed_data['_delete_stack']=list(removed_data.get('_delete_stack',[]))+[deletion_token]
     removed_data['_deleted']=True; removed.setData(0,Qt.UserRole,removed_data)
     pending.extend(removed.child(i) for i in range(removed.childCount()))
-  self.mark_dirty(); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
+  self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
  @preserve_bom_view
  def restore_relation(self,item):
   data=item.data(0,Qt.UserRole) or {}
@@ -1010,7 +1013,7 @@ class BomWindow(QMainWindow):
    data=dict(node['data']); data.setdefault('_edit_base',{k:data.get(k) for k in ('quantity','position','remark')}); parent_data=parent.data(0,Qt.UserRole) or {}
    node_id=f"{path}/{data['id']}"
    data.update(node_id=node_id,parent_node_id=path or None,parent_material_id=parent_data['material_id'],parent_item_id=parent_data.get('id'),level_no=level)
-   item=QTreeWidgetItem(parent,[f"{data['base_code']}{data['version']} {data['name']}",f"{data['quantity']:.1f}",data['unit'],data.get('position',''),data.get('remark','')]); item.setData(0,Qt.UserRole,data); self.by[node_id]=item
+   item=QTreeWidgetItem(parent,[f"{data['base_code']}{data['version']} {data['name']}",format_quantity(data['quantity']),data['unit'],data.get('position',''),data.get('remark','')]); item.setData(0,Qt.UserRole,data); self.by[node_id]=item
    for child in node['children']:append(child,item,node_id,level+1)
   for node in nodes:append(node,self.root_item,'',1)
   for key,item in self.expansion_nodes():
@@ -1095,7 +1098,7 @@ class BomWindow(QMainWindow):
  def update_tree_field(self,key,value):
   if self._loading_fields or self.current_item is None or self.current_item is getattr(self,'root_item',None): return
   if (self.current_item.data(0,Qt.UserRole) or {}).get('_deleted'):return
-  value=f'{float(value):.1f}' if key=='quantity' else value
+  value=format_quantity(value) if key=='quantity' else value
   col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); d=self.current_item.data(0,Qt.UserRole) or {}; d[key]=float(value) if key=='quantity' and value else value; self.current_item.setData(0,Qt.UserRole,d); self.mark_dirty()
  def add_relative(self,parent,child):
   target=self.by.get(parent.get('node_id'),self.root_item) if child else (self.by.get(parent.get('parent_node_id'),self.root_item) or self.root_item)
@@ -1111,7 +1114,7 @@ class BomWindow(QMainWindow):
   if hasattr(self.svc,'ensure_material_bom'):self.svc.ensure_material_bom(r['id'])
   parent=target.data(0,Qt.UserRole) or {}
   self._deleted_relations.discard((parent.get('material_id'),r['id'],''))
-  item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1.0',r['unit'],'',''])
+  item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1',r['unit'],'',''])
   if after is not None and after.parent() is target:
    target.takeChild(target.indexOfChild(item));target.insertChild(target.indexOfChild(after)+1,item)
   temporary_id=-id(item); data=dict(r)
@@ -1128,7 +1131,7 @@ class BomWindow(QMainWindow):
   parent_data=parent_item.data(0,Qt.UserRole) or {}
   for row in rows:
    if row['child_material_id'] in ancestors:continue
-   child=QTreeWidgetItem(parent_item,[f"{row['base_code']}{row['version']} {row['name']}",f"{row['quantity']:.1f}",row['material_unit'],row['position'],row['remark']]); d=dict(row); d['_added']=parent_data.get('_added',False); d['_db_alternates']=[a['material_id'] for a in self.svc.alternates(row['id'])]; d.update({'material_id':row['child_material_id'],'unit':row['material_unit'],'parent_item_id':parent_data.get('id'),'level_no':(parent_data.get('level_no') or 0)+1}); d.update(node_id=f"{parent_data.get('node_id')}/{row['id']}",parent_node_id=parent_data.get('node_id')); child.setData(0,Qt.UserRole,d); self.by[d['node_id']]=child; self.add_existing_children(child,row['child_material_id'],ancestors)
+   child=QTreeWidgetItem(parent_item,[f"{row['base_code']}{row['version']} {row['name']}",format_quantity(row['quantity']),row['material_unit'],row['position'],row['remark']]); d=dict(row); d['_added']=parent_data.get('_added',False); d['_db_alternates']=[a['material_id'] for a in self.svc.alternates(row['id'])]; d.update({'material_id':row['child_material_id'],'unit':row['material_unit'],'parent_item_id':parent_data.get('id'),'level_no':(parent_data.get('level_no') or 0)+1}); d.update(node_id=f"{parent_data.get('node_id')}/{row['id']}",parent_node_id=parent_data.get('node_id')); child.setData(0,Qt.UserRole,d); self.by[d['node_id']]=child; self.add_existing_children(child,row['child_material_id'],ancestors)
   parent_item.setExpanded(True)
  def alternate_key(self,item):
   data=item.data(0,Qt.UserRole) or {}
@@ -1242,11 +1245,18 @@ class BomWindow(QMainWindow):
   data=item.data(0,Qt.UserRole) or {}
   def append(node,parent,path,level):
    d=dict(node['data']); d['_added']=d.get('_added',True); d.update(parent_material_id=data.get('material_id'),parent_item_id=data.get('id'),node_id=f'{path}/{d["id"]}',parent_node_id=path,level_no=level)
-   child=QTreeWidgetItem(parent,[f"{d['base_code']}{d['version']} {d['name']}",f"{d['quantity']:.1f}",d['unit'],d.get('position',''),d.get('remark','')]);child.setData(0,Qt.UserRole,d)
+   child=QTreeWidgetItem(parent,[f"{d['base_code']}{d['version']} {d['name']}",format_quantity(d['quantity']),d['unit'],d.get('position',''),d.get('remark','')]);child.setData(0,Qt.UserRole,d)
    for grand in node['children']:append(grand,child,d['node_id'],level+1)
   for node in nodes:append(node,item,data.get('node_id',''),(data.get('level_no') or 0)+1)
   item.setExpanded(True);self.mark_dirty();self.tree.setCurrentItem(item);self.show_item_info(item)
  def save(self):
+  if self._saving:return False
+  progress=QProgressDialog('正在整理BOM…',None,0,100,self)
+  progress.setWindowTitle('保存BOM');progress.setWindowModality(Qt.ApplicationModal);progress.setMinimumDuration(0);progress.setAutoClose(False);progress.show()
+  def report(value,message):
+   progress.setLabelText(message);progress.setValue(value)
+   QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+  report(0,'正在整理BOM…')
   self._saving=True
   try:
    rows=[]
@@ -1258,14 +1268,17 @@ class BomWindow(QMainWindow):
     rows.append(d)
     for j in range(it.childCount()): walk(it.child(j),d['material_id'])
    for j in range(self.root_item.childCount()): walk(self.root_item.child(j),self.root)
-   self.svc.save_bom(self.root,rows)
+   self.svc.save_bom(self.root,rows,progress=lambda n,text:report(int(n*0.85),text))
+   report(90,'正在刷新BOM显示…')
+   self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+   report(100,'BOM保存完成')
   except Exception as error:
    self.mark_dirty()
    QMessageBox.warning(self,'保存失败',f'BOM未保存，编辑内容已保留。\n{error}')
    return False
   finally:
    self._saving=False
-  self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+   progress.close()
   QMessageBox.information(self,'保存','BOM已保存')
   return True
 
@@ -1458,7 +1471,7 @@ class MaterialWindow(QMainWindow):
   quantities=self.svc.sku_material_quantities(skus)
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
-   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+[format(quantities[sku['id']][r['id']].quantize(Decimal('0.1'),rounding=ROUND_HALF_UP),'.1f') if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
+   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+[format_quantity(quantities[sku['id']][r['id']]) if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
     item=QTableWidgetItem(str(v or '')); item.setData(Qt.UserRole,r['id'])
     if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
     if j>=base:

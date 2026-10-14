@@ -50,7 +50,7 @@ class BomExportLayoutTests(unittest.TestCase):
          edge=getattr(cell.border,side);self.assertEqual(edge.style,'thin');self.assertEqual(edge.color.rgb,'FF000000')
         if headers[cell.column-1] in centered:self.assertEqual(cell.alignment.horizontal,'center')
         if cell.row==1:self.assertTrue(cell.font.bold)
-       if cells[0].row>1:self.assertEqual(cells[9].number_format,'0.0')
+       if cells[0].row>1:self.assertEqual(cells[9].number_format,'0.############')
      finally:wb.close()
     empty=s.create_sku(s.create_material(dict(base_code='EMPTY',version='1',name='空',unit='pcs')))
     s.export_sku(empty,Path(tmp)/'empty.xlsx');wb=load_workbook(Path(tmp)/'empty.xlsx')

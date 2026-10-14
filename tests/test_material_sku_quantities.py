@@ -26,14 +26,14 @@ class MaterialSkuQuantityTests(unittest.TestCase):
     row=next(i for i in range(w.t.rowCount()) if w.t.item(i,0).text()==code)
     return w.t.item(row,11+w._sku_column_ids.index(sid)).text()
    try:
-    self.assertEqual(w.t.columnCount(),13);self.assertEqual(value('C',z),'9.0');self.assertEqual(value('Z',z),'1.0');self.assertEqual(value('C',a),'NA');self.assertEqual(value('X',z),'NA')
+    self.assertEqual(w.t.columnCount(),13);self.assertEqual(value('C',z),'9');self.assertEqual(value('Z',z),'1');self.assertEqual(value('C',a),'NA');self.assertEqual(value('X',z),'NA')
     w._selected_skus={a,z};w.refresh()
-    w._filters[11]=('',{'9.0'});w.apply_filters()
-    main.sort_skus(1);self.assertEqual(w._sku_column_ids,[a,z]);self.assertEqual(standalone._sku_column_ids,[a,z]);self.assertIn(12,w._filters);self.assertEqual(value('C',z),'9.0')
+    w._filters[11]=('',{'9'});w.apply_filters()
+    main.sort_skus(1);self.assertEqual(w._sku_column_ids,[a,z]);self.assertEqual(standalone._sku_column_ids,[a,z]);self.assertIn(12,w._filters);self.assertEqual(value('C',z),'9')
     self.assertEqual(w._column_labels[11],'A1\nA');main.refresh();self.assertEqual(w._sku_column_ids,[a,z])
-    s.save_bom(ids['P'],[dict(material_id=ids['C'],quantity=2,unit='pcs')]);self.assertEqual(value('C',z),'10.0')
+    s.save_bom(ids['P'],[dict(material_id=ids['C'],quantity=2,unit='pcs')]);self.assertEqual(value('C',z),'10')
     s.delete_sku(z);self.assertEqual(w._sku_column_ids,[a]);self.assertEqual(w._filters,{})
-    new=s.create_sku(ids['X']);self.assertIn(new,w._sku_column_ids);self.assertEqual(value('X',new),'1.0')
+    new=s.create_sku(ids['X']);self.assertIn(new,w._sku_column_ids);self.assertEqual(value('X',new),'1')
    finally:standalone.close();w.close();main.close();db.close()
  def test_decimal_shared_subtree_and_zero_skus(self):
   with tempfile.TemporaryDirectory() as tmp:
@@ -64,7 +64,7 @@ class MaterialSkuQuantityTests(unittest.TestCase):
     self.assertLess(width,w.t.horizontalHeader().fontMetrics().horizontalAdvance('很长的SKU名称'*12))
     for size in (2400,700):
      w.resize(size,500);self.app.processEvents();self.app.processEvents();self.assertEqual(w.t.columnWidth(ca),width)
-    w._filters[ca]=('',{'2.0'});w.apply_filters()
+    w._filters[ca]=('',{'2'});w.apply_filters()
     self.assertIn('SKU-A100\n'+'很长的SKU名称'*12,w.t.horizontalHeaderItem(ca).toolTip())
     def cell(code,col):
      row=next(i for i in range(w.t.rowCount()) if w.t.item(i,0).text()==code)

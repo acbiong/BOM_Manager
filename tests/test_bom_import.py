@@ -26,7 +26,7 @@ class BomImportTests(unittest.TestCase):
   dialog=MaterialHeaderMappingDialog(self.path,error.exception.headers,error.exception.missing,sheet_name='BOM',required=self.s.BOM_HEADERS)
   self.assertEqual(dialog.preview.item(0,0).text(),'P');self.assertEqual(dialog.mapping_table.columnCount(),6)
   mapping=dict(zip(self.s.BOM_HEADERS,headers));self.assertEqual(self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',header_mapping=mapping),2)
-  rows=self.s.bom(self.ids['R','1']);self.assertEqual([(r['material_id'],r['level_no']) for r in rows],[(self.ids['P','2'],1),(self.ids['C','1'],2)]);self.assertEqual(rows[1]['quantity'],2.3);self.assertEqual(self.s.bom(self.ids['P','1']),[]);dialog.close()
+  rows=self.s.bom(self.ids['R','1']);self.assertEqual([(r['material_id'],r['level_no']) for r in rows],[(self.ids['P','2'],1),(self.ids['C','1'],2)]);self.assertEqual(rows[1]['quantity'],2.34);self.assertEqual(self.s.bom(self.ids['P','1']),[]);dialog.close()
  def test_validation_failure_never_partially_writes(self):
   valid=['R','1','P','2',1,'']
   bad_rows=[['P','2','R','1',1,''],['R','1','P','2',2,'different'],['P','1','C','1',1,''],['P','9','C','1',1,''],['P','2','C','1','nan',''],['P','2','P','2',1,'']]

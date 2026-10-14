@@ -26,16 +26,16 @@ class BomUiTests(unittest.TestCase):
   self.w.dirty=False; self.w.close(); self.db.conn.close(); self.tmp.cleanup()
  def test_material_update_refresh_and_quantity_cache(self):
   r,p,c,o,x=self.ids; parent=self.w.root_item.child(0)
-  self.assertEqual(parent.text(1),'1.0')
+  self.assertEqual(parent.text(1),'1')
   self.w.show_item_info(parent); self.w.fields['quantity'].setValue(2.34)
-  self.assertEqual(parent.text(1),'2.3')
+  self.assertEqual(parent.text(1),'2.34')
   self.s.update_material(p,dict(name='修改后的名称',unit='pcs'))
   self.assertTrue(self.w.refresh_action.isEnabled()); self.assertEqual(self.w.statusBar().currentMessage(),''); self.assertEqual(self.w.notice.text(),'BOM有更新，请点击刷新或重新打开窗口')
   self.w.refresh_external()
   self.assertEqual(self.w.statusBar().currentMessage(),''); self.assertEqual(self.w.notice.text(),'')
   self.assertFalse(self.w.refresh_action.isEnabled()); self.assertTrue(self.w.save_action.isEnabled())
-  parent=self.w.root_item.child(0); self.assertIn('修改后的名称',parent.text(0)); self.assertEqual(parent.text(1),'2.3')
-  self.w.show_item_info(parent); self.assertEqual(self.w.fields['quantity'].text(),'2.3')
+  parent=self.w.root_item.child(0); self.assertIn('修改后的名称',parent.text(0)); self.assertEqual(parent.text(1),'2.34')
+  self.w.show_item_info(parent); self.assertEqual(self.w.fields['quantity'].text(),'2.34')
   self.s.update_material(o,dict(name='无关',unit='pcs')); self.assertFalse(self.w.refresh_action.isEnabled())
  def test_sibling_and_child_candidates_block_cycles(self):
   parent=self.w.root_item.child(0); child=parent.child(0)
@@ -48,15 +48,15 @@ class BomUiTests(unittest.TestCase):
   parent=self.w.root_item.child(0)
   with patch.object(MaterialSelectionDialog,'getItem',return_value=('OTHER1 OTHER',True)):
    self.w.add_relative(parent.data(0,Qt.UserRole),True)
-  self.assertEqual(self.w.tree.currentItem().text(1),'1.0'); self.assertEqual(self.w.fields['quantity'].text(),'1.0')
+  self.assertEqual(self.w.tree.currentItem().text(1),'1'); self.assertEqual(self.w.fields['quantity'].text(),'1')
   self.w.fields['quantity'].setValue(3.27)
   with patch.object(QMessageBox,'information'):
    self.w.save()
-  self.assertEqual([row['quantity'] for row in self.s.bom(self.ids[0]) if row['material_id']==self.ids[3]],[3.3])
-  self.w.load(); self.assertEqual(self.w.root_item.child(0).child(1).text(1),'3.3')
+  self.assertEqual([row['quantity'] for row in self.s.bom(self.ids[0]) if row['material_id']==self.ids[3]],[3.27])
+  self.w.load(); self.assertEqual(self.w.root_item.child(0).child(1).text(1),'3.27')
   from openpyxl import load_workbook
   sid=self.s.create_sku(self.ids[0]); path=Path(self.tmp.name)/'bom.xlsx'; self.s.export_sku(sid,path)
-  wb=load_workbook(path); self.assertEqual(wb[self.s.material_snapshot(self.ids[0])['name']].cell(2,10).number_format,'0.0'); wb.close()
+  wb=load_workbook(path); self.assertEqual(wb[self.s.material_snapshot(self.ids[0])['name']].cell(2,10).number_format,'0.############'); wb.close()
  def test_shared_sub_bom_save_twice_and_edit(self):
   # CHILD已有下阶物料，添加为ROOT的另一个子项时再次展开同一关系。
   r,p,c,o,x=self.ids
@@ -172,7 +172,7 @@ class BomUiTests(unittest.TestCase):
    self.assertTrue(self.w.root_item.child(0).child(0).child(0).data(0,Qt.UserRole)['_deleted'])
    self.assertTrue(self.w.root_item.child(1).child(0).data(0,Qt.UserRole)['_deleted'])
    self.assertEqual(len(self.s.bom(c)),1)  # 未保存不改数据库
-   self.assertIs(self.w.tree.currentItem(),self.w.root_item)
+   self.assertIs(self.w.tree.currentItem(),child)
    self.w.refresh_external()  # 未保存删除在外部刷新后仍然保留
    self.assertTrue(self.w.root_item.child(1).child(0).data(0,Qt.UserRole)['_deleted'])
    with patch.object(QMessageBox,'information'): self.assertTrue(self.w.save())

@@ -30,7 +30,7 @@ class ClipboardTests(unittest.TestCase):
   self.other.handle_clipboard_action(actions['copy'],actions,item)
   added=self.w.paste_material(self.w.root_item.child(0),False)
   self.assertEqual([self.w.root_item.child(i).data(0,Qt.UserRole)['material_id'] for i in range(3)],[self.ids[c] for c in ['A','C','B']])
-  self.assertTrue(added.data(0,Qt.UserRole)['_added']);self.assertTrue(added.child(0).data(0,Qt.UserRole)['_added']);self.assertEqual(added.text(1),'1.0');self.assertIs(self.w.tree.currentItem(),added)
+  self.assertTrue(added.data(0,Qt.UserRole)['_added']);self.assertTrue(added.child(0).data(0,Qt.UserRole)['_added']);self.assertEqual(added.text(1),'1');self.assertIs(self.w.tree.currentItem(),added)
   self.assertEqual(len(self.s.bom(self.ids['R'])),2)
   self.assertFalse(self.w.export_action.isEnabled())
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())

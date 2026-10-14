@@ -46,7 +46,7 @@ class PurchaseExportTests(unittest.TestCase):
    self.assertEqual(headers,expected)
    rows={row[1]:dict(zip(headers,row)) for row in sh.iter_rows(min_row=2,values_only=True)}
    self.assertEqual(set(rows),{'A1','B1','C1','D1','C2'})
-   self.assertEqual({code:row['用量'] for code,row in rows.items()},{'A1':2,'B1':3,'C1':9.5,'D1':4.8,'C2':1})
+   self.assertEqual({code:row['用量'] for code,row in rows.items()},{'A1':2,'B1':3,'C1':9.5,'D1':4.75,'C2':1})
    self.assertEqual(rows['C1']['M/P'],'P');self.assertEqual(rows['C1']['物料等级'],'A')
    self.assertEqual(rows['C1']['替代料1物料编码'],'X1');self.assertEqual(rows['C1']['替代料2物料编码'],'Y1')
    self.assertEqual(rows['C1']['替代料1规格'],'规格'*70)
@@ -61,7 +61,7 @@ class PurchaseExportTests(unittest.TestCase):
       self.assertEqual(getattr(cell.border,side).style,'thin');self.assertEqual(getattr(cell.border,side).color.rgb,'FF000000')
      if headers[cell.column-1] in ('序号','用量','单位','物料等级','M/P'):self.assertEqual(cell.alignment.horizontal,'center')
      if cell.row==1:self.assertTrue(cell.font.bold)
-    if cells[0].row>1:self.assertEqual(cells[4].number_format,'0.0')
+    if cells[0].row>1:self.assertEqual(cells[4].number_format,'0.############')
   finally:wb.close()
  def test_empty_bom_and_non_sku_root(self):
   wb=self.export()

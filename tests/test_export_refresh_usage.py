@@ -56,8 +56,8 @@ class ExportRefreshUsageTests(unittest.TestCase):
         target.refresh_external()
         self.assertFalse(target.export_action.isEnabled())
         self.assertTrue(target.save_action.isEnabled())
-        self.assertEqual(target.root_item.child(0).text(1), '3.0')
-        self.assertEqual(target.root_item.child(0).child(0).text(1), '2.0')
+        self.assertEqual(target.root_item.child(0).text(1), '3')
+        self.assertEqual(target.root_item.child(0).child(0).text(1), '2')
         with patch.object(QFileDialog, 'getSaveFileName') as chooser:
             target.export_bom()
             chooser.assert_not_called()

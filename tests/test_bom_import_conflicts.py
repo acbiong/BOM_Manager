@@ -42,7 +42,7 @@ class BomImportConflictTests(unittest.TestCase):
   dialog=BomImportConflictDialog(captured)
   try:
    self.assertEqual(dialog.table.rowCount(),3);self.assertEqual(dialog.choice,'stop')
-   self.assertIn('数量：2.0',dialog.table.item(0,3).text());dialog.reject();self.assertEqual(dialog.choice,'stop')
+   self.assertIn('数量：2',dialog.table.item(0,3).text());dialog.reject();self.assertEqual(dialog.choice,'stop')
   finally:dialog.close()
  def test_system_keeps_entire_subtree_and_discards_disconnected_imports(self):
   self.write([('R','A',1,''),('A','B',4,''),('B','D',5,''),('D','X',6,'')]);before=self.snapshot()
@@ -59,7 +59,7 @@ class BomImportConflictTests(unittest.TestCase):
   with patch.object(MaterialHeaderMappingDialog,'exec_',return_value=QDialog.Accepted),patch.object(BomImportConflictDialog,'exec_',decide),patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QMessageBox,'information'):
    w.import_bom()
   self.assertTrue(w.dirty);self.assertEqual(before,self.snapshot());self.assertFalse(shared.refresh_action.isEnabled())
-  self.assertEqual(w.root_item.child(0).child(0).text(1),'4.0')
+  self.assertEqual(w.root_item.child(0).child(0).text(1),'4')
   with patch.object(QMessageBox,'information'):self.assertTrue(w.save())
   self.assertTrue(shared.refresh_action.isEnabled());self.assertEqual(self.s.bom(self.ids['B'])[0]['material_id'],self.ids['D'])
  def test_stop_ui_leaves_draft_unchanged(self):

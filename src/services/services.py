@@ -1,3 +1,5 @@
+from domain.quantity import format_quantity
+import math
 """业务服务层：物料、SKU、BOM、日志和Excel；UI不得直接访问数据库。编辑时间：2026-09-24。"""
 from pathlib import Path
 from datetime import datetime, timezone
@@ -170,8 +172,10 @@ class Services:
     d=dict(r); d.update(material_id=r['child_material_id'],unit=r['material_unit'],level_no=level,parent_item_id=parent_item_id,bom_root_id=root,node_id=node_id,parent_node_id=parent_node_id)
     result.append(d); walk(r['child_material_id'],level+1,r['id'],node_id,ancestors)
   walk(root,1,None,None,set()); return result
- def save_bom(self,root,items,preview=False):
+ def save_bom(self,root,items,preview=False,progress=None):
   """把树中的重复子BOM归并为物料关系，在单个事务中保存。"""
+  report=progress or (lambda value,message:None)
+  report(5,'读取现有BOM…')
   old_rows=self.bom(root)
   retained={root}|{row['material_id'] for row in items}
   parents={root}|{row['parent_material_id'] for row in old_rows if row['parent_material_id'] in retained}
@@ -182,7 +186,7 @@ class Services:
   old={ (row['parent_material_id'],row['child_material_id'],row['position'] or ''):dict(row)
         for row in self.db.conn.execute('SELECT * FROM material_bom_items') }
   def payload(row):
-   return (round(float(row['quantity']),1),row['unit'],row.get('remark','') or '')
+   return (float(row['quantity']),row['unit'],row.get('remark','') or '')
   for row in items:
    parent=row.get('parent_material_id')
    if parent is None:
@@ -200,7 +204,7 @@ class Services:
      if not self.db.conn.execute('SELECT 1 FROM materials WHERE id=?',(mid,)).fetchone():raise ValueError('替代料不存在，请重新选择')
     alternate_updates[key]=alternates
    values=payload(row)
-   if values[0]<=0: raise ValueError('物料数量必须至少为0.1')
+   if not math.isfinite(values[0]) or values[0]<=0: raise ValueError('物料数量必须为大于0的有限数字')
    parents.add(parent)
    if key in desired and desired[key]!=values:
     baseline=payload(old[key]) if key in old else None
@@ -248,9 +252,24 @@ class Services:
    def expand(parent):
     return [{'data':dict(data),'children':expand(data['material_id'])} for data in groups.get(parent,[])]
    return expand(root)
-  log_roots={sku['material_id']:{sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])} for sku in self.bom_skus()}
+  report(25,'检查结构并计算联动范围…')
+  def reachable(root,relations):
+   found={root};pending=[root]
+   while pending:
+    for child in relations.get(pending.pop(),()):
+     if child not in found:found.add(child);pending.append(child)
+   return found
+  old_graph={}
+  for parent,child,_ in old:old_graph.setdefault(parent,set()).add(child)
+  log_roots={sku['material_id']:reachable(sku['material_id'],old_graph) for sku in self.bom_skus()}
   log_roots.setdefault(root,{root}|{row['material_id'] for row in old_rows})
-  old_alternates={row['id']:[r['material_id'] for r in self.alternates(row['id'])] for row in old.values()}
+  def alternate_map():
+   mapping={}
+   for row in self.db.conn.execute('SELECT bom_item_id,material_id FROM alternates ORDER BY sort_no,id'):
+    mapping.setdefault(row[0],[]).append(row[1])
+   return mapping
+  old_alternates=alternate_map()
+  report(40,'正在写入BOM关系…')
   saved_at=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
   affected_skus=[]
   with self.db.transaction():
@@ -260,6 +279,7 @@ class Services:
      self.db.conn.execute('DELETE FROM material_bom_items WHERE id=?',(row['id'],))
    for order,(key,values) in enumerate(desired.items()):
     parent,child,position=key; quantity,unit,remark=values
+    if key in old and payload(old[key])==values and old[key]['sort_no']==order:continue
     self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?) ON CONFLICT(parent_material_id,child_material_id,position) DO UPDATE SET quantity=excluded.quantity,unit=excluded.unit,remark=excluded.remark,sort_no=excluded.sort_no,updated_at=CURRENT_TIMESTAMP',(parent,child,quantity,unit,position,remark,order))
    # 只清理本次移除分支中不再被外部BOM或SKU使用的父物料结构。
    candidates={row['material_id'] for row in old_rows}-retained
@@ -289,14 +309,18 @@ class Services:
    # 在同一事务内更新时间，保证界面收到通知时读取的是已提交数据。
    for sku in self.bom_skus():
     sku_root=sku['material_id']
-    contained=log_roots.get(sku_root,{sku_root})|{sku_root}|{row['material_id'] for row in self.bom(sku_root)}
+    contained=log_roots.get(sku_root,{sku_root})|reachable(sku_root,graph)
     if contained & changed_parents:
      if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(saved_at,sku_root))
      self.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(saved_at,sku['id']))
      affected_skus.append(sku['id'])
    after={ (r['parent_material_id'],r['child_material_id'],r['position'] or ''):dict(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items') }
+   report(70,'正在生成变更记录…')
+   after_alternates=alternate_map()
+   material_cache={}
    def label(mid):
-    material=self.material_snapshot(mid)
+    if mid not in material_cache:material_cache[mid]=self.material_snapshot(mid)
+    material=material_cache[mid]
     return material.get('base_code','')+material.get('version','')+' '+material.get('name','')
    # 按父项+子物料配对位置变化，避免一处位置修改被写成删除和新增两条。
    remaining=set(after); pairs=[]
@@ -311,13 +335,13 @@ class Services:
    pairs.extend((key,None,key,after[key]) for key in after if key in remaining)
    for key,before,target,current in pairs:
     detail=[]
-    if before is None:detail.append(f"新增物料；数量：{current['quantity']:.1f}；单位：{current['unit']}；备注：{current['remark']}")
+    if before is None:detail.append(f"新增物料；数量：{format_quantity(current['quantity'])}；单位：{current['unit']}；备注：{current['remark']}")
     elif current is None:detail.append('删除物料（含关系属性及替代料）')
     else:
      for field,title in [('position','位置'),('quantity','数量'),('unit','单位'),('remark','备注')]:
       if before[field]!=current[field]:detail.append(f'{title}：{before[field] or "（空）"} → {current[field] or "（空）"}')
     previous=old_alternates.get(before['id'],[]) if before else []
-    following=[r['material_id'] for r in self.alternates(current['id'])] if current else []
+    following=after_alternates.get(current['id'],[]) if current else []
     for mid in following:
      if mid not in previous:detail.append('增加替代料：'+label(mid))
     for mid in previous:
@@ -330,8 +354,10 @@ class Services:
      if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
    if getattr(self,'scope_id',0):self.refresh_usage()
   from infrastructure.events import WindowRefreshBus
+  report(90,'正在通知相关BOM窗口…')
   for parent in changed_parents: self.publish({'type':'bom_changed','root':parent})
   if affected_skus:self.publish({'type':'sku_changed','ids':affected_skus})
+  report(100,'BOM保存完成')
  def validate_bom_rows(self,root,rows):
   """校验导入BOM与现有结构的子项、数量、位置一致性。"""
   old={(x['material_id'],str(x['position'])):float(x['quantity']) for x in self.bom(root)}; new={(x['material_id'],str(x.get('position',''))):float(x['quantity']) for x in rows}
@@ -411,7 +437,7 @@ class Services:
     if data['物料数量']:
      try:
       quantity=float(data['物料数量'])
-      if not math.isfinite(quantity) or round(quantity,1)<=0:issues.append(f'第{no}行数量必须至少为0.1且为有限数字')
+      if not math.isfinite(quantity) or quantity<=0:issues.append(f'第{no}行数量必须大于0且为有限数字')
      except ValueError:issues.append(f'第{no}行数量不是有效数字')
     alternate_ids=[]
     for number in groups:
@@ -429,7 +455,7 @@ class Services:
     if pid==mid:issues.append(f'第{no}行物料不能包含自身')
     pairs.add((pid,mid));edge_lines.setdefault((pid,mid),no);parents.add(pid);child_ids.add(mid)
     if mid not in children.setdefault(pid,[]):children[pid].append(mid)
-    if len(issues)==start_errors:rows.append(dict(parent_material_id=pid,material_id=mid,quantity=round(quantity,1),unit=child['unit'],position=data['位置'],alternate_material_ids=alternate_ids))
+    if len(issues)==start_errors:rows.append(dict(parent_material_id=pid,material_id=mid,quantity=quantity,unit=child['unit'],position=data['位置'],alternate_material_ids=alternate_ids))
    if not rows and root_row is None and not issues:issues.append('所选工作表没有可导入的BOM数据')
    if root is None:
     roots=parents-child_ids
@@ -473,9 +499,9 @@ class Services:
   for row in rows:incoming[row['parent_material_id']].append(row)
   def label(mid):
    m=materials[mid];return m['base_code']+m['version']+' '+m['name']
-  def signature(row):return (round(float(row['quantity']),1),row.get('position','') or '',row.get('remark','') or '',tuple(sorted(row.get('alternate_material_ids',[]))))
+  def signature(row):return (float(row['quantity']),row.get('position','') or '',row.get('remark','') or '',tuple(sorted(row.get('alternate_material_ids',[]))))
   def describe(items):
-   return '\n'.join(f"数量：{signature(row)[0]:.1f}；位置：{signature(row)[1] or '（空）'}；备注：{signature(row)[2] or '（空）'}；替代料："+('、'.join(label(mid) for mid in signature(row)[3]) or '无') for row in items) or '不存在'
+   return '\n'.join(f"数量：{format_quantity(signature(row)[0])}；位置：{signature(row)[1] or '（空）'}；备注：{signature(row)[2] or '（空）'}；替代料："+('、'.join(label(mid) for mid in signature(row)[3]) or '无') for row in items) or '不存在'
   conflicts=[];conflict_parents=set()
   # 检查明确提供子项且系统也已有子项的每个物料，包含导入根。
   for parent,new_rows in incoming.items():
@@ -749,7 +775,7 @@ class Services:
   # 根SKU也属于导出的BOM：ROOT标记便于导入时核对根物料身份。
   material=materials[root]
   sheet.append(['1',0,'ROOT','ROOT',material['base_code'],material['version'],material['name'],material['description'],'',1.0,material['unit'],material['grade'],material['mp_flag'],material['manufacturer'],material['mpn']]+['']*(count*5)+[''])
-  sheet.cell(2,1).number_format='@'; sheet.cell(2,10).number_format='0.0'
+  sheet.cell(2,1).number_format='@'; sheet.cell(2,10).number_format='0.############'
   counters={}; numbers={}
   for row in rows:
    parent_path=row['parent_node_id']
@@ -761,7 +787,7 @@ class Services:
    alternate_values+=['']*(count*5-len(alternate_values))
    sheet.append([number,row['level_no'],parent['base_code'],parent['version'],row['base_code'],row['version'],row['name'],row['description'],row['position'],row['quantity'],row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn']]+alternate_values+[row['remark']])
    sheet.cell(sheet.max_row,1).number_format='@'
-   sheet.cell(sheet.max_row,10).number_format='0.0'
+   sheet.cell(sheet.max_row,10).number_format='0.############'
   centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
   centered.update(f'替代料{number}版本号' for number in range(1,count+1))
   self.format_export_sheet(sheet,centered)
@@ -803,12 +829,12 @@ class Services:
      notes.append('替代料仅适用于对应BOM位置：')
      for label,quantity,ids in entry['occurrences']:
       codes='、'.join(snapshots[mid]['base_code']+snapshots[mid]['version'] for mid in ids) or '无替代料'
-      notes.append(f'{label}（用量{quantity:.1f}）：{codes}')
+      notes.append(f'{label}（用量{format_quantity(quantity)}）：{codes}')
     values=[v for a in entry['alternates'].values() for v in (a['base_code']+a['version'],a['name'],a['description'],a['manufacturer'],a['mpn'])]
     values+=['']*(count*5-len(values))
-    quantity=float(entry['quantity'].quantize(Decimal('0.1'),rounding=ROUND_HALF_UP))
+    quantity=float(entry['quantity'])
     sheet.append([number,row['base_code']+row['version'],row['name'],row['description'],quantity,row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn']]+values+['\n'.join(notes)])
-    sheet.cell(sheet.max_row,5).number_format='0.0'
+    sheet.cell(sheet.max_row,5).number_format='0.############'
    self.format_export_sheet(sheet,{'序号','用量','单位','物料等级','M/P'})
    wb.save(path)
   finally:wb.close()
@@ -821,7 +847,7 @@ class Services:
   def width(text):return sum(2 if unicodedata.east_asian_width(char) in ('W','F') else 1 for char in text)
   def display(cell):
    if cell.value is None:return ''
-   if headers[cell.column-1]=='用量' and cell.row>1:return f'{cell.value:.1f}'
+   if headers[cell.column-1]=='用量' and cell.row>1:return format_quantity(cell.value)
    return str(cell.value)
   widths={}
   for column,header in enumerate(headers,1):
