@@ -19,7 +19,7 @@ class ThemeTests(unittest.TestCase):
    root=s.create_material(dict(base_code='ROOT',version='1',name='根',unit='pcs'));child=s.create_material(dict(base_code='CHILD',version='1',name='子',unit='pcs'));s.save_bom(root,[dict(material_id=child,quantity=1,unit='pcs')])
    main=MainWindow(s);material=MaterialWindow(s,main);bom=BomWindow(s,root,main)
    try:
-    main.set_theme(False);self.assertEqual(main.power_label.text(),'Powered by Biong & BrainCo Inc.');self.assertEqual(main.count_label.text(),'共计0个SKU')
+    main.set_theme(False);self.assertEqual(main.version_label.text(),'版本 '+main.version);self.assertEqual(main.count_label.text(),'共计0个SKU')
     corner=main.menuBar().cornerWidget(Qt.TopRightCorner);self.assertIs(corner.layout().itemAt(corner.layout().count()-1).widget(),main.theme_button)
     node=bom.root_item.child(0);bom.show_item_info(node);bom.fields['quantity'].setValue(2.0)
     self.assertEqual(node.foreground(0).color(),QColor('#9a6700'));self.assertTrue(bom.dirty)

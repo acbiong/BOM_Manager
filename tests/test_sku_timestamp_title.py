@@ -88,7 +88,7 @@ class SkuTimestampTitleTests(unittest.TestCase):
         self.assertEqual(self.w.windowTitle(), 'PRJ 项目甲 BOM管理系统')
         self.assertTrue(self.w.statusBar().isHidden())
         self.assertTrue(self.w.count_label.isVisible())
-        for label in (self.w.power_label, self.w.version_label):
+        for label in (self.w.latest_bom_only, self.w.version_label):
             self.assertIs(label.parentWidget(), self.w.count_label.parentWidget())
             self.assertEqual(label.geometry().center().y(), self.w.count_label.geometry().center().y())
         mw = MaterialWindow(self.s, self.w)

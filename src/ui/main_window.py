@@ -286,12 +286,13 @@ class MainWindow(QMainWindow):
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
-  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku); a=bar.addAction('关于'); a.triggered.connect(self.show_about)
+  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
   self.table=QTableWidget(); self.table.setColumnCount(7); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID']); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self._sku_sort=None;self._sku_filters={}
   self._description_hover=VersionDescriptionHover(self.table)
   filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
   compare_action=bar.addAction('BOM对比');compare_action.triggered.connect(self.compare_boms)
+  a=bar.addAction('关于'); a.triggered.connect(self.show_about)
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.table.horizontalHeader().setSectionsClickable(True);self.table.horizontalHeader().sectionClicked.connect(self.sort_skus)
   for column in (1,2,4,5):self.table.horizontalHeaderItem(column).setToolTip('点击升序/降序排序')
@@ -299,7 +300,13 @@ class MainWindow(QMainWindow):
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
-  self.count_label=QLabel(''); self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(8,2,8,2); footer_l.addWidget(self.count_label); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); self.latest_bom_only=QCheckBox('只显示最新BOM'); self.latest_bom_only.setChecked(False); self.latest_bom_only.setToolTip('同一SKU仅显示镜像版本号最高的BOM'); self.latest_bom_only.toggled.connect(self.apply_sku_filters); footer_l.addWidget(self.latest_bom_only); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().setSizeGripEnabled(False); self.statusBar().hide(); self.refresh()
+  self.count_label=QLabel(''); self.version_label=QLabel('版本 '+self.version); self.version_label.setAlignment(Qt.AlignCenter)
+  self.latest_bom_only=QCheckBox('只显示最新BOM'); self.latest_bom_only.setChecked(False); self.latest_bom_only.setToolTip('同一SKU仅显示镜像版本号最高的BOM'); self.latest_bom_only.toggled.connect(self.apply_sku_filters)
+  footer=QWidget(); footer_l=QGridLayout(footer); footer_l.setContentsMargins(8,2,8,2)
+  footer_l.addWidget(self.count_label,0,0,Qt.AlignLeft|Qt.AlignVCenter); footer_l.addWidget(self.version_label,0,1); footer_l.addWidget(self.latest_bom_only,0,2,Qt.AlignRight|Qt.AlignVCenter)
+  for column in range(3):footer_l.setColumnStretch(column,1)
+  root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().setSizeGripEnabled(False); self.statusBar().hide(); self.refresh()
+
  def compare_boms(self):
   from ui.bom_compare import BomCompareDialog
   if not getattr(self,'_compare_dialog',None):self._compare_dialog=BomCompareDialog(self.svc,self)

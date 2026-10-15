@@ -32,7 +32,7 @@ class BomContextImportTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    db=Database(str(Path(tmp)/'db'));s=Services(db);mid=s.create_material(dict(base_code='R',version='1',name='SKU',unit='pcs'));s.create_sku(mid);window=BomWindow(s,mid);main=MainWindow(s)
    try:
-    self.assertEqual(main.power_label.text(),'Powered by Biong & BrainCo Inc.')
+    self.assertEqual(main.version_label.text(),'版本 '+main.version)
     self.assertFalse(any(a.text()=='导入BOM' for a in window.findChildren(__import__('PyQt5.QtWidgets',fromlist=['QAction']).QAction)))
     self.assertEqual(window.export_action.text(),'导出BOM')
    finally:window.close();main.close();db.close()
