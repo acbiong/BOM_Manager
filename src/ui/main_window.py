@@ -299,7 +299,7 @@ class MainWindow(QMainWindow):
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
-  self.count_label=QLabel(''); self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(8,2,8,2); footer_l.addWidget(self.count_label); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().setSizeGripEnabled(False); self.statusBar().hide(); self.refresh()
+  self.count_label=QLabel(''); self.power_label=QLabel('Powered by Biong & BrainCo Inc.'); self.power_label.setAlignment(Qt.AlignCenter); self.version_label=QLabel('版本 '+self.version); footer=QWidget(); footer_l=QHBoxLayout(footer); footer_l.setContentsMargins(8,2,8,2); footer_l.addWidget(self.count_label); footer_l.addStretch(); footer_l.addWidget(self.power_label); footer_l.addStretch(); footer_l.addWidget(self.version_label); self.latest_bom_only=QCheckBox('只显示最新BOM'); self.latest_bom_only.setChecked(False); self.latest_bom_only.setToolTip('同一SKU仅显示镜像版本号最高的BOM'); self.latest_bom_only.toggled.connect(self.apply_sku_filters); footer_l.addWidget(self.latest_bom_only); root_l=QVBoxLayout(); root_l.setContentsMargins(0,0,0,0); root_l.addWidget(self.table); root_l.addWidget(footer); container=QWidget(); container.setLayout(root_l); self.setCentralWidget(container); self.statusBar().setSizeGripEnabled(False); self.statusBar().hide(); self.refresh()
  def compare_boms(self):
   from ui.bom_compare import BomCompareDialog
   if not getattr(self,'_compare_dialog',None):self._compare_dialog=BomCompareDialog(self.svc,self)
@@ -327,6 +327,7 @@ class MainWindow(QMainWindow):
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(sku_timestamp(r['updated_at']))); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
    self.table.item(i,4).setData(DESCRIPTION_ROLE,r['change_description'])
+   self.table.item(i,1).setData(Qt.UserRole,r['material_id'])
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
   self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
@@ -344,11 +345,17 @@ class MainWindow(QMainWindow):
    else:self._sku_filters[column]=condition
    self.apply_sku_filters()
  def apply_sku_filters(self):
-  count=0
+  count=0; latest={}
+  only_latest=self.latest_bom_only.isChecked()
+  if only_latest:
+   for row in range(self.table.rowCount()):
+    material_id=self.table.item(row,1).data(Qt.UserRole); version=int(self.table.item(row,4).text())
+    latest[material_id]=max(latest.get(material_id,version),version)
   for row in range(self.table.rowCount()):
    visible=all(query.casefold() in self.table.item(row,col).text().casefold() and (selected is None or self.table.item(row,col).text() in selected) for col,(query,selected) in self._sku_filters.items())
+   if only_latest:visible=visible and int(self.table.item(row,4).text())==latest[self.table.item(row,1).data(Qt.UserRole)]
    self.table.setRowHidden(row,not visible);count+=int(visible)
-  self.count_label.setText(f'显示{count} / 共计{self.table.rowCount()}个SKU' if self._sku_filters else f'共计{self.table.rowCount()}个SKU')
+  self.count_label.setText(f'显示{count} / 共计{self.table.rowCount()}个SKU' if self._sku_filters or only_latest else f'共计{self.table.rowCount()}个SKU')
  def copy_sku_bom(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
   window=self._bom_windows.get(sid) or (self._material_bom_windows.get(row['material_id']) if row and not row['scope_id'] else None)
