@@ -261,8 +261,13 @@ class BomCompareDialog(QDialog):
         try:
             from services.external_bom import ExcelSource,COLUMNS,REQUIRED,ALT_SUFFIXES,ALIASES,build_external_bom,text
             from ui.main_window import MaterialHeaderMappingDialog
-            path,_=QFileDialog.getOpenFileName(self,'载入其他BOM','','Excel (*.xlsx *.xls)')
+            from config.config_service import ConfigService
+            from pathlib import Path
+            from ui.import_paths import external_bom_selection,remember_external_bom
+            config=self.service.config_service or ConfigService(Path(self.service.db.path).parent)
+            path,_=QFileDialog.getOpenFileName(self,'载入其他BOM',external_bom_selection(config),'Excel (*.xlsx *.xls)')
             if not path:return
+            path=remember_external_bom(config,path)
             source=ExcelSource(path)
             try:
                 sheet,ok=QInputDialog.getItem(self,'选择BOM工作表','选择BOM所在的sheet',source.names,0,False)

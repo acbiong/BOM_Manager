@@ -115,3 +115,36 @@ class ExternalBomTests(unittest.TestCase):
    self.assertTrue(all(d.status=='same' for d in compare_trees(snapshot(s,dict(s.skus()[0])),tree)))
    s.save_bom(root,[dict(material_id=b,quantity=1,unit='pcs',alternate_material_ids=[a])])
    self.assertEqual(compare_trees(tree,snapshot(s,dict(s.skus()[0])))[1].status,'exchanged');db.close()
+ def test_external_file_remembered_across_windows_and_missing_falls_back(self):
+  from PyQt5.QtCore import QStandardPaths
+  from shutil import copyfile
+  with tempfile.TemporaryDirectory() as tmp:
+   config=ConfigService(tmp);db=Database(str(Path(tmp)/'db'));s=Services(db,config)
+   folder=Path(tmp)/'外部BOM';folder.mkdir();path=folder/'对比.xls';copyfile(Path(__file__).parent/'fixtures/external_bom.xls',path)
+   dialog=BomCompareDialog(s)
+   try:
+    with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=(str(path),'')),patch('ui.bom_compare.QInputDialog.getItem',return_value=('',False)):
+     dialog.left.setCurrentIndex(dialog.left.count()-1);dialog.choose_source(0)
+    self.assertEqual(config.load()['database']['last_compare_bom_file'],'外部BOM/对比.xls')
+   finally:dialog.close()
+   s.config_service=ConfigService(tmp);dialog=BomCompareDialog(s)
+   try:
+    for exists in (True,False):
+     if not exists:path.unlink()
+     with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=('','')) as picker:
+      dialog.right.setCurrentIndex(dialog.right.count()-1);dialog.choose_source(1)
+     expected=str(path) if exists else QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
+     self.assertEqual(picker.call_args.args[2],expected)
+     self.assertEqual(config.load()['database']['last_compare_bom_file'],'外部BOM/对比.xls')
+   finally:dialog.close();db.close()
+ def test_sku_click_selects_whole_visible_row(self):
+  from PyQt5.QtTest import QTest
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db,ConfigService(tmp))
+   for code in ('A','B'):s.create_sku(s.create_material(dict(base_code=code,version='1',name=code,unit='pcs')))
+   main=MainWindow(s);main.show();self.app.processEvents()
+   try:
+    table=main.table;QTest.mouseClick(table.viewport(),Qt.LeftButton,pos=table.visualItemRect(table.item(1,2)).center())
+    self.assertEqual({index.row() for index in table.selectedIndexes()},{1})
+    self.assertEqual({index.column() for index in table.selectedIndexes()},set(range(6)))
+   finally:main.close();db.close()

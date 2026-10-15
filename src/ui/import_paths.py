@@ -58,3 +58,21 @@ def remember_bom_import(config,selected):
     path=local_import_path(selected)
     cfg=config.load();cfg['database']['last_bom_import_dir']=str(path.parent);config.save(cfg)
     return str(path)
+
+
+def external_bom_selection(config):
+    """Select the last external workbook, falling back to the OS desktop."""
+    from PyQt5.QtCore import QStandardPaths
+    stored=config.load()['database'].get('last_compare_bom_file','')
+    if stored:
+        try:
+            path=config.resolve_path(stored)
+            if path.is_file():return str(path)
+        except (OSError,ValueError):pass
+    return QStandardPaths.writableLocation(QStandardPaths.DesktopLocation) or str(Path.home()/'Desktop')
+
+
+def remember_external_bom(config,selected):
+    path=local_import_path(selected)
+    cfg=config.load();cfg['database']['last_compare_bom_file']=str(path);config.save(cfg)
+    return str(path)

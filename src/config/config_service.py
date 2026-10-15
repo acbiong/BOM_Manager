@@ -51,12 +51,12 @@ class ConfigService:
   return (self.base/self.relative_path(value)).resolve()
  def _normalize_paths(self,c,strict=True):
   if not c.has_section('database'):return
-  for key in ('path','last_import_dir','last_bom_import_dir'):
+  for key in ('path','last_import_dir','last_bom_import_dir','last_compare_bom_file'):
    value=c['database'].get(key,'')
    if not value:continue
    try:c['database'][key]=self.relative_path(value)
    except ValueError:
-    if key in ('last_import_dir','last_bom_import_dir'):c.remove_option('database',key)
+    if key in ('last_import_dir','last_bom_import_dir','last_compare_bom_file'):c.remove_option('database',key)
     elif strict:raise
  def save(self,c):
   self._normalize_paths(c)
