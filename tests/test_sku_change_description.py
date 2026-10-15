@@ -74,3 +74,23 @@ class SkuDescriptionTests(unittest.TestCase):
     s.update_sku_change_description(mirror,'第二次修改');self.app.processEvents()
     self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),mirror)
    finally:w.close();db.close()
+ def test_real_modal_close_focuses_edited_mirror_not_previous_current_item(self):
+  from PyQt5.QtCore import QTimer
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   mid=s.create_material(dict(base_code='R',version='1',name='root',unit='pcs'));original=s.create_sku(mid);edited=s.copy_sku_bom(original)
+   w=MainWindow(s);w.show();w.activateWindow();self.app.processEvents()
+   real_exec=ChangeDescriptionDialog.exec_
+   try:
+    for accepted in (True,False):
+     w.table.setCurrentCell(0,1);w.table.cellWidget(0,0).setFocus()
+     def execute(dialog):
+      dialog.editor.setPlainText('真实模态窗口保存')
+      QTimer.singleShot(0,dialog.accept if accepted else dialog.reject)
+      return real_exec(dialog)
+     with patch.object(ChangeDescriptionDialog,'exec_',execute):w.edit_sku_change_description(edited)
+     QTest.qWait(30)
+     self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),edited)
+     self.assertEqual({int(w.table.item(i.row(),6).text()) for i in w.table.selectedIndexes()},{edited})
+     self.assertTrue(w.table.hasFocus())
+   finally:w.close();db.close()

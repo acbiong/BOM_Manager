@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
   WindowRefreshBus.publish({'type':'sku_order_changed'})
  def refresh(self):
   current=self.table.currentRow(); column=max(1,self.table.currentColumn())
-  selected_id=self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None
+  selected_id=str(self._description_target) if getattr(self,'_description_target',None) is not None else (self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None)
   scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
   project=self.svc.project(); name=(project['project_name'] or '').strip(); code=(project['project_code'] or '').strip(); prefix=' '.join(x for x in (code,name) if x and x!='请输入项目名称'); title=f'{prefix} BOM管理系统' if prefix else 'BOM管理系统'
   self.setWindowTitle(title)
@@ -524,13 +524,35 @@ class MainWindow(QMainWindow):
    window=self._bom_windows.get(sid)
    if window and not window.close():return
    self.svc.delete_sku(sid);self.refresh()
+ def focus_sku_description(self,sid,scroll):
+  row=next((r for r in range(self.table.rowCount()) if self.table.item(r,6).text()==str(sid)),None)
+  if row is None or self.table.isRowHidden(row):return
+  self.table.setCurrentCell(row,4);self.table.selectRow(row)
+  if self.isVisible():self.activateWindow()
+  self.table.setFocus(Qt.OtherFocusReason)
+  self.table.horizontalScrollBar().setValue(scroll[0]);self.table.verticalScrollBar().setValue(scroll[1])
+  item=self.table.item(row,4)
+  if not self.table.viewport().rect().contains(self.table.visualItemRect(item)):self.table.scrollToItem(item,QAbstractItemView.PositionAtCenter)
  def edit_sku_change_description(self,sid):
   row=next((r for r in self.svc.skus() if r['id']==sid),None)
   if row is None:return
+  scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
+  self._description_target=sid
   dialog=ChangeDescriptionDialog(row['change_description'],self)
-  if dialog.exec_()!=QDialog.Accepted:return
-  try:self.svc.update_sku_change_description(sid,dialog.description())
-  except Exception as error:QMessageBox.warning(self,'保存失败',str(error))
+  try:
+   if dialog.exec_()==QDialog.Accepted:
+    try:self.svc.update_sku_change_description(sid,dialog.description())
+    except Exception as error:QMessageBox.warning(self,'保存失败',str(error))
+  finally:
+   self._description_target=None
+   self.focus_sku_description(sid,scroll)
+   # Qt restores the pre-dialog focus during queued activation/menu cleanup.
+   # Restore the explicitly edited mirror once more after those events settle.
+   if getattr(self,'_description_focus_timer',None):self._description_focus_timer.stop();self._description_focus_timer.deleteLater()
+   timer=QTimer(self);timer.setSingleShot(True);self._description_focus_timer=timer
+   database=self.svc.db
+   timer.timeout.connect(lambda:self.focus_sku_description(sid,scroll) if self.isVisible() and self.svc.db is database else None)
+   timer.start(0)
  def sku_context_menu(self,pos):
   row=self.table.rowAt(pos.y())
   if row<0:return
