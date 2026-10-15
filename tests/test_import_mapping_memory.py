@@ -78,3 +78,16 @@ class ImportMappingMemoryTests(unittest.TestCase):
   dialog=self.dialog(MATERIAL_IMPORT_HEADERS)
   try:self.assertEqual(dialog.mapping()['物料名称'],'物料名称')
   finally:dialog.close()
+ def test_mapping_selection_color_for_material_bom_and_external_with_memory(self):
+  for kind in ('materials','bom','compare_bom'):
+   with self.subTest(kind=kind):
+    self.config.save_import_mapping(kind,{'物料名称':'缺失列'})
+    dialog=MaterialHeaderMappingDialog('unused.xlsx',['物料名称','物料基础编码'],[],required=None if kind=='materials' else ['物料名称','物料基础编码'],preview_rows=[],config_service=self.config,mapping_kind=kind)
+    try:
+     name=dialog.combos['物料名称'];code=dialog.combos['物料基础编码']
+     self.assertEqual(name.currentIndex(),0);self.assertEqual(name.styleSheet(),'');self.assertIn('#d9f2df',code.styleSheet())
+     name.setCurrentText('物料名称');self.assertIn('#d9f2df',name.styleSheet());name.setCurrentIndex(0);self.assertEqual(name.styleSheet(),'')
+     if kind!='materials':
+      dialog.add_alternate_mapping();alternate=dialog.combos['替代料1编码'];self.assertEqual(alternate.styleSheet(),'')
+      alternate.setCurrentText('物料基础编码');self.assertIn('#d9f2df',alternate.styleSheet());alternate.setCurrentIndex(0);self.assertEqual(alternate.styleSheet(),'')
+    finally:dialog.close()

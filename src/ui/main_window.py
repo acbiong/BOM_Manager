@@ -78,6 +78,7 @@ class MaterialHeaderMappingDialog(QDialog):
    combo=QComboBox(); combo.setSizeAdjustPolicy(QComboBox.AdjustToContents); combo.addItem('（未映射）',''); combo.addItems([header for header in headers if header.strip()])
    if need not in missing and need in headers: combo.setCurrentText(need)
    self.combos[need]=combo; self.mapping_table.setCellWidget(1,column,combo)
+   self.configure_mapping_color(combo)
    combo.currentTextChanged.connect(self.schedule_mapping_fit)
    combo.installEventFilter(self)
   self.mapping_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.mapping_table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -114,6 +115,10 @@ class MaterialHeaderMappingDialog(QDialog):
     combo.setCurrentIndex(combo.findText(target) if target and headers.count(target)==1 else 0)
   self.schedule_mapping_fit()
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.validate_mapping); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+ def configure_mapping_color(self,combo):
+  def update_color(*args):
+   combo.setStyleSheet('QComboBox { background-color: #d9f2df; color: #202020; }' if combo.currentIndex()>0 else '')
+  combo.currentIndexChanged.connect(update_color);update_color()
  def add_alternate_mapping(self,number=None):
   if number is None or isinstance(number,bool):number=max([int(group[0].split('替代料')[1].split('编码')[0]) for group in self.alternate_groups] or [0])+1
   group=[f'替代料{number}{suffix}' for suffix in self.alternate_suffixes]; self.alternate_groups.append(group)
@@ -124,6 +129,7 @@ class MaterialHeaderMappingDialog(QDialog):
    combo=QComboBox(); combo.addItem('（未映射）',''); combo.addItems([h for h in self.source_headers if h.strip()]); self.combos[field]=combo
    if field in self.source_headers:combo.setCurrentText(field)
    combo.setContextMenuPolicy(Qt.CustomContextMenu); combo.customContextMenuRequested.connect(lambda pos,f=field,w=combo:self.alternate_mapping_menu(f,w.mapToGlobal(pos)))
+   self.configure_mapping_color(combo)
    combo.currentTextChanged.connect(self.schedule_mapping_fit); self.mapping_table.setCellWidget(1,column,combo)
   if not getattr(self,'_mapping_menu_connected',False):
    self.mapping_table.setContextMenuPolicy(Qt.CustomContextMenu); self.mapping_table.customContextMenuRequested.connect(self.mapping_context_menu); self._mapping_menu_connected=True
@@ -310,13 +316,12 @@ class MainWindow(QMainWindow):
  def compare_boms(self):
   from ui.bom_compare import BomCompareDialog
   if not getattr(self,'_compare_dialog',None):self._compare_dialog=BomCompareDialog(self.svc,self)
-  self._compare_dialog.reload_choices();self._compare_dialog.show();self._compare_dialog.raise_();self._compare_dialog.activateWindow()
+  self._compare_dialog.live_timer.stop();self._compare_dialog.clear_results();self._compare_dialog.reload_choices();self._compare_dialog.show();self._compare_dialog.raise_();self._compare_dialog.activateWindow()
  def compare_sku_bom(self,sid):
   self.compare_boms()
   dialog=self._compare_dialog;index=dialog.left.findData(sid)
   if index<0:return
   dialog.left.setCurrentIndex(index)
-  if dialog.right.currentData() not in (None,'load_external'):dialog.compare()
  def show_about(self):
   AboutDialog(self.version,self).exec_()
  def set_theme(self,dark):

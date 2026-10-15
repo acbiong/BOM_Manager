@@ -120,9 +120,8 @@ class BomCompareDialog(QDialog):
         self.reload_choices()
     def showEvent(self,event):
         super().showEvent(event);WindowRefreshBus.subscribe(self.on_change)
-        if self._compared:self.live_timer.start(0)
     def closeEvent(self,event):
-        WindowRefreshBus.unsubscribe(self.on_change);self.live_timer.stop();super().closeEvent(event)
+        WindowRefreshBus.unsubscribe(self.on_change);self.live_timer.stop();self.clear_results();super().closeEvent(event)
     def on_change(self,event):
         if event.get('type')=='sku_order_changed':
             self.reload_choices();return
