@@ -339,6 +339,9 @@ class MainWindow(QMainWindow):
   self.svc.sku_display_order=[int(self.table.item(row,6).text()) for row in range(self.table.rowCount())]
   WindowRefreshBus.publish({'type':'sku_order_changed'})
  def refresh(self):
+  current=self.table.currentRow(); column=max(1,self.table.currentColumn())
+  selected_id=self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None
+  scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
   project=self.svc.project(); name=(project['project_name'] or '').strip(); code=(project['project_code'] or '').strip(); prefix=' '.join(x for x in (code,name) if x and x!='请输入项目名称'); title=f'{prefix} BOM管理系统' if prefix else 'BOM管理系统'
   self.setWindowTitle(title)
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
@@ -349,7 +352,18 @@ class MainWindow(QMainWindow):
    self.table.item(i,1).setData(Qt.UserRole,r['material_id'])
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
-  self.apply_sku_filters();self.publish_sku_order()
+  self.apply_sku_filters()
+  if selected_id is not None:
+   selected_row=next((r for r in range(self.table.rowCount()) if self.table.item(r,6).text()==selected_id),None)
+   self.table.clearSelection()
+   if selected_row is not None and not self.table.isRowHidden(selected_row):
+    self.table.setCurrentCell(selected_row,column);self.table.selectRow(selected_row)
+   else:self.table.setCurrentItem(None)
+  self.table.horizontalScrollBar().setValue(scroll[0]);self.table.verticalScrollBar().setValue(scroll[1])
+  if selected_id is not None and selected_row is not None and not self.table.isRowHidden(selected_row):
+   item=self.table.item(selected_row,column)
+   if not self.table.viewport().rect().intersects(self.table.visualItemRect(item)):self.table.scrollToItem(item,QAbstractItemView.PositionAtCenter)
+  self.publish_sku_order()
  def filter_skus(self):
   labels=['SKU编码','SKU名称','SKU描述','版本号','修改日期时间','清除全部筛选']
   label,ok=QInputDialog.getItem(self,'SKU筛选','选择筛选列',labels,0,False)

@@ -49,3 +49,28 @@ class SkuDescriptionTests(unittest.TestCase):
    conn.execute('CREATE TABLE skus(id INTEGER PRIMARY KEY,material_id INTEGER,updated_at TEXT,mirror_version INTEGER NOT NULL DEFAULT 100,scope_id INTEGER NOT NULL DEFAULT 0,UNIQUE(material_id,mirror_version))')
    conn.execute('INSERT INTO skus VALUES(1,1,NULL,100,0)');conn.commit();conn.close()
    db=Database(path);self.assertEqual(db.conn.execute('SELECT change_description FROM skus').fetchone()[0],'');db.close()
+ def test_edit_description_keeps_exact_mirror_selection_and_scroll(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   ids=[]
+   for i in range(35):
+    mid=s.create_material(dict(base_code=f'S{i:03}',version='1',name=f'SKU{i}',unit='pcs'));sid=s.create_sku(mid);ids.append(sid)
+   mirror=s.copy_sku_bom(ids[20]);w=MainWindow(s);w.resize(800,450);w.show();self.app.processEvents()
+   try:
+    w.sort_skus(1);w.sort_skus(1)
+    row=next(r for r in range(w.table.rowCount()) if int(w.table.item(r,6).text())==mirror)
+    w.table.setCurrentCell(row,4);w.table.selectRow(row);w.table.scrollToItem(w.table.item(row,4));self.app.processEvents()
+    before=w.table.verticalScrollBar().value()
+    def edit(d):d.editor.setPlainText('修改描述');return QDialog.Accepted
+    with patch.object(ChangeDescriptionDialog,'exec_',edit):w.edit_sku_change_description(mirror)
+    self.app.processEvents()
+    self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),mirror)
+    self.assertEqual({int(w.table.item(i.row(),6).text()) for i in w.table.selectedIndexes()},{mirror})
+    self.assertEqual(w.table.verticalScrollBar().value(),before)
+    self.assertTrue(w.table.item(w.table.currentRow(),4).font().bold())
+    w.sort_skus(5);w.sort_skus(5)
+    with patch.object(ChangeDescriptionDialog,'exec_',edit):w.edit_sku_change_description(mirror)
+    self.app.processEvents();self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),mirror)
+    s.update_sku_change_description(mirror,'第二次修改');self.app.processEvents()
+    self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),mirror)
+   finally:w.close();db.close()
