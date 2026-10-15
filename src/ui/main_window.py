@@ -340,6 +340,7 @@ class MainWindow(QMainWindow):
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(sku_timestamp(r['updated_at']))); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
    self.table.item(i,4).setData(DESCRIPTION_ROLE,r['change_description'])
+   version_font=self.table.item(i,4).font();version_font.setBold(bool((r['change_description'] or '').strip()));self.table.item(i,4).setFont(version_font)
    self.table.item(i,1).setData(Qt.UserRole,r['material_id'])
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
