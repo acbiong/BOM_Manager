@@ -433,6 +433,8 @@ class MainWindow(QMainWindow):
    if not valid:
     new_db.close()
     raise ValueError('数据库结构不可用，缺少表：'+', '.join(missing))
+   from ui.shared_bom_migration import prepare_shared_bom
+   if not prepare_shared_bom(new_db,self):new_db.close();return
    for window in set(self._material_bom_windows.values())|set(self._bom_windows.values()):
     if not window.close(): new_db.close(); return
    if self._materials is not None: self._materials.close()
@@ -678,7 +680,7 @@ class BomWindow(QMainWindow):
   if self._saving: return
   if event.get('type')=='sku_changed':
    self.update_mirror_title();return
-  if event.get('type')=='bom_changed' and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
+  if event.get('type')=='bom_changed' and not event.get('shared') and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
    self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
  def closeEvent(self,event):

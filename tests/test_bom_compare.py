@@ -24,9 +24,9 @@ class BomCompareTests(unittest.TestCase):
   self.assertTrue(all(d.status=='same' for d in compare_boms(self.s,self.sid,copy)))
   self.put(mirror,self.p,[(self.c,4,dict(position='A1',remark='test'))]);mirror.add_alternate(mirror.bom(self.p)[0]['id'],self.a)
   rows=compare_boms(self.s,self.sid,copy)
-  self.assertEqual([d.status for d in rows],['same','same','modified'])
-  self.assertEqual(set(rows[-1].changed),{'quantity','position','remark','alternates'})
-  self.assertEqual(self.s.bom(self.p)[0]['quantity'],3)
+  self.assertEqual([d.status for d in rows],['same','same','same'])
+  self.assertEqual(rows[-1].changed,())
+  self.assertEqual(self.s.bom(self.p)[0]['quantity'],4)
  def test_deleted_and_added_subtrees_and_ui(self):
   self.put(self.s,self.r,[(self.p,1,{}),(self.a,1,{})]);self.put(self.s,self.p,[(self.c,1,{})])
   copy=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copy)
@@ -50,8 +50,8 @@ class BomCompareTests(unittest.TestCase):
   new=self.s.create_material(dict(base_code='C',version='101',name='C',unit='pcs'))
   self.put(mirror,self.p,[(new,2,{})])
   rows=compare_boms(self.s,self.sid,copy)
-  self.assertEqual([d.status for d in rows],['same','same','modified','same','same'])
-  self.assertEqual(rows[2].changed,('version',))
+  self.assertEqual([d.status for d in rows],['same','same','same','same','same'])
+  self.assertEqual(rows[2].changed,())
  def test_empty_same_and_invalid_selection(self):
   rows=compare_boms(self.s,self.sid,self.sid);self.assertEqual(len(rows),1);self.assertEqual(rows[0].status,'same')
   with self.assertRaises(ValueError):compare_boms(self.s,self.sid,-1)

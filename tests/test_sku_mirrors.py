@@ -27,22 +27,22 @@ class MirrorTests(unittest.TestCase):
     self.assertIsNot(w,other);self.assertIs(main.open_bom_id(copy),other)
     self.assertEqual(main.table.item(0,4).text(),'100');self.assertEqual(main.table.item(1,4).text(),'101')
     mirror.save_bom(p,[dict(material_id=c,quantity=5,unit='pcs',remark='镜像备注')])
-    self.assertEqual(s.bom(p)[0]['quantity'],3);self.assertEqual(mirror.bom(p)[0]['quantity'],5)
-    self.assertFalse(w.refresh_action.isEnabled())
-    s.save_bom(p,[dict(material_id=c,quantity=7,unit='pcs')]);self.assertEqual(mirror.bom(p)[0]['quantity'],5)
+    self.assertEqual(s.bom(p)[0]['quantity'],5);self.assertEqual(mirror.bom(p)[0]['quantity'],5)
+    self.assertTrue(w.refresh_action.isEnabled())
+    s.save_bom(p,[dict(material_id=c,quantity=7,unit='pcs')]);self.assertEqual(mirror.bom(p)[0]['quantity'],7)
     main._sku_filters={4:('',{'101'})};main.apply_sku_filters();self.assertTrue(main.table.isRowHidden(0));self.assertFalse(main.table.isRowHidden(1))
-    totals=s.sku_material_quantities();self.assertEqual(totals[sid][c],14);self.assertEqual(totals[copy][c],10)
+    totals=s.sku_material_quantities();self.assertEqual(totals[sid][c],14);self.assertEqual(totals[copy][c],14)
     s.change_mirror_version(copy,105);self.assertIn('105',other.windowTitle())
     with self.assertRaises(ValueError):s.change_mirror_version(copy,100)
     next_id=s.copy_sku_bom(copy);self.assertEqual(s.skus()[-1]['mirror_version'],106)
     export=Path(tmp)/'mirror.xlsx';s.export_sku(copy,export);wb=load_workbook(export)
-    self.assertEqual(wb['R'].cell(4,10).value,5);wb.close()
+    self.assertEqual(wb['R'].cell(4,10).value,7);wb.close()
     logs=list(mirror.db.conn.execute("SELECT changed_at,detail FROM change_logs WHERE object_type='bom' ORDER BY id"));self.assertTrue(any('镜像备注' in row['detail'] for row in logs));self.assertRegex(logs[-1]['changed_at'],r'\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{2}$')
-    other.close();s.delete_sku(copy);self.assertEqual(s.bom(p)[0]['quantity'],7);self.assertEqual(s.for_sku(next_id).bom(p)[0]['quantity'],5)
+    other.close();s.delete_sku(copy);self.assertEqual(s.bom(p)[0]['quantity'],7);self.assertEqual(s.for_sku(next_id).bom(p)[0]['quantity'],7)
    finally:
     for window in list(main._bom_windows.values()):window.dirty=False;window.close()
     main.close();db.close()
-   db=Database(path);s=Services(db);self.assertEqual(s.for_sku(next_id).bom(p)[0]['quantity'],5);db.close()
+   db=Database(path);s=Services(db);self.assertEqual(s.for_sku(next_id).bom(p)[0]['quantity'],7);db.close()
  def test_migration_backup_default_versions_and_local_centisecond_logs(self):
   import sqlite3
   from datetime import datetime,timezone
@@ -85,7 +85,7 @@ class MirrorTests(unittest.TestCase):
     node=w.insert_material(w.root_item,s.material_snapshot(p));self.assertEqual(node.childCount(),1);self.assertEqual(node.child(0).text(1),'3')
     self.assertEqual(mirror.bom(r),[])
     with patch.object(QMessageBox,'information'):self.assertTrue(w.save())
-    s.save_bom(p,[dict(material_id=c,quantity=9,unit='pcs')]);self.assertEqual(mirror.bom(p)[0]['quantity'],3)
+    s.save_bom(p,[dict(material_id=c,quantity=9,unit='pcs')]);self.assertEqual(mirror.bom(p)[0]['quantity'],9)
     before=len(s.skus())
     with patch('services.mirrors.create_namespace',side_effect=RuntimeError('test failure')):
      with self.assertRaises(RuntimeError):s.copy_sku_bom(copy)

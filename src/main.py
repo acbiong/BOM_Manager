@@ -138,6 +138,8 @@ def main():
    QMessageBox.information(None,'使用本地配置目录','软件所在目录为只读或无写入权限（网络共享可能以只读方式挂载）。\n配置保存在：'+str(config_service.path)+'\n新建数据库将默认使用可写目录，您也可以自行选择其他可写位置。')
   db=startup_database(config_service,cfg)
   if db is None:return 0
+  from ui.shared_bom_migration import prepare_shared_bom
+  if not prepare_shared_bom(db):return 0
   w=MainWindow(Services(db,config_service),VERSION); w.show(); guard.set_window(w); return app.exec_()
  except Exception as exc:
   log=(base or Path(tempfile.gettempdir()))/'startup_error.log'

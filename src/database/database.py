@@ -50,7 +50,7 @@ class Database:
     self.conn.execute('UPDATE change_logs SET changed_at=? WHERE id=?',(value,row['id']))
    self.conn.execute("INSERT INTO app_metadata VALUES('local_log_time_v1','1')")
   from services.mirrors import TABLES,table_name
-  existing={row[0] for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+  existing={row[0] for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
   for row in self.conn.execute('SELECT id,scope_id FROM skus WHERE scope_id<>0'):
    if row['scope_id']!=row['id'] or any(table_name(row['id'],table) not in existing for table in TABLES):raise ValueError('镜像BOM数据表缺失或标识错误，请从备份恢复数据库')
   self.conn.commit()

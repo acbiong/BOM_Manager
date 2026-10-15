@@ -20,7 +20,13 @@ MATERIAL_IMPORT_DEFAULTS={'物料等级':'','M/P':'M'}
 class Services:
  UNITS=list(DEFAULT_MATERIAL_UNITS); MP=['M','P']
  def __init__(self,db,config_service=None):
-  self.db=db; self.config_service=config_service; self.UNITS=config_service.material_units() if config_service else list(DEFAULT_MATERIAL_UNITS)
+  self.db=db
+  if not hasattr(db,'original'):
+   from services.shared_bom import is_shared,migrate,conflicts,migration_candidates
+   if not is_shared(db.conn):
+    if conflicts(migration_candidates(db)):raise ValueError('数据库需要逐项选择公共子BOM结构后才能使用')
+    migrate(db)
+  self.config_service=config_service; self.UNITS=config_service.material_units() if config_service else list(DEFAULT_MATERIAL_UNITS)
  MATERIAL_FIELDS=[('base_code','基础编码'),('version','版本号'),('name','物料名称'),('description','规格描述'),('unit','单位'),('grade','物料等级'),('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P')]
  def material_snapshot(self,i):
   row=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
@@ -38,7 +44,25 @@ class Services:
   self.db.conn.execute('INSERT INTO change_logs(object_type,object_id,action,detail,material_code,material_name,changed_at) VALUES(?,?,?,?,?,?,?)',(typ,obj,act,detail,code,snapshot.get('name'),datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]))
  def publish(self,event):
   from infrastructure.events import WindowRefreshBus
-  if event.get('type')=='bom_changed' and getattr(self,'scope_id',0):event=dict(event,scope_id=self.scope_id)
+  if event.get('type')=='bom_changed':
+   primary=getattr(self,'primary',self);parent=event.get('root')
+   own_root=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(self.scope_id,)).fetchone()[0] if getattr(self,'scope_id',0) else None
+   if getattr(self,'scope_id',0) and parent==own_root:event=dict(event,scope_id=self.scope_id)
+   else:
+    event=dict(event,shared=not bool(primary.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(parent,)).fetchone()))
+    affected=[]
+    for sku in primary.skus():
+     scoped=primary.for_sku(sku['id'])
+     if sku['scope_id']:scoped.refresh_usage()
+     if parent==sku['material_id'] or any(r['material_id']==parent for r in scoped.bom(sku['material_id'])):
+      affected.append(sku['id'])
+      if sku['scope_id']:primary.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4],sku['id']))
+      else:
+       stamp=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+       primary.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,sku['material_id']))
+       primary.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(stamp,sku['id']))
+    primary.db.conn.commit()
+    if affected:WindowRefreshBus.publish({'type':'sku_changed','ids':affected})
   WindowRefreshBus.publish(event)
  def for_sku(self,sid):
   row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
@@ -247,6 +271,22 @@ class Services:
    for child in graph.get(node,()): check(child)
    visiting.remove(node); visited.add(node)
   for parent in parents: check(parent)
+  # A shared edit must also be acyclic under every other SKU root variant.
+  primary=getattr(self,'primary',self);own_scope=getattr(self,'scope_id',0)
+  own_root=self.db.conn.root if own_scope else None
+  public_parents=parents-({own_root} if own_scope else set())
+  original_graph=graph
+  for sku in primary.skus():
+   if sku['scope_id']==own_scope:continue
+   scoped=primary.for_sku(sku['id']);graph={}
+   for parent,child in scoped.bom_graph_edges():graph.setdefault(parent,set()).add(child)
+   updates=public_parents-({sku['material_id']} if sku['scope_id'] else set())
+   for parent in updates:graph[parent]=set()
+   for parent,child,_ in desired:
+    if parent in updates:graph.setdefault(parent,set()).add(child)
+   visiting=set();visited=set()
+   for parent in graph:check(parent)
+  graph=original_graph
   if preview:
    # 使用与正式保存完全相同的关系集合生成编辑树，不写库、不发送刷新通知。
    relations={key:payload(row) for key,row in old.items() if key[0] not in parents}
@@ -303,6 +343,8 @@ class Services:
     parent=pending.pop()
     for child in graph.get(parent,[]):
      if child not in protected:protected.add(child);pending.append(child)
+   protected.update(r[0] for r in self.db.conn.execute('SELECT material_id FROM mirror_material_usage'))
+   if getattr(self,'scope_id',0):protected.update(r[0] for r in self.primary.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items'))
    for parent in candidates-protected:
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(parent,))
     self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(parent,))
@@ -362,6 +404,16 @@ class Services:
     log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     for affected,contained in log_roots.items():
      if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
+    if getattr(self,'scope_id',0):
+     sku_root=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(self.scope_id,)).fetchone()[0]
+     if key[0]!=sku_root:
+      record=self.db.conn.execute('SELECT * FROM change_logs WHERE id=?',(log_id,)).fetchone()
+      columns=[c for c in record.keys() if c!='id']
+      shared_id=self.primary.db.conn.execute('INSERT INTO change_logs ('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',[record[c] for c in columns]).lastrowid
+      for sku in self.primary.skus():
+       scoped=self.primary.for_sku(sku['id'])
+       if any(r['material_id']==key[0] for r in scoped.bom(sku['material_id'])) or sku['material_id']==key[0]:
+        self.primary.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots VALUES(?,?)',(shared_id,sku['material_id']))
    if getattr(self,'scope_id',0):self.refresh_usage()
   from infrastructure.events import WindowRefreshBus
   report(90,'正在通知相关BOM窗口…')
@@ -576,6 +628,12 @@ class Services:
     for parent_id in sorted(parent_ids):
      parent=self.material_snapshot(parent_id);label=parent['base_code']+parent['version']+' '+parent['name']
      sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}"
+     if parent_id!=sku['material_id']:
+      group=next((v for v in result if v['parent_id']==parent_id),None)
+      if group is not None:
+       if group['sku_ids']==[None]:group['sku_ids']=[];group['sku_labels']=[];group['labels']=[]
+       group['sku_ids'].append(sku['id']);group['sku_labels'].append(sku_label);group['labels'].append(sku_label+'/'+label)
+       continue
      result.append(dict(parent_id=f"mirror:{sku['id']}:{parent_id}",material_parent_id=parent_id,sku_ids=[sku['id']],sku_labels=[sku_label],parent_label=label,labels=[sku_label+'/'+label]))
   return result
  def material_usage(self,i):
@@ -885,6 +943,14 @@ class Services:
   records=[row for row in self.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if row['id'] in linked or (row['object_type'] in ('material','bom') and row['object_id'] in material_ids) or (row['object_type']=='sku' and row['object_id']==sid)]
   reset=self.db.conn.execute('SELECT start_log_id FROM sku_history_reset WHERE root_id=?',(sku['material_id'],)).fetchone()
   if reset:records=[row for row in records if row['id']>=reset[0]]
+  if getattr(self,'scope_id',0):
+   public_linked={r[0] for r in self.primary.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(sku['material_id'],))}
+   shared=[r for r in self.primary.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if r['object_type'] in ('material','bom') and (r['object_id'] in material_ids or r['id'] in public_linked) and (r['object_type']=='material' or r['object_id']!=sku['material_id'])]
+   unique={}
+   for record in records+shared:
+    identity=tuple(record[k] for k in ('object_type','object_id','action','detail','changed_at','material_code','material_name'))
+    unique[identity]=record
+   records=sorted(unique.values(),key=lambda r:(r['changed_at'] or '',r['id']))
   self.write_change_sheet(w,records)
   import re
   name=self.material_snapshot(sku['material_id'])['name']
