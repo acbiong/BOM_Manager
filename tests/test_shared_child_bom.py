@@ -38,15 +38,17 @@ class SharedChildBomTests(unittest.TestCase):
   finally:dialog.close()
   self.assertTrue(is_shared(self.db.conn));self.assertEqual(len(list(self.path.parent.glob('*.pre-shared-bom-*.db'))),1)
   mirror=self.s.for_sku(sid);self.assertEqual(self.s.bom(self.p)[0]['quantity'],7);self.assertEqual(mirror.bom(self.r)[0]['quantity'],4);self.assertEqual(self.s.bom(self.r)[0]['quantity'],3)
-  rid=mirror.bom(self.p)[0]['id'];mirror.add_alternate(rid,self.a);self.assertEqual(self.s.alternates(rid)[0]['material_id'],self.a)
-  self.assertEqual(self.db.conn.execute(f'SELECT COUNT(*) FROM {table_name(sid,"material_bom_items")}_local WHERE parent_material_id<>?',(self.r,)).fetchone()[0],0)
+  from services.snapshot_bom import migrate as migrate_snapshots
+  migrate_snapshots(self.db)
+  rid=mirror.bom(self.p)[0]['id'];mirror.add_alternate(rid,self.a);self.assertEqual(self.s.alternates(rid),[])
+  self.assertEqual(mirror.alternates(rid)[0]['material_id'],self.a)
   self.db.close();self.db=Database(str(self.path));self.s=Services(self.db);self.assertEqual(self.s.for_sku(sid).bom(self.p)[0]['quantity'],7)
- def test_shared_edit_notifies_all_mirrors_but_root_edit_stays_independent(self):
+ def test_private_edit_notifies_only_its_mirror(self):
   copy=self.s.copy_sku_bom(self.sid);mirror=self.s.for_sku(copy);main=MainWindow(self.s);a=main.open_bom_id(self.sid);b=main.open_bom_id(copy)
   try:
    mirror.save_bom(self.p,[dict(material_id=self.c,quantity=8,unit='pcs',alternate_material_ids=[self.a])])
-   self.assertEqual(self.s.bom(self.p)[0]['quantity'],8);self.assertTrue(a.refresh_action.isEnabled());self.assertTrue(b.refresh_action.isEnabled())
-   refs=self.s.material_version_references(self.c);self.assertEqual(len(refs),1);self.assertEqual(set(refs[0]['sku_ids']),{self.sid,copy})
+   self.assertEqual(self.s.bom(self.p)[0]['quantity'],2);self.assertFalse(a.refresh_action.isEnabled());self.assertTrue(b.refresh_action.isEnabled())
+   refs=self.s.material_version_references(self.c);self.assertEqual(len(refs),2);self.assertEqual({sid for ref in refs for sid in ref['sku_ids']},{self.sid,copy})
    a.refresh_external();b.refresh_external();a.dirty=False;b.dirty=False
    self.s.save_bom(self.r,[dict(material_id=self.p,quantity=6,unit='pcs'),dict(material_id=self.c,parent_material_id=self.p,quantity=8,unit='pcs',alternate_material_ids=[self.a])])
    self.assertEqual(mirror.bom(self.r)[0]['quantity'],3);self.assertEqual(self.s.bom(self.r)[0]['quantity'],6)
@@ -70,7 +72,7 @@ class SharedChildBomTests(unittest.TestCase):
   path=Path(self.tmp.name)/'out.xlsx';self.s.export_sku(two,path);wb=load_workbook(path)
   try:
    text='\n'.join(str(cell.value or '') for row in wb['变更记录'] for cell in row)
-   self.assertIn('公共子BOM测试备注',text);self.assertIn('再次公共编辑',text)
+   self.assertIn('公共子BOM测试备注',text);self.assertNotIn('再次公共编辑',text)
   finally:wb.close()
   mirror.save_bom(self.r,[dict(material_id=self.p,quantity=4,unit='pcs',alternate_material_ids=[]),dict(material_id=self.c,parent_material_id=self.p,quantity=10,unit='pcs',remark='再次公共编辑')])
   self.assertEqual(mirror.alternates(root_id),[]);self.assertEqual(self.s.for_sku(one).alternates(self.s.for_sku(one).bom(self.r)[0]['id'])[0]['material_id'],self.a)
@@ -94,7 +96,6 @@ class SharedChildBomTests(unittest.TestCase):
   # Public root no longer contains P; only the copied SKU still does.
   self.s.save_bom(self.r,[])
   before=[dict(r) for r in self.s.bom(self.p)]
-  with self.assertRaisesRegex(ValueError,'循环'):
-   self.s.save_bom(self.p,[dict(material_id=self.r,quantity=1,unit='pcs')])
-  self.assertEqual([dict(r) for r in self.s.bom(self.p)],before)
+  self.s.save_bom(self.p,[dict(material_id=self.r,quantity=1,unit='pcs')])
+  self.assertEqual(mirror.bom(self.p)[0]['material_id'],self.c)
   self.assertEqual(mirror.bom(self.r)[0]['material_id'],self.p)

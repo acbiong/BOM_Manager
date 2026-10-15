@@ -56,8 +56,19 @@ class Database:
   self.conn.commit()
  @contextmanager
  def transaction(self):
-  try: yield self.conn; self.conn.commit()
-  except: self.conn.rollback(); raise
+  depth=getattr(self,'_transaction_depth',0);self._transaction_depth=depth+1
+  name='bom_nested_'+str(depth)
+  if depth:self.conn.execute('SAVEPOINT '+name)
+  elif not self.conn.in_transaction:self.conn.execute('BEGIN')
+  try:
+   yield self.conn
+   if depth:self.conn.execute('RELEASE SAVEPOINT '+name)
+   else:self.conn.commit()
+  except:
+   if depth:self.conn.execute('ROLLBACK TO SAVEPOINT '+name);self.conn.execute('RELEASE SAVEPOINT '+name)
+   else:self.conn.rollback()
+   raise
+  finally:self._transaction_depth=depth
  def validate_schema(self):
   required={'materials','skus','bom_items','material_bom_items','alternates','change_logs','project'}
   got={r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}

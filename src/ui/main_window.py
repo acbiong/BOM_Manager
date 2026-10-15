@@ -433,8 +433,8 @@ class MainWindow(QMainWindow):
    if not valid:
     new_db.close()
     raise ValueError('数据库结构不可用，缺少表：'+', '.join(missing))
-   from ui.shared_bom_migration import prepare_shared_bom
-   if not prepare_shared_bom(new_db,self):new_db.close();return
+   from ui.snapshot_migration import prepare_snapshot_bom
+   if not prepare_snapshot_bom(new_db,self):new_db.close();return
    for window in set(self._material_bom_windows.values())|set(self._bom_windows.values()):
     if not window.close(): new_db.close(); return
    if self._materials is not None: self._materials.close()
@@ -591,6 +591,18 @@ class MainWindow(QMainWindow):
   if window is not None:self._bom_windows[sid]=window
   return window
  def open_material_bom(self,material_id):
+  from services.snapshot_bom import enabled,material_sources
+  if enabled(self.svc.db):
+   sources=material_sources(self.svc,material_id)
+   if sources:
+    labels=[f"{r['base_code']}{r['version']} {r['name']} 镜像{r['mirror_version']}" for r in sources]
+    chosen=labels[0]
+    if len(sources)>1:
+     chosen,ok=QInputDialog.getItem(self,'选择要编辑的BOM镜像','子BOM属于独立镜像，请选择：',labels,0,False)
+     if not ok:return
+    window=self.open_bom_id(sources[labels.index(chosen)]['id'])
+    if window is not None:window.locate_material(material_id)
+    return window
   if self.svc.db.conn.execute('SELECT 1 FROM materials WHERE id=?',(material_id,)).fetchone() is None:return
   if material_id not in self._material_bom_windows:
    window=BomWindow(self.svc,material_id,self)
@@ -702,7 +714,7 @@ class BomWindow(QMainWindow):
   if self._saving: return
   if event.get('type')=='sku_changed':
    self.update_mirror_title();return
-  if event.get('type')=='bom_changed' and not event.get('shared') and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
+  if event.get('type')=='bom_changed' and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
    self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
  def closeEvent(self,event):
@@ -1409,7 +1421,15 @@ class BomWindow(QMainWindow):
     rows.append(d)
     for j in range(it.childCount()): walk(it.child(j),d['material_id'])
    for j in range(self.root_item.childCount()): walk(self.root_item.child(j),self.root)
-   self.svc.save_bom(self.root,rows,progress=lambda n,text:report(int(n*0.85),text))
+   from services.snapshot_bom import revision_conflicts,save_with_revisions
+   violations=revision_conflicts(self.svc,self.root,rows)
+   if violations:
+    progress.hide()
+    from ui.parent_revision import ParentRevisionDialog
+    chooser=ParentRevisionDialog(self.svc,violations,self)
+    if chooser.exec_()!=QDialog.Accepted:return False
+    progress.show();revisions=save_with_revisions(self.svc,self.root,rows,chooser.versions(),progress=lambda n,text:report(int(n*0.85),text));self.root=revisions.get(self.root,self.root)
+   else:self.svc.save_bom(self.root,rows,progress=lambda n,text:report(int(n*0.85),text))
    report(90,'正在刷新BOM显示…')
    self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
    report(100,'BOM保存完成')
@@ -1446,6 +1466,8 @@ class MaterialWindow(QMainWindow):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self._filters={}; self._local_bom_windows={}; WindowRefreshBus.subscribe(self.on_event); self.setWindowTitle('物料库')
   menu=self.menuBar(); a=menu.addAction('新建物料'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('查找物料'); a.setShortcut('Ctrl+F');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.search_materials); self.resize(1000,600); self.t=FrozenMaterialTable(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
+  from services.snapshot_bom import enabled
+  if enabled(self.svc.db):self._column_labels.append('是否被最新镜像使用')
   self._base_column_labels=list(self._column_labels);self._sku_column_ids=[];self._hidden_skus=set()
   self._column_config=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
   self._selected_skus=self._column_config.sku_columns(self.svc.db.path)
@@ -1612,9 +1634,9 @@ class MaterialWindow(QMainWindow):
   quantities=self.svc.sku_material_quantities(skus)
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
-   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+[format_quantity(quantities[sku['id']][r['id']]) if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
+   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+([r['latest_used']] if 'latest_used' in r.keys() else [])+[format_quantity(quantities[sku['id']][r['id']]) if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
     item=QTableWidgetItem(str(v or '')); item.setData(Qt.UserRole,r['id'])
-    if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料'):item.setTextAlignment(Qt.AlignCenter)
+    if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新镜像使用'):item.setTextAlignment(Qt.AlignCenter)
     if j>=base:
      item.setBackground(QColor('#eeeeee' if v=='NA' else '#d9ead3'));item.setForeground(QColor('black'))
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))

@@ -78,13 +78,13 @@ class VersionUpdateTests(unittest.TestCase):
    with patch.object(MaterialSelectionDialog,'getItem',return_value=('P2 new',True)),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes) as question:
     new=self.w.replace_material(self.w.root_item.child(0));question.assert_called_once()
    self.assertEqual(new.child(0).data(0,Qt.UserRole)['material_id'],self.ids['c']);self.assertEqual(flag(),'N')
-   self.save();self.assertEqual(flag(),'Y');self.assertEqual(self.s.bom(self.ids['new'])[0]['material_id'],self.ids['c'])
+   self.save();self.assertEqual(flag(),'Y');self.assertEqual(self.s.bom(self.ids['new']),[])
    self.assertEqual(mirror.bom(self.ids['new'])[0]['material_id'],self.ids['c'])
    index=next(i for i in range(library.t.rowCount()) if library.t.item(i,0).text()=='P' and library.t.item(i,1).text()=='2')
    self.assertEqual(library.t.item(index,9).text(),'Y')
    child=self.w.root_item.child(0).child(0);self.w.remove_relation(child);self.save();self.assertEqual(flag(),'N')
    self.w.insert_material(self.w.root_item.child(0),mirror.material_snapshot(self.ids['c']));self.save();self.assertEqual(flag(),'Y')
-   self.s.delete_sku(copy);self.assertEqual(flag(),'Y')
+   self.s.delete_sku(copy);self.assertEqual(flag(),'N')
   finally:library.close()
  def test_regular_replace_copy_cancel_and_decline(self):
   for answer in (QMessageBox.Cancel,QMessageBox.No):

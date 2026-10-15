@@ -18,9 +18,32 @@ class MirrorServices(Services):
                 self.db.conn.execute('INSERT OR IGNORE INTO mirror_material_usage VALUES(?,?,?,?)',(self.sku_id,alternate['material_id'],node['parent_material_id'],'alternate'))
 
     def ensure_material_bom(self, material_id):
-        # Non-root definitions are read directly from the shared public graph.
-        return
+        """Capture a newly selected material's definitions without changing the SKU tree.
 
-    def bom_graph_edges(self):return super().bom_graph_edges()
+        Already captured parents (including empty leaves) never follow global edits.
+        """
+        from services.snapshot_bom import enabled,template_service
+        source=template_service(self.primary,material_id) if enabled(self.db) else self.primary
+        with self.db.transaction():
+            pending=[material_id]
+            while pending:
+                parent=pending.pop()
+                if self.db.conn.execute('SELECT 1 FROM mirror_captured_materials WHERE sku_id=? AND material_id=?',(self.sku_id,parent)).fetchone():continue
+                self.db.conn.execute('INSERT INTO mirror_captured_materials VALUES(?,?)',(self.sku_id,parent))
+                for row in source.db.conn.execute('SELECT * FROM material_bom_items WHERE parent_material_id=? ORDER BY sort_no,id',(parent,)).fetchall():
+                    relation=self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(parent,row['child_material_id'],row['quantity'],row['unit'],row['position'],row['remark'],row['sort_no'])).lastrowid
+                    for alt in source.alternates(row['id']):
+                        self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',(relation,alt['material_id'],alt['sort_no']))
+                    pending.append(row['child_material_id'])
 
-    def bom(self,root):return super().bom(root)
+    def bom_graph_edges(self):
+        captured={row[0] for row in self.db.conn.execute('SELECT material_id FROM mirror_captured_materials WHERE sku_id=?',(self.sku_id,))}
+        return list(super().bom_graph_edges())+[row for row in self.primary.bom_graph_edges() if row[0] not in captured]
+
+    def bom(self,root):
+        if not self.db.conn.execute('SELECT 1 FROM mirror_captured_materials WHERE sku_id=? AND material_id=?',(self.sku_id,root)).fetchone():
+            from services.snapshot_bom import enabled,template_service
+            source=template_service(self.primary,root) if enabled(self.db) else self.primary
+            if source is not self.primary and getattr(source,'scope_id',None)==self.scope_id:return super().bom(root)
+            return Services.bom(source,root)
+        return super().bom(root)
