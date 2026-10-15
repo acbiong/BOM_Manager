@@ -343,7 +343,6 @@ class MainWindow(QMainWindow):
    self.table.item(i,1).setData(Qt.UserRole,r['material_id'])
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
-  self.count_label.setText(f'共计{len(rows)}个SKU'); self.count_label.setToolTip('当前SKU总数')
   self.apply_sku_filters();self.publish_sku_order()
  def filter_skus(self):
   labels=['SKU编码','SKU名称','SKU描述','版本号','修改日期时间','清除全部筛选']
@@ -358,7 +357,7 @@ class MainWindow(QMainWindow):
    else:self._sku_filters[column]=condition
    self.apply_sku_filters()
  def apply_sku_filters(self):
-  count=0; latest={}
+  count=0; latest={}; sku_codes=set(); visible_codes=set()
   only_latest=self.latest_bom_only.isChecked()
   if only_latest:
    for row in range(self.table.rowCount()):
@@ -367,8 +366,11 @@ class MainWindow(QMainWindow):
   for row in range(self.table.rowCount()):
    visible=all(query.casefold() in self.table.item(row,col).text().casefold() and (selected is None or self.table.item(row,col).text() in selected) for col,(query,selected) in self._sku_filters.items())
    if only_latest:visible=visible and int(self.table.item(row,4).text())==latest[self.table.item(row,1).data(Qt.UserRole)]
+   code=self.table.item(row,1).text();sku_codes.add(code)
+   if visible:visible_codes.add(code)
    self.table.setRowHidden(row,not visible);count+=int(visible)
-  self.count_label.setText(f'显示{count} / 共计{self.table.rowCount()}个SKU' if self._sku_filters or only_latest else f'共计{self.table.rowCount()}个SKU')
+  self.count_label.setText(f'共计{len(sku_codes)}个SKU，{self.table.rowCount()}个BOM')
+  self.count_label.setToolTip(f'SKU按编码去重，每个镜像计为一个BOM。当前显示{len(visible_codes)}个SKU，{count}个BOM。')
  def copy_sku_bom(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
   window=self._bom_windows.get(sid) or (self._material_bom_windows.get(row['material_id']) if row and not row['scope_id'] else None)

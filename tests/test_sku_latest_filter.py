@@ -23,20 +23,20 @@ class LatestSkuTests(unittest.TestCase):
  def visible(self):return {int(self.w.table.item(i,6).text()) for i in range(self.w.table.rowCount()) if not self.w.table.isRowHidden(i)}
  def test_numeric_latest_per_sku_toggle_sort_and_count(self):
   self.assertFalse(self.w.latest_bom_only.isChecked());self.assertEqual(self.visible(),{self.a,self.a2,self.b,self.b2,self.c})
-  self.w.latest_bom_only.setChecked(True);self.assertEqual(self.visible(),{self.a2,self.b2,self.c});self.assertEqual(self.w.count_label.text(),'显示3 / 共计5个SKU')
+  self.w.latest_bom_only.setChecked(True);self.assertEqual(self.visible(),{self.a2,self.b2,self.c});self.assertEqual(self.w.count_label.text(),'共计3个SKU，5个BOM')
   for col in (1,2,4,5):
    self.w.sort_skus(col);self.w.sort_skus(col);self.assertEqual(self.visible(),{self.a2,self.b2,self.c})
-  self.w.latest_bom_only.setChecked(False);self.assertEqual(len(self.visible()),5);self.assertEqual(self.w.count_label.text(),'共计5个SKU')
+  self.w.latest_bom_only.setChecked(False);self.assertEqual(len(self.visible()),5);self.assertEqual(self.w.count_label.text(),'共计3个SKU，5个BOM')
  def test_existing_filters_are_intersected_without_old_version_fallback(self):
   self.w._sku_filters={4:('',{'9'})};self.w.apply_sku_filters();self.assertEqual(self.visible(),{self.a})
-  self.w.latest_bom_only.setChecked(True);self.assertEqual(self.visible(),set())
+  self.w.latest_bom_only.setChecked(True);self.assertEqual(self.visible(),set());self.assertEqual(self.w.count_label.text(),'共计3个SKU，5个BOM');self.assertIn('当前显示0个SKU，0个BOM',self.w.count_label.toolTip())
   self.w.latest_bom_only.setChecked(False);self.assertEqual(self.visible(),{self.a})
   self.w._sku_filters.clear();self.w.apply_sku_filters();self.assertEqual(len(self.visible()),5)
  def test_live_copy_version_change_and_delete_recompute_latest(self):
   self.w.latest_bom_only.setChecked(True)
-  copied=self.s.copy_sku_bom(self.a2);self.assertEqual(self.visible(),{copied,self.b2,self.c})
+  copied=self.s.copy_sku_bom(self.a2);self.assertEqual(self.visible(),{copied,self.b2,self.c});self.assertEqual(self.w.count_label.text(),'共计3个SKU，6个BOM')
   self.s.change_mirror_version(self.a,1000);self.assertEqual(self.visible(),{self.a,self.b2,self.c})
-  self.s.delete_sku(self.a);self.assertEqual(self.visible(),{copied,self.b2,self.c});self.assertTrue(self.w.latest_bom_only.isChecked())
+  self.s.delete_sku(self.a);self.assertEqual(self.visible(),{copied,self.b2,self.c});self.assertTrue(self.w.latest_bom_only.isChecked());self.assertEqual(self.w.count_label.text(),'共计3个SKU，5个BOM')
  def test_empty_list(self):
   for sku in list(self.s.skus()):self.s.delete_sku(sku['id'])
-  self.w.latest_bom_only.setChecked(True);self.assertEqual(self.visible(),set());self.assertEqual(self.w.count_label.text(),'显示0 / 共计0个SKU')
+  self.w.latest_bom_only.setChecked(True);self.assertEqual(self.visible(),set());self.assertEqual(self.w.count_label.text(),'共计0个SKU，0个BOM')
