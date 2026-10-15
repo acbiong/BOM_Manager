@@ -406,3 +406,22 @@ class BomCompareTests(unittest.TestCase):
     self.assertTrue(all(not table.isRowHidden(r) and not table.frozen.isRowHidden(r) for r in range(3)))
    self.assertEqual([d.left['serial'] for d in dialog._rows],original)
   finally:dialog.close();self.app.processEvents()
+ def test_sku_context_compare_uses_exact_mirror_and_reuses_window(self):
+  from unittest.mock import patch
+  from PyQt5.QtCore import QPoint
+  from PyQt5.QtWidgets import QMenu
+  from ui.main_window import MainWindow
+  self.put(self.s,self.r,[(self.p,2,{})]);copy=self.s.copy_sku_bom(self.sid)
+  self.put(self.s.for_sku(copy),self.r,[(self.p,5,{})]);main=MainWindow(self.s)
+  try:
+   main.sort_skus(4);main.sort_skus(4)
+   row=next(r for r in range(main.table.rowCount()) if int(main.table.item(r,6).text())==copy)
+   def choose(menu,*args):return next(a for a in menu.actions() if a.text()=='BOM对比')
+   with patch.object(main.table,'rowAt',return_value=row),patch.object(QMenu,'exec_',choose):main.sku_context_menu(QPoint())
+   dialog=main._compare_dialog;self.assertTrue(dialog.isVisible());self.assertEqual(dialog.left.currentData(),copy);self.assertIsNone(dialog.right.currentData());self.assertFalse(dialog._compared)
+   dialog.right.setCurrentIndex(dialog.right.findData(self.sid));dialog.compare();self.assertEqual(dialog._rows[1].status,'modified')
+   dialog.close();main.compare_sku_bom(self.sid)
+   self.assertIs(main._compare_dialog,dialog);self.assertTrue(dialog.isVisible());self.assertEqual(dialog.left.currentData(),self.sid);self.assertEqual(dialog.right.currentData(),self.sid);self.assertTrue(all(r.status=='same' for r in dialog._rows))
+   main.compare_sku_bom(copy);self.assertEqual(dialog.left.currentData(),copy);self.assertEqual(dialog._rows[1].status,'modified')
+   main.compare_boms();self.assertEqual(dialog.left.currentData(),copy);self.assertEqual(dialog.right.currentData(),self.sid)
+  finally:main.close()

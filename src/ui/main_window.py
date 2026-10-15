@@ -311,6 +311,12 @@ class MainWindow(QMainWindow):
   from ui.bom_compare import BomCompareDialog
   if not getattr(self,'_compare_dialog',None):self._compare_dialog=BomCompareDialog(self.svc,self)
   self._compare_dialog.reload_choices();self._compare_dialog.show();self._compare_dialog.raise_();self._compare_dialog.activateWindow()
+ def compare_sku_bom(self,sid):
+  self.compare_boms()
+  dialog=self._compare_dialog;index=dialog.left.findData(sid)
+  if index<0:return
+  dialog.left.setCurrentIndex(index)
+  if dialog.right.currentData() not in (None,'load_external'):dialog.compare()
  def show_about(self):
   AboutDialog(self.version,self).exec_()
  def set_theme(self,dark):
@@ -505,10 +511,11 @@ class MainWindow(QMainWindow):
   row=self.table.rowAt(pos.y())
   if row<0:return
   self.table.selectRow(row); sid=int(self.table.item(row,6).text())
-  menu=QMenu(self); description=menu.addAction('编辑变更描述'); version=menu.addAction('SKU版本变更');mirror=menu.addAction('镜像版本变更');copy=menu.addAction('复制BOM'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
+  menu=QMenu(self); description=menu.addAction('编辑变更描述'); version=menu.addAction('SKU版本变更');mirror=menu.addAction('镜像版本变更');copy=menu.addAction('复制BOM'); compare=menu.addAction('BOM对比'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
   if action==description:self.edit_sku_change_description(sid)
   elif action==copy:self.copy_sku_bom(sid)
+  elif action==compare:self.compare_sku_bom(sid)
   elif action==mirror:self.change_mirror_version(sid)
   elif action==version:self.change_sku_version(sid)
   elif action==export_action:self.export_sku_id(sid)
