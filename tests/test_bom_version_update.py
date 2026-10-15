@@ -68,3 +68,26 @@ class VersionUpdateTests(unittest.TestCase):
   for parent in [self.w.root_item.child(0),self.w.root_item.child(1).child(0)]:
    self.assertTrue(parent.child(0).data(0,Qt.UserRole)['_deleted']);self.assertEqual(parent.child(1).child(0).text(1),'2')
   self.save();self.assertEqual(self.s.bom(p)[0]['material_id'],self.ids['new'])
+ def test_regular_replace_mirror_107_copies_children_and_library_flag(self):
+  from ui.main_window import MaterialWindow
+  sid=self.s.create_sku(self.ids['r']);copy=self.s.copy_sku_bom(sid);self.s.change_mirror_version(copy,107);mirror=self.s.for_sku(copy)
+  self.w.close();self.w=BomWindow(mirror,self.ids['r']);library=MaterialWindow(self.s)
+  def flag():return next(row['has_bom'] for row in self.s.materials() if row['id']==self.ids['new'])
+  try:
+   self.assertEqual(flag(),'N')
+   with patch.object(MaterialSelectionDialog,'getItem',return_value=('P2 new',True)),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes) as question:
+    new=self.w.replace_material(self.w.root_item.child(0));question.assert_called_once()
+   self.assertEqual(new.child(0).data(0,Qt.UserRole)['material_id'],self.ids['c']);self.assertEqual(flag(),'N')
+   self.save();self.assertEqual(flag(),'Y');self.assertEqual(self.s.bom(self.ids['new']),[])
+   self.assertEqual(mirror.bom(self.ids['new'])[0]['material_id'],self.ids['c'])
+   index=next(i for i in range(library.t.rowCount()) if library.t.item(i,0).text()=='P' and library.t.item(i,1).text()=='2')
+   self.assertEqual(library.t.item(index,9).text(),'Y')
+   child=self.w.root_item.child(0).child(0);self.w.remove_relation(child);self.save();self.assertEqual(flag(),'N')
+   self.w.insert_material(self.w.root_item.child(0),mirror.material_snapshot(self.ids['c']));self.save();self.assertEqual(flag(),'Y')
+   self.s.delete_sku(copy);self.assertEqual(flag(),'N')
+  finally:library.close()
+ def test_regular_replace_copy_cancel_and_decline(self):
+  for answer in (QMessageBox.Cancel,QMessageBox.No):
+   with patch.object(MaterialSelectionDialog,'getItem',return_value=('P2 new',True)),patch.object(QMessageBox,'question',return_value=answer):new=self.w.replace_material(self.w.root_item.child(0))
+   if answer==QMessageBox.Cancel:self.assertIsNone(new);self.assertFalse(self.w.dirty)
+   else:self.assertEqual(new.childCount(),0);self.save();self.assertEqual(self.s.bom(self.ids['new']),[])

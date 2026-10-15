@@ -770,6 +770,8 @@ class BomWindow(QMainWindow):
    reason=self.paste_block_reason(node,False,material['id'])
    if material['id'] in self.alternate_ids(node):reason='目标版本已是当前物料的替代料，不能继承为自身替代料'
    if reason:QMessageBox.warning(self,'无法更新物料版本',reason.replace('粘贴','替换'));return
+  return self.replace_with_subtree_choice(item,matches,material)
+ def replace_with_subtree_choice(self,item,matches,material):
   subtree=None
   original=self.version_subtree_snapshot(item)
   target=next((node for _,node in self.expansion_nodes() if not (node.data(0,Qt.UserRole) or {}).get('_deleted') and (node.data(0,Qt.UserRole) or {}).get('material_id')==material['id']),None)
@@ -777,7 +779,7 @@ class BomWindow(QMainWindow):
   if target_tree:
    if target is not None:subtree=target_tree
   elif original:
-   answer=QMessageBox.question(self,'复制原子BOM','目标版本没有BOM结构，是否将原物料的子BOM复制到目标版本？\n选择“否”仅替换物料，不复制子BOM；点击保存后才写入数据库。',QMessageBox.Yes|QMessageBox.No|QMessageBox.Cancel,QMessageBox.Cancel)
+   answer=QMessageBox.question(self,'复制原子BOM','目标物料没有BOM结构，是否将原物料的子BOM复制到目标物料？\n选择“否”仅替换物料，不复制子BOM；点击保存后才写入数据库。',QMessageBox.Yes|QMessageBox.No|QMessageBox.Cancel,QMessageBox.Cancel)
    if answer==QMessageBox.Cancel:return
    if answer==QMessageBox.Yes:
     def contains(nodes):
@@ -829,7 +831,7 @@ class BomWindow(QMainWindow):
    if dialog.exec_()!=QDialog.Accepted:return
    matches=dialog.selected_nodes()
    if not matches:return
-  return self.replace_nodes(item,matches,material)
+  return self.replace_with_subtree_choice(item,matches,material)
  @preserve_bom_view
  def replace_nodes(self,item,matches,material,swap_alternate=False,version_children=None):
   selected=None
