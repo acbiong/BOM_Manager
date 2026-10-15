@@ -430,3 +430,11 @@ SKU右键新增编辑变更描述，使用可保存/取消的多行纯文本编�
 
 ### 2026-10-14 外部BOM对比
 比较拆成compare_boms和compare_trees；跨来源匹配用base_code/version，交换用alternate_codes（数据库快照和草稿均提供）。external_bom.ExcelSource用openpyxl/xlrd，build_external_bom仅构造内存dict，不访问DB。外部节点_external=True，禁止数据库编辑菜单。BOM候选按sku_display_order更新，末尾load_external；external_sources保存树和标签，selected_snapshot深拷贝。映射全字段，REQUIRED七项，ALT_SUFFIXES六项，optional_fields/preview_rows/mapping_kind/alternate_suffixes为映射窗新增兼容参数。compare_bom配置键独立记忆。真实xls测试样本tests/fixtures/external_bom.xls；xlrd运行依赖，xlwt不需随软件安装。
+
+
+## 2026-10-15 BOM编辑中的物料版本更新
+- 非根节点右键增加“物料版本更新”；仅选择物料库中相同基础编码的其他版本，没有其他版本时禁用。SKU/物料根节点保持原有身份管理方式。
+- 替换继承数量、位置、备注、替代料，载入目标版本子BOM；目标无子BOM而原物料有子BOM时提供复制/不复制/取消，复制包含未保存的子项编辑与替代料，排除待删除项。
+- 采用编辑缓存，旧物料标记删除、新版本标记新增，点击保存后写库；共享父项的显示副本同步替换，独立镜像保持隔离。
+- 检查同级重复、循环引用、自身替代料，禁止无效替换；复制到当前树已存在的空目标版本时同步显示其子BOM。
+- 验证：tests/test_bom_version_update.py 的8项回归覆盖版本候选/菜单禁用、复制与保存、拒绝复制/取消、目标已有结构、重复与循环、共享副本及镜像隔离；完整收尾测试报告位于 test_reports/。

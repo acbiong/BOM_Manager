@@ -662,10 +662,11 @@ class BomWindow(QMainWindow):
    elif act==child:self.add_relative(d,True)
    elif act==imp:self.import_bom(it)
    return
-  m=QMenu(self); edit=m.addAction('编辑此物料'); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); replace=m.addAction('替换物料'); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  m=QMenu(self); edit=m.addAction('编辑此物料'); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); replace=m.addAction('替换物料'); version=m.addAction('物料版本更新'); version.setEnabled(bool(self.material_versions(it))); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
   if self.handle_clipboard_action(act,clipboard_actions,it):return
   if act==edit:self.edit_tree_material(it);return
   if act==replace:self.replace_material(it);return
+  if act==version:self.update_material_version(it);return
   if act==up:self.move_item(it,-1); return
   if act==down:self.move_item(it,1); return
   if act==imp:self.import_bom(it); return
@@ -702,6 +703,61 @@ class BomWindow(QMainWindow):
    if mid in visited:continue
    visited.add(mid);pending.extend(reverse.get(mid,()))
   return blocked|visited
+ def material_versions(self,item):
+  data=item.data(0,Qt.UserRole) or {}
+  return list(self.svc.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND id<>? ORDER BY version',(data.get('base_code'),data.get('material_id'))))
+ def version_subtree_snapshot(self,item):
+  nodes=[]
+  for index in range(item.childCount()):
+   child=item.child(index);data=dict(child.data(0,Qt.UserRole) or {})
+   if data.get('_deleted'):continue
+   data.update(quantity=float(child.text(1)),position=child.text(3),_db_alternates=self.alternate_ids(child))
+   nodes.append(dict(data=data,children=self.version_subtree_snapshot(child)))
+  return nodes
+ def update_material_version(self,item):
+  if item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
+  rows=self.material_versions(item)
+  if not rows:return
+  choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
+  choice,ok=MaterialSelectionDialog.getItem(self,'物料版本更新','选择同基础编码的其他版本物料',choices,0,False)
+  if not ok:return
+  material=rows[choices.index(choice)];key=self.relation_key(item)
+  matches=[node for _,node in self.expansion_nodes() if node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted') and self.relation_key(node)==key]
+  for node in matches:
+   reason=self.paste_block_reason(node,False,material['id'])
+   if material['id'] in self.alternate_ids(node):reason='目标版本已是当前物料的替代料，不能继承为自身替代料'
+   if reason:QMessageBox.warning(self,'无法更新物料版本',reason.replace('粘贴','替换'));return
+  subtree=None
+  original=self.version_subtree_snapshot(item)
+  target=next((node for _,node in self.expansion_nodes() if not (node.data(0,Qt.UserRole) or {}).get('_deleted') and (node.data(0,Qt.UserRole) or {}).get('material_id')==material['id']),None)
+  target_tree=self.version_subtree_snapshot(target) if target is not None else self.svc.bom(material['id'])
+  if target_tree:
+   if target is not None:subtree=target_tree
+  elif original:
+   answer=QMessageBox.question(self,'复制原子BOM','目标版本没有BOM结构，是否将原物料的子BOM复制到目标版本？\n选择“否”仅替换物料，不复制子BOM；点击保存后才写入数据库。',QMessageBox.Yes|QMessageBox.No|QMessageBox.Cancel,QMessageBox.Cancel)
+   if answer==QMessageBox.Cancel:return
+   if answer==QMessageBox.Yes:
+    def contains(nodes):
+     return any(n['data']['material_id']==material['id'] or contains(n['children']) for n in nodes)
+    if contains(original):QMessageBox.warning(self,'无法更新物料版本','原子BOM包含目标版本，复制会造成循环引用。');return
+    subtree=original
+   else:subtree=[]
+  elif target is not None:subtree=[]
+  if subtree and not target_tree:
+   for _,node in list(self.expansion_nodes()):
+    if not (node.data(0,Qt.UserRole) or {}).get('_deleted') and (node.data(0,Qt.UserRole) or {}).get('material_id')==material['id']:
+     node.takeChildren();self.clone_version_children(node,subtree)
+  return self.replace_nodes(item,matches,material,version_children=subtree)
+ def clone_version_children(self,parent,nodes):
+  for node in nodes:
+   source=node['data'];pd=parent.data(0,Qt.UserRole) or {}
+   child=QTreeWidgetItem(parent,[f"{source['base_code']}{source['version']} {source['name']}",format_quantity(source['quantity']),source.get('unit',''),source.get('position',''),source.get('remark','')])
+   temp=-id(child);data={k:v for k,v in source.items() if not k.startswith('_')}
+   data.update(id=temp,node_id=str(temp),parent_node_id=pd.get('node_id'),parent_item_id=pd.get('id'),parent_material_id=pd['material_id'],level_no=(pd.get('level_no') or 0)+1,_added=True)
+   child.setData(0,Qt.UserRole,data);self.by[str(temp)]=child
+   self._alternate_edits[temp]=list(source.get('_db_alternates',[]))
+   self.clone_version_children(child,node['children']);self._draft_baselines[temp]=self.capture_item(child)
+  parent.setExpanded(True)
  def replace_material(self,item):
   if item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   alternates=self.alternate_ids(item)
@@ -732,11 +788,13 @@ class BomWindow(QMainWindow):
    if not matches:return
   return self.replace_nodes(item,matches,material)
  @preserve_bom_view
- def replace_nodes(self,item,matches,material,swap_alternate=False):
+ def replace_nodes(self,item,matches,material,swap_alternate=False,version_children=None):
   selected=None
   for old in matches:
    original=dict(old.data(0,Qt.UserRole) or {})
    added=self.insert_material(old.parent(),material,after=old)
+   if version_children is not None:
+    added.takeChildren();self.clone_version_children(added,version_children)
    data=dict(added.data(0,Qt.UserRole) or {})
    for field,column in [('quantity',1),('position',3),('remark',4)]:
     data[field]=original.get(field,1.0 if field=='quantity' else '')
