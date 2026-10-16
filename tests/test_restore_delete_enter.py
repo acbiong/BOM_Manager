@@ -43,3 +43,35 @@ class RestoreEnterTests(unittest.TestCase):
    try:
     d.combo.lineEdit().setText('match');QTest.keyClick(d.combo.lineEdit(),Qt.Key_Return);self.assertEqual(d.combo.currentText(),'B1 match');self.assertNotEqual(d.result(),QDialog.Accepted)
    finally:d.close();db.close()
+
+ def test_enter_confirms_preselected_material_and_keypad_enter(self):
+  for key in (Qt.Key_Return,Qt.Key_Enter):
+   def exercise(dialog):
+    combo=dialog.findChild(QComboBox);combo.setCurrentIndex(1)
+    QTest.keyClick(combo.lineEdit(),key)
+    self.assertEqual(dialog.result(),QDialog.Accepted)
+    return dialog.result()
+   with patch.object(MaterialSelectionDialog,'exec_',exercise):
+    self.assertEqual(MaterialSelectionDialog.getItem(None,'选择','物料',['A1 Alpha','B1 Beta']),('B1 Beta',True))
+ def test_sku_second_enter_confirms_first_filtered_candidate(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   mid=s.create_material(dict(base_code='B',version='1',name='match',unit='pcs'))
+   d=NewSkuDialog(s)
+   try:
+    d.combo.lineEdit().setText('match');QTest.keyClick(d.combo.lineEdit(),Qt.Key_Return)
+    self.assertNotEqual(d.result(),QDialog.Accepted)
+    QTest.keyClick(d.combo.lineEdit(),Qt.Key_Return)
+    self.assertEqual(d.result(),QDialog.Accepted);self.assertEqual(d.material_id,mid)
+   finally:d.close();db.close()
+
+ def test_enter_confirms_highlighted_completion_not_first_match(self):
+  def exercise(dialog):
+   dialog.show();combo=dialog.findChild(QComboBox);combo.lineEdit().setText('Beta')
+   completer=combo.completer();completer.setCompletionPrefix('Beta');completer.complete()
+   popup=completer.popup();popup.setCurrentIndex(completer.completionModel().index(1,0))
+   QTest.keyClick(popup,Qt.Key_Return)
+   self.assertEqual(dialog.result(),QDialog.Accepted)
+   return dialog.result()
+  with patch.object(MaterialSelectionDialog,'exec_',exercise):
+   self.assertEqual(MaterialSelectionDialog.getItem(None,'选择','物料',['B1 Beta','B2 Beta']),('B2 Beta',True))

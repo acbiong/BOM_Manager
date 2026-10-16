@@ -253,7 +253,7 @@ class MaterialSelectionDialog(QInputDialog):
   combo=dialog.findChild(QComboBox); combo.setInsertPolicy(QComboBox.NoInsert)
   completer=QCompleter(items,dialog); completer.setCaseSensitivity(Qt.CaseInsensitive); completer.setFilterMode(Qt.MatchContains); completer.setCompletionMode(QCompleter.PopupCompletion); combo.setCompleter(completer)
   combo.setCurrentIndex(-1); combo.lineEdit().setPlaceholderText('输入物料编码、版本或名称筛选')
-  dialog._enter_selection=FirstMaterialOnEnter(combo)
+  dialog._enter_selection=FirstMaterialOnEnter(combo,dialog.accept)
   dialog._valid_choices=set(items)
   return (dialog.textValue(),True) if dialog.exec_()==QDialog.Accepted else ('',False)
  def accept(self):
@@ -273,7 +273,7 @@ class NewSkuDialog(QDialog):
   self.combo.setModel(self.model); self.combo.setCurrentIndex(-1); self.combo.lineEdit().setPlaceholderText('输入物料编码或名称')
   self.proxy=QSortFilterProxyModel(self); self.proxy.setSourceModel(self.model); self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
   self.completer=QCompleter(self.proxy,self); self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion); self.combo.setCompleter(self.completer)
-  self._enter_selection=FirstMaterialOnEnter(self.combo)
+  self._enter_selection=FirstMaterialOnEnter(self.combo,self.accept)
   self.combo.lineEdit().textEdited.connect(self.filter_materials); layout.addWidget(self.combo)
   buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
  def filter_materials(self,text):
