@@ -18,6 +18,8 @@ env=dict(os.environ,PYTHONUTF8='1',PYTHONDONTWRITEBYTECODE='1')
 if os.name == 'nt':
     canonical_temp = str(Path(tempfile.gettempdir()).resolve())
     env.update(TEMP=canonical_temp, TMP=canonical_temp, TMPDIR=canonical_temp)
+    # The offscreen plugin does not discover native Windows fonts itself.
+    env.setdefault('QT_QPA_FONTDIR',str(Path(os.environ.get('WINDIR','C:/Windows'))/'Fonts'))
 failed=False
 with report.open('w',encoding='utf-8') as output:
     output.write(f'BOM管理系统测试报告\n时间：{datetime.datetime.now().astimezone().isoformat()}\n项目：{root}\nPython：{sys.executable}\n平台：{platform.platform()}\n')

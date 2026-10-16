@@ -39,6 +39,8 @@ jobs:
             test_reports/
   windows:
     runs-on: windows-2022
+    env:
+      QT_QPA_FONTDIR: C:/Windows/Fonts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QPlainTextEdit
 from PyQt5.QtCore import QRect
-from PyQt5.QtGui import QImage,QPainter
+from PyQt5.QtGui import QImage,QPainter,QFont,QFontDatabase
 from database.database import Database
 from services.services import Services
 from ui.main_window import MaterialWindow,BomWindow
@@ -28,6 +28,12 @@ class HeaderBomLayoutTests(unittest.TestCase):
     library._selected_skus={sid};library.refresh();library.show();self.app.processEvents()
     library.t.horizontalScrollBar().setValue(library.t.horizontalScrollBar().maximum());self.app.processEvents()
     header=library.t.horizontalHeader();header.timer.stop()
+    if sys.platform=='win32':
+     # Windows offscreen rendering needs a registered font, unlike the
+     # native desktop platform. Without one it paints no glyphs at all.
+     font_id=QFontDatabase.addApplicationFont(str(Path(os.environ.get('WINDIR','C:/Windows'))/'Fonts'/'arial.ttf'))
+     self.assertGreaterEqual(font_id,0)
+     header.setFont(QFont(QFontDatabase.applicationFontFamilies(font_id)[0],10))
     # Paint the SKU section explicitly: native Windows viewport grabs may
     # reuse a cached backing store and never invoke the animation painter.
     column=header.first_sku_column
