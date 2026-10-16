@@ -31,6 +31,8 @@ class HeaderBomLayoutTests(unittest.TestCase):
     # Paint the SKU section explicitly: native Windows viewport grabs may
     # reuse a cached backing store and never invoke the animation painter.
     column=header.first_sku_column
+    self.assertEqual(column,len(library._base_column_labels))
+    self.assertIn('SKU100',header.model().headerData(column,1))
     self.assertFalse(header.isSectionHidden(column))
     def frame(elapsed):
      header.clock=SimpleNamespace(elapsed=lambda:elapsed)

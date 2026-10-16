@@ -1646,6 +1646,7 @@ class MaterialWindow(QMainWindow):
   skus=list(self.svc.skus());order={sid:i for i,sid in enumerate(getattr(self.svc,'sku_display_order',[]))}
   skus.sort(key=lambda sku:order.get(sku['id'],len(order)+sku['id']))
   ids=[sku['id'] for sku in skus];base=len(self._base_column_labels)
+  self.t.horizontalHeader().first_sku_column=base
   # 按SKU身份迁移筛选条件，排序或删除列不能把条件套到另一个SKU。
   remembered={self._sku_column_ids[col-base]:condition for col,condition in self._filters.items() if base<=col<base+len(self._sku_column_ids)}
   self._filters={col:condition for col,condition in self._filters.items() if col<base}
