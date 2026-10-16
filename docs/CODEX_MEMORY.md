@@ -607,6 +607,12 @@ GitHub原始基准标签为大写V0.5.1。v0.6.0发布说明位于docs/RELEASE_v
 - 本轮新增test_database_creation_files.py的3项数据库回归、test_windows_signing.py的5项签名流水线回归；签名命令采用模拟失败/成功验证控制流，不能视为真实证书验收。收尾使用tools/windows.ps1 finish调用tools/finish_ai_change.sh及打包钩子；最终完整测试、需求编号审计、编译和EXE自检报告保留于test_reports，SHA256位于package，提交对应成功标记为.tmp/package_success_commit。
 - 提交前完整验证证据：test_reports/test_20261016_174059.txt，66个文件共373项测试通过，TRACE_OK 137/137、TEST_STEPS 67/67（含审计）、COMPILE_OK；一万物料替换/替代选择首帧85.3/75.8ms。后续收尾和打包会按同一入口重新验证，以最新报告及产物为准。
 - 收尾复测曾因Windows连续读取相同系统时间失败并在提交前停止。固定时钟回归已稳定复现并验证修复：Services.save_bom在同一事务中取受影响SKU原时间，必要时将统一UTC保存时间推进1微秒，保持所有受影响SKU/根物料相同，无关SKU及未实际修改不更新。test_sku_timestamp_title.py现8项通过，最终全套增至374项，收尾按新代码重新执行；不靠休眠、放宽断言或忽略失败处理。
-- 收尾复测曾因Windows连续读取相同系统时间失败并在提交前停止。固定时钟回归已稳定复现并验证修复：Services.save_bom在同一事务中取受影响SKU原时间，必要时将统一UTC保存时间推进1微秒，保持所有受影响SKU/根物料相同，无关SKU及未实际修改不更新。test_sku_timestamp_title.py现8项通过，最终全套增至374项，收尾按新代码重新执行；不靠休眠、放宽断言或忽略失败处理。
-- 提交前完整验证证据：test_reports/test_20261016_174059.txt，66个文件共373项测试通过，TRACE_OK 137/137、TEST_STEPS 67/67（含审计）、COMPILE_OK；一万物料替换/替代选择首帧85.3/75.8ms。后续收尾和打包会按同一入口重新验证，以最新报告及产物为准。
 - 用户此前已明确先完成Windows环境和EXE，本机仍无WSL/Linux；本轮AppImage构建和SHA256核验待Linux环境完成，不安装WSL、不启动常驻监控、不自动push或发布Release。
+
+## 2026-10-16：0.6.0首次启动防病毒提示的补充诊断
+
+用户确认“无法成功完成操作，因为文件包含病毒或潜在的垃圾软件”发生在本机第一次打开0.6.0，第二次已不再出现；不能与此前SmartScreen信誉提示混为一谈。本机Get-MpThreat/Get-MpThreatDetection未返回检测记录，最近三天Defender检测/处置事件1116、1117为空，实时防护开启。没有取得用户当时打开的0.6.0原始文件及威胁名称，未确认误报，也未确认根因或宣称已修复。
+
+对现有0.6.1发布文件BOM_Manager_0.6.1_20261016_175053_windows_x64.exe重新核对SHA256为b29b08bbbec8e05cb716470c3e2abaf52a6ee5573ab0a8cbab51e58ea89bfcfe，与此前发布校验一致。使用Defender自定义单文件扫描（ScanType 3、DisableRemediation，原生Windows路径）返回“found no threats”、退出码0；病毒库1.461.52.0，最后更新时间2026-10-16 10:45:27 +08:00。报告test_reports/windows_061_defender_scan_native_path.txt。初次传入D:/正斜杠路径扫描返回0x80508023，改用Resolve-Path.ProviderPath后完成；错误不能当作通过。DisableRemediation只控制本次自定义扫描不自动处置，未关闭实时保护、添加排除项、恢复隔离文件或修改系统策略。
+
+上述扫描结论仅适用于该文件和本次本机病毒库，不能反推0.6.0原包或所有机器均安全，也不能保证以后不提示。未上传任何文件供外部检测。若再次出现，保留原文件、SHA256、发生时间及威胁名称，再按微软开发者渠道申请复核；外部上传须取得用户授权。本轮更新诊断说明、去除上一轮文档重复段落，不改动软件业务或打包方式；沿用既有收尾要求，最终包及报告以package、test_reports和VERSION为准。签名证书和Linux AppImage仍待后续环境，不启动常驻监控。

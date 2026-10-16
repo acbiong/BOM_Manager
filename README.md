@@ -378,3 +378,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 build
 后续需实际接入证书完成签名构建，并从真实下载渠道在干净目标Windows环境验收首次启动；受SmartScreen信誉影响仍可能有提示。若要求广泛分发时尽量避免这类首次下载警告，可另行评估Microsoft Store分发，账号及审核发布不属于本轮已完成事项。
 
 Windows测试入口按`tests/test_*.py`逐文件启用独立Python/Qt进程，避免整套测试的残留窗口状态影响后续用例；保留全部用例、原有性能阈值和完整日志。每个文件超时180秒或进程异常退出均记为失败；`TEST_STEPS`包含需求审计，不是业务用例数。
+
+“无法成功完成操作，因为文件包含病毒或潜在的垃圾软件”是防病毒拦截提示，与SmartScreen的“无法识别的应用”不同。即使第二次可打开，也不足以确认第一次是误报；需要原始文件、SHA256及保护历史中的威胁名称核对。可对原文件执行一次Defender自定义扫描并保留报告，不通过改名重打包、关闭实时防护或添加排除项处理。确认疑似误报后，使用[微软开发者文件提交入口](https://www.microsoft.com/en-us/wdsi/filesubmission)申请复核；需用户确认后才上传文件。签名不能替代防病毒检测。
