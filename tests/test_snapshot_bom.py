@@ -112,3 +112,23 @@ class SnapshotTests(unittest.TestCase):
   self.s.change_sku_version(sid,'2')
   self.assertEqual(self.s.material_snapshot(self.p)['version'],'2')
   self.assertEqual(self.s.for_sku(sid).bom(self.p)[0]['material_id'],self.c)
+ def test_revision_dialog_only_differences_and_scrolls_large_single_row(self):
+  from PyQt5.QtWidgets import QApplication,QAbstractItemView
+  from ui.parent_revision import ParentRevisionDialog
+  app=QApplication.instance() or QApplication([])
+  removed=[f'OLD{i:03}' for i in range(80)]
+  problem=dict(material_id=self.p,label='P1',before=['SAME']+removed,after=['SAME','NEW'])
+  dialog=ParentRevisionDialog(self.m,[problem])
+  try:
+   dialog.show();app.processEvents()
+   self.assertEqual(dialog.table.item(0,1).text(),'\n'.join(removed))
+   self.assertEqual(dialog.table.item(0,2).text(),'NEW')
+   self.assertEqual(dialog.table.verticalScrollMode(),QAbstractItemView.ScrollPerPixel)
+   scroll=dialog.table.verticalScrollBar();self.assertTrue(scroll.isVisible());self.assertGreater(scroll.maximum(),0)
+   scroll.setValue(scroll.maximum());app.processEvents()
+   self.assertGreater(dialog.table.visualItemRect(dialog.table.item(0,1)).bottom(),0)
+   self.assertLessEqual(dialog.table.visualItemRect(dialog.table.item(0,1)).bottom(),dialog.table.viewport().height())
+  finally:dialog.close()
+  dialog=ParentRevisionDialog(self.m,[dict(problem,before=['SAME'],after=['SAME','NEW'])])
+  try:self.assertEqual(dialog.table.item(0,1).text(),'（无）')
+  finally:dialog.close()
