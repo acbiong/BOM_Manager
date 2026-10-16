@@ -129,7 +129,7 @@ def revision_conflicts(service,root,items):
     conflicts=[]
     for mid,codes in draft_definitions(service,root,items).items():
         if service.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
-        if exclusive_to_current_sku(service,mid):continue
+        if mid in getattr(service,'_approved_catalog_parents',set()) or exclusive_to_current_sku(service,mid):continue
         known=service.db.conn.execute('SELECT child_codes FROM bom_revision_definitions WHERE material_id=?',(mid,)).fetchone()
         if known and known[0]!=codes:
             material=service.material_snapshot(mid)
@@ -140,14 +140,14 @@ def record_definitions(service,root):
     conn=getattr(service.db.conn,'raw',service.db.conn)
     for mid,codes in scope_definitions(conn,getattr(service,'scope_id',0),root).items():
         if conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
-        if exclusive_to_current_sku(service,mid):
+        if mid in getattr(service,'_approved_catalog_parents',set()) or exclusive_to_current_sku(service,mid):
             conn.execute('INSERT INTO bom_revision_definitions VALUES(?,?) ON CONFLICT(material_id) DO UPDATE SET child_codes=excluded.child_codes',(mid,codes))
         else:conn.execute('INSERT OR IGNORE INTO bom_revision_definitions VALUES(?,?)',(mid,codes))
         if getattr(service,'scope_id',0):conn.execute('DELETE FROM bom_revision_legacy_conflicts WHERE sku_id=? AND material_id=?',(service.scope_id,mid))
 
-def save_with_revisions(service,root,items,versions,progress=None):
+def save_with_revisions(service,root,items,versions,progress=None,required=None):
     """Create/reuse explicitly chosen parent revisions and save atomically."""
-    violations=revision_conflicts(service,root,items)
+    violations=revision_conflicts(service,root,items) if required is None else required
     if {v['material_id'] for v in violations}!=set(versions):raise ValueError('父项升版清单已变化，请重新检查')
     original=getattr(service.db,'original',service.db)
     mapping={}
@@ -199,5 +199,7 @@ def material_sources(service,mid):
     return sorted(result,key=lambda r:(r['updated_at'] or '',r['id']),reverse=True)
 
 def template_service(primary,mid):
+    from services.current_catalog import enabled as catalog_enabled
+    if catalog_enabled(primary):return primary
     sources=material_sources(primary,mid)
     return primary.for_sku(sources[0]['id']) if sources else primary

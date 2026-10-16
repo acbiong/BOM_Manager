@@ -48,6 +48,7 @@ def create_namespace(database,sid,source):
             conn.executemany(f'INSERT INTO {target} ('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',[tuple(row) for row in rows])
     conn.execute(f'CREATE INDEX mirror_{sid}_parent ON {table_name(sid,"material_bom_items")}(parent_material_id)')
     conn.execute(f'CREATE INDEX mirror_{sid}_child ON {table_name(sid,"material_bom_items")}(child_material_id)')
+    conn.execute(f'CREATE INDEX {table_name(sid,"alternates")}_relation ON {table_name(sid,"alternates")}(bom_item_id,sort_no)')
 
 def drop_namespace(database,sid):
     for table in TABLES:database.conn.execute(f'DROP TABLE IF EXISTS {table_name(sid,table)}')

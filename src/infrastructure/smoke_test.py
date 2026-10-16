@@ -52,10 +52,22 @@ def run_smoke_test(report_path):
             mirror_id=svc.copy_sku_bom(sid);mirror=svc.for_sku(mirror_id)
             mirror.save_bom(root,[dict(material_id=child,quantity=2.5,unit='pcs')])
             assert svc.bom(root)[0]['quantity']==1.5 and mirror.bom(root)[0]['quantity']==2.5, '镜像BOM未隔离'
+            from services.snapshot_bom import migrate
+            from services.current_catalog import initialize,synchronization_plan,save_confirmed,selection_tree
+            migrate(db);initialize(db);mirror=svc.for_sku(mirror_id)
+            second=svc.create_material(dict(base_code='SECOND',version='1',name='同步SKU',unit='pcs'))
+            second_id=svc.create_sku(second);second_service=svc.for_sku(second_id)
+            second_service.save_bom(second,[dict(material_id=root,quantity=1,unit='pcs'),dict(material_id=child,parent_material_id=root,quantity=2.5,unit='pcs')])
+            rows=[dict(material_id=child,quantity=3.5,unit='pcs')]
+            plan=synchronization_plan(mirror,root,rows)
+            assert plan and plan[0]['other_skus'][0]['id']==second_id
+            save_confirmed(mirror,root,rows,plan,{root:{second_id}},{})
+            assert second_service.bom(root)[0]['quantity']==3.5 and svc.for_sku(sid).bom(root)[0]['quantity']==1.5
+            assert selection_tree(mirror,root)[0]['data']['quantity']==3.5
             windows = [BomWindow(mirror,root),MainWindow(svc,get_version()),MaterialWindow(svc),BomWindow(svc,root),AboutDialog(get_version())]
             for window in windows:window.show()
             app.processEvents()
-            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['single_instance','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader'])
+            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['single_instance','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved'])
             for window in windows:window.close()
             windows=[];db.close();db=None
     except Exception:

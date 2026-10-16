@@ -57,6 +57,7 @@ class Database:
  @contextmanager
  def transaction(self):
   depth=getattr(self,'_transaction_depth',0);self._transaction_depth=depth+1
+  pending_start=len(getattr(self,'_pending_events',[]))
   name='bom_nested_'+str(depth)
   if depth:self.conn.execute('SAVEPOINT '+name)
   elif not self.conn.in_transaction:self.conn.execute('BEGIN')
@@ -65,14 +66,23 @@ class Database:
    if depth:self.conn.execute('RELEASE SAVEPOINT '+name)
    else:self.conn.commit()
   except:
+   self._pending_events=getattr(self,'_pending_events',[])[:pending_start]
    if depth:self.conn.execute('ROLLBACK TO SAVEPOINT '+name);self.conn.execute('RELEASE SAVEPOINT '+name)
    else:self.conn.rollback()
    raise
   finally:self._transaction_depth=depth
+  if not depth:
+   events=getattr(self,'_pending_events',[]);self._pending_events=[]
+   if events:
+    from infrastructure.events import WindowRefreshBus
+    for event in events:WindowRefreshBus.publish(event)
  def validate_schema(self):
   required={'materials','skus','bom_items','material_bom_items','alternates','change_logs','project'}
   got={r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
   return required.issubset(got), sorted(required-got)
  def recreate_schema(self):
   self.create_schema(); return self.validate_schema()[0]
- def close(self): self.conn.close()
+ def close(self):
+  try:self.conn.execute('PRAGMA optimize')
+  except sqlite3.DatabaseError:pass
+  finally:self.conn.close()

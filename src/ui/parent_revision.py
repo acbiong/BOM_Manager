@@ -17,7 +17,7 @@ class ParentRevisionDialog(QDialog):
             removed=[code for code in problem['before'] if code not in after]
             added=[code for code in problem['after'] if code not in before]
             usages='\n'.join(f"{sku['base_code']}{sku['version']} {sku['name']} / 镜像{sku['mirror_version']}" for sku in problem.get('other_skus',[]))
-            for col,value in enumerate([problem['label'],'\n'.join(removed) or '（无）','\n'.join(added) or '（无）',usages or '（无其他SKU引用）']):
+            for col,value in enumerate([problem['label']+('\n'+problem['detail'] if problem.get('detail') else ''),'\n'.join(removed) or '（无）','\n'.join(added) or '（无）',usages or '（无其他SKU引用）']):
                 item=QTableWidgetItem(value);item.setTextAlignment(Qt.AlignLeft|Qt.AlignTop);table.setItem(row,col,item)
             combo=QComboBox();combo.setEditable(True);combo.addItem('')
             for other in service.db.conn.execute('SELECT version FROM materials WHERE base_code=? AND id<>? ORDER BY version',(material['base_code'],material['id'])):combo.addItem(other[0])

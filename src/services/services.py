@@ -39,7 +39,10 @@ class Services:
  def publish(self,event):
   from infrastructure.events import WindowRefreshBus
   if event.get('type')=='bom_changed' and getattr(self,'scope_id',0):event=dict(event,scope_id=self.scope_id)
-  WindowRefreshBus.publish(event)
+  database=getattr(self.db,'original',self.db)
+  if getattr(database,'_transaction_depth',0):
+   database._pending_events=getattr(database,'_pending_events',[])+[event]
+  else:WindowRefreshBus.publish(event)
  def for_sku(self,sid):
   row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
   if row is None:raise ValueError('SKU不存在')
@@ -60,6 +63,8 @@ class Services:
    copied=self.for_sku(new_id);copied.refresh_usage()
    copied.db.conn.execute("UPDATE change_logs SET object_id=? WHERE object_type='sku' AND object_id=?",(new_id,sid))
    copied.log('sku',new_id,'copy',f'复制BOM；源镜像版本：{sku["mirror_version"]}；新镜像版本：{version}')
+   from services.current_catalog import refresh_latest_from_catalog
+   refresh_latest_from_catalog(self)
   self.publish({'type':'sku_changed','id':new_id});return new_id
  def change_mirror_version(self,sid,value):
   try:value=int(value)
@@ -73,6 +78,8 @@ class Services:
    self.db.conn.execute('UPDATE skus SET mirror_version=?,updated_at=? WHERE id=?',(value,stamp,sid))
    if not row['scope_id']:self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,row['material_id']))
    self.for_sku(sid).log('sku',sid,'mirror_version',f'镜像版本号：{row["mirror_version"]} → {value}')
+   from services.current_catalog import refresh_latest_from_catalog
+   refresh_latest_from_catalog(self)
   self.publish({'type':'sku_changed','id':sid})
  def update_sku_change_description(self,sid,text):
   row=self.db.conn.execute('SELECT change_description,material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
@@ -89,7 +96,13 @@ class Services:
   q=f'%{query}%'; rows=self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id WHERE u.parent_id=m.id AND u.role="main") THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
   from services.snapshot_bom import enabled,latest_usage
   if enabled(self.db):
-   used=latest_usage(self);return [dict(row,latest_used='Y' if row['id'] in used else 'N') for row in rows]
+   used=latest_usage(self)
+   from services.current_catalog import enabled as catalog_enabled
+   if catalog_enabled(self):
+    primary=getattr(self,'primary',self)
+    parents={r[0] for r in primary.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items')}
+    return [dict(row,latest_used='Y' if row['id'] in used else 'N',has_bom='Y' if row['id'] in parents else 'N') for row in rows]
+   return [dict(row,latest_used='Y' if row['id'] in used else 'N') for row in rows]
   return rows
  def create_material(self,d):
   if not all(d.get(k) for k in ('base_code','version','name')): raise ValueError('基础编码、版本号、名称为必填')
@@ -158,7 +171,12 @@ class Services:
   row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
   if row and row['scope_id']:
    from services.mirrors import drop_namespace
-   with self.db.transaction():drop_namespace(self.db,sid);self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,))
+   with self.db.transaction():
+    drop_namespace(self.db,sid);self.db.conn.execute('DELETE FROM skus WHERE id=?',(sid,))
+    from services.current_catalog import enabled as catalog_enabled,refresh_latest_from_catalog,prune_public
+    if catalog_enabled(self):
+     self.db.conn.execute('DELETE FROM bom_revision_legacy_conflicts WHERE sku_id=?',(sid,))
+     refresh_latest_from_catalog(self);prune_public(self)
    self.publish({'type':'sku_changed','id':sid});return
   with self.db.transaction():
    r=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
@@ -198,7 +216,7 @@ class Services:
  def save_bom(self,root,items,preview=False,progress=None):
   """把树中的重复子BOM归并为物料关系，在单个事务中保存。"""
   from services.snapshot_bom import revision_conflicts,ParentRevisionRequired,enabled,record_definitions
-  violations=[] if preview else revision_conflicts(self,root,items)
+  violations=[] if preview or getattr(self,'_catalog_sync',False) else revision_conflicts(self,root,items)
   if violations:raise ParentRevisionRequired(violations)
   report=progress or (lambda value,message:None)
   report(5,'读取现有BOM…')
@@ -378,8 +396,11 @@ class Services:
     log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     for affected,contained in log_roots.items():
      if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
+   from services.current_catalog import enabled as catalog_enabled,prune_snapshot,synchronize
+   if catalog_enabled(self):prune_snapshot(self)
    if getattr(self,'scope_id',0):self.refresh_usage()
    if enabled(self.db):record_definitions(self,root)
+   synchronize(self,changed_parents)
   from infrastructure.events import WindowRefreshBus
   report(90,'正在通知相关BOM窗口…')
   for parent in changed_parents: self.publish({'type':'bom_changed','root':parent})

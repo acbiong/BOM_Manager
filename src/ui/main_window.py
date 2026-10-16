@@ -811,9 +811,11 @@ class BomWindow(QMainWindow):
   subtree=None
   original=self.version_subtree_snapshot(item)
   target=next((node for _,node in self.expansion_nodes() if not (node.data(0,Qt.UserRole) or {}).get('_deleted') and (node.data(0,Qt.UserRole) or {}).get('material_id')==material['id']),None)
-  target_tree=self.version_subtree_snapshot(target) if target is not None else self.svc.bom(material['id'])
+  from services.current_catalog import enabled as catalog_enabled,selection_tree
+  current_catalog=catalog_enabled(self.svc)
+  target_tree=selection_tree(self.svc,material['id']) if current_catalog else self.version_subtree_snapshot(target) if target is not None else self.svc.bom(material['id'])
   if target_tree:
-   if target is not None:subtree=target_tree
+   if current_catalog or target is not None:subtree=target_tree
   elif original:
    answer=QMessageBox.question(self,'复制原子BOM','目标物料没有BOM结构，是否将原物料的子BOM复制到目标物料？\n选择“否”仅替换物料，不复制子BOM；点击保存后才写入数据库。',QMessageBox.Yes|QMessageBox.No|QMessageBox.Cancel,QMessageBox.Cancel)
    if answer==QMessageBox.Cancel:return
@@ -1264,7 +1266,11 @@ class BomWindow(QMainWindow):
   self.insert_material(target,rows[items.index(x)],after=selected)
  @preserve_bom_view
  def insert_material(self,target,r,after=None):
-  if hasattr(self.svc,'ensure_material_bom'):self.svc.ensure_material_bom(r['id'])
+  from services.current_catalog import enabled as catalog_enabled,selection_tree
+  current_catalog=catalog_enabled(self.svc)
+  r=self.svc.material_snapshot(r['id'])
+  latest_children=selection_tree(self.svc,r['id']) if current_catalog else None
+  if not current_catalog and hasattr(self.svc,'ensure_material_bom'):self.svc.ensure_material_bom(r['id'])
   parent=target.data(0,Qt.UserRole) or {}
   self._deleted_relations.discard((parent.get('material_id'),r['id'],''))
   item=QTreeWidgetItem(target,[f"{r['base_code']}{r['version']} {r['name']}",'1',r['unit'],'',''])
@@ -1273,7 +1279,8 @@ class BomWindow(QMainWindow):
   temporary_id=-id(item); data=dict(r)
   data.update(_added=True,id=temporary_id,material_id=r['id'],quantity=1.0,position='',remark='',level_no=(parent.get('level_no') or 0)+1,parent_item_id=parent.get('id'),parent_material_id=parent.get('material_id'),node_id=str(temporary_id),parent_node_id=parent.get('node_id'))
   item.setData(0,Qt.UserRole,data); self.by[str(temporary_id)]=item; target.setExpanded(True)
-  self.add_existing_children(item,r['id'],set())
+  if current_catalog:self.clone_version_children(item,latest_children)
+  else:self.add_existing_children(item,r['id'],set())
   self._draft_baselines[temporary_id]=self.capture_item(item)
   fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
   return item
@@ -1422,14 +1429,32 @@ class BomWindow(QMainWindow):
     for j in range(it.childCount()): walk(it.child(j),d['material_id'])
    for j in range(self.root_item.childCount()): walk(self.root_item.child(j),self.root)
    from services.snapshot_bom import revision_conflicts,save_with_revisions
-   violations=revision_conflicts(self.svc,self.root,rows)
+   from services.current_catalog import synchronization_plan,save_confirmed
+   plan=synchronization_plan(self.svc,self.root,rows);selections={};versions={}
+   if plan:
+    progress.hide()
+    from ui.bom_sync_confirmation import BomSyncConfirmationDialog
+    confirmation=BomSyncConfirmationDialog(plan,self)
+    if confirmation.exec_()!=QDialog.Accepted:return False
+    selections=confirmation.selections()
+   partial=[p for p in plan if selections.get(p['material_id'],set())!={s['id'] for s in p['other_skus']}]
+   if any(self.svc.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(p['material_id'],)).fetchone() for p in partial):
+    QMessageBox.warning(self,'SKU版本需手动更新','未全部同步的父物料属于SKU，请先通过SKU版本变更手动升版，再保存此变更。编辑缓存已保留。');return False
+   approved={p['material_id'] for p in plan if p not in partial}
+   violations={v['material_id']:v for v in revision_conflicts(self.svc,self.root,rows) if v['material_id'] not in approved}
+   violations.update({p['material_id']:p for p in partial})
    if violations:
     progress.hide()
     from ui.parent_revision import ParentRevisionDialog
-    chooser=ParentRevisionDialog(self.svc,violations,self)
+    chooser=ParentRevisionDialog(self.svc,list(violations.values()),self)
     if chooser.exec_()!=QDialog.Accepted:return False
-    progress.show();revisions=save_with_revisions(self.svc,self.root,rows,chooser.versions(),progress=lambda n,text:report(int(n*0.85),text));self.root=revisions.get(self.root,self.root)
-   else:self.svc.save_bom(self.root,rows,progress=lambda n,text:report(int(n*0.85),text))
+    versions=chooser.versions()
+   progress.show()
+   callback=lambda n,text:report(int(n*0.85),text)
+   if plan:revisions=save_confirmed(self.svc,self.root,rows,plan,selections,versions,callback)
+   elif violations:revisions=save_with_revisions(self.svc,self.root,rows,versions,progress=callback)
+   else:self.svc.save_bom(self.root,rows,progress=callback);revisions={}
+   self.root=revisions.get(self.root,self.root)
    report(90,'正在刷新BOM显示…')
    self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
    report(100,'BOM保存完成')
