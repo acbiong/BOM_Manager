@@ -92,7 +92,7 @@
 ## 发布文件与验证
 
 - Linux x86_64 AppImage及对应SHA-256校验文件，面向deepin 25 / Ubuntu 24.04及以上同架构环境。下载后赋予执行权限运行。
-- 本次发布以本机实际构建并验证的附件为准；不将旧版Windows EXE重新命名为0.6.0。仓库保留Windows原生构建能力，Windows包应从本标签原生构建。
+- GitHub Actions从同一发布标签原生构建Linux AppImage和Windows x64单文件EXE，验证成功后随Release上传；Windows目标系统为Windows 10/11。附件均为本标签新构建，不使用旧版文件改名。
 - 发布流程执行完整单元/UI回归、需求审计、Python语法编译及AppImage自检。自检覆盖SQLite、Excel、主窗口/物料库/BOM、镜像隔离、最新同步确认和历史保留；无界面自检不等同于所有目标操作系统的人工桌面测试。
 
 完整提交比较：https://github.com/acbiong/BOM_Manager/compare/V0.5.1...v0.6.0

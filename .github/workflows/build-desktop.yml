@@ -56,3 +56,32 @@ jobs:
           path: |
             package/*.exe*
             test_reports/
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-appimage-and-reports
+          path: release-assets/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-exe-and-reports
+          path: release-assets/windows
+      - name: Create release and upload validated packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="docs/RELEASE_${RELEASE_TAG}.md"
+          test -s "$notes"
+          mapfile -d '' assets < <(find release-assets -type f \( -name '*.AppImage' -o -name '*.exe' -o -name '*.sha256' \) -print0)
+          test "${#assets[@]}" -ge 2
+          gh release create "$RELEASE_TAG" --verify-tag --title "BOM管理系统 ${RELEASE_TAG}" --notes-file "$notes" "${assets[@]}"
