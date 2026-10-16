@@ -11,10 +11,17 @@ from PyQt5.QtWidgets import QApplication,QDialog
 from PyQt5.QtCore import QEvent,Qt
 from PyQt5.QtGui import QMouseEvent
 from PyQt5.QtTest import QTest
+from PyQt5 import sip
 
 class SkuDescriptionTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
+ def dispose_window(self,window):
+  # close() only hides a QWidget; release native timers, filters and dialogs
+  # while QApplication still exists, rather than during interpreter shutdown.
+  window.close();window.deleteLater()
+  self.app.sendPostedEvents(None,QEvent.DeferredDelete)
+  self.assertTrue(sip.isdeleted(window))
  def test_independent_storage_ui_save_cancel_clear_and_hover(self):
   with tempfile.TemporaryDirectory() as tmp:
    path=str(Path(tmp)/'db');db=Database(path);s=Services(db)
@@ -40,7 +47,7 @@ class SkuDescriptionTests(unittest.TestCase):
     s.update_sku_change_description(copied,'镜像独立备注');self.assertTrue(w.table.item(1,4).font().bold())
     w.sort_skus(4);w.sort_skus(4);w.refresh()
     for row in range(w.table.rowCount()):self.assertEqual(w.table.item(row,4).font().bold(),int(w.table.item(row,6).text())==copied)
-   finally:w.close();db.close()
+   finally:self.dispose_window(w);db.close()
    db=Database(path);self.assertEqual(Services(db).skus()[1]['change_description'],'镜像独立备注');db.close()
  def test_upgrade_existing_mirror_schema_defaults_blank(self):
   import sqlite3
@@ -73,7 +80,7 @@ class SkuDescriptionTests(unittest.TestCase):
     self.app.processEvents();self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),mirror)
     s.update_sku_change_description(mirror,'第二次修改');self.app.processEvents()
     self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),mirror)
-   finally:w.close();db.close()
+   finally:self.dispose_window(w);db.close()
  def test_real_modal_close_focuses_edited_mirror_not_previous_current_item(self):
   from PyQt5.QtCore import QTimer
   with tempfile.TemporaryDirectory() as tmp:
@@ -93,4 +100,4 @@ class SkuDescriptionTests(unittest.TestCase):
      self.assertEqual(int(w.table.item(w.table.currentRow(),6).text()),edited)
      self.assertEqual({int(w.table.item(i.row(),6).text()) for i in w.table.selectedIndexes()},{edited})
      self.assertTrue(w.table.hasFocus())
-   finally:w.close();db.close()
+   finally:self.dispose_window(w);db.close()
