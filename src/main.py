@@ -85,6 +85,7 @@ def selected_database_path(value):
   url=urlparse(value)
   if url.netloc not in ('','localhost'):raise ValueError('请使用本地文件路径或本机挂载路径')
   value=unquote(url.path)
+  if os.name=='nt' and len(value)>3 and value[0]=='/' and value[1].isalpha() and value[2]==':':value=value[1:]
  return Path(value).expanduser().resolve()
 
 def startup_database(config_service,cfg):

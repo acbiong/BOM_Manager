@@ -1,5 +1,6 @@
 """BOM import paths, including native mounted SMB shares. No network writes."""
 import os
+import sys
 import re
 from pathlib import Path
 from urllib.parse import urlsplit,unquote
@@ -28,7 +29,7 @@ def local_import_path(value):
     if value.lower().startswith('smb://'):
         url=urlsplit(value);parts=unquote(url.path).strip('/').split('/')
         if not url.hostname or not parts[0] or any(p in ('.','..') for p in parts):raise ValueError('SMB文件路径无效')
-        if os.name=='nt':return Path('//'+url.hostname+'/'+ '/'.join(parts))
+        if sys.platform=='win32':return Path('//'+url.hostname+'/'+ '/'.join(parts))
         share='//'+url.hostname+'/'+parts[0]
         for source,mount in mounted_smb_roots():
             if source.casefold()==share.casefold():

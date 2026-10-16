@@ -7,11 +7,17 @@ from pathlib import Path
 import py_compile
 import subprocess
 import sys
+import tempfile
 root=Path(__file__).resolve().parents[1]
 os.chdir(root)
 (root/'test_reports').mkdir(exist_ok=True)
 report=root/'test_reports'/('test_'+datetime.datetime.now().strftime('%Y%m%d_%H%M%S')+'.txt')
 env=dict(os.environ,PYTHONUTF8='1',PYTHONDONTWRITEBYTECODE='1')
+# Windows runners may expose an 8.3 TEMP alias; use one canonical path in
+# subprocess fixtures and application path comparisons.
+if os.name == 'nt':
+    canonical_temp = str(Path(tempfile.gettempdir()).resolve())
+    env.update(TEMP=canonical_temp, TMP=canonical_temp, TMPDIR=canonical_temp)
 failed=False
 with report.open('w',encoding='utf-8') as output:
     output.write(f'BOM管理系统测试报告\n时间：{datetime.datetime.now().astimezone().isoformat()}\n项目：{root}\nPython：{sys.executable}\n平台：{platform.platform()}\n')

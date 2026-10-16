@@ -2,6 +2,7 @@
 from configparser import ConfigParser
 from pathlib import Path, PureWindowsPath
 import ntpath
+import os
 import posixpath
 import re
 DEFAULT_MATERIAL_UNITS=('pcs','套','ml','L','mm','cm','m','米','M','克','g')
@@ -20,6 +21,9 @@ def relative_config_path(value, base):
  if windows and ((drive and not ntpath.isabs(value)) or (value.startswith('/') and not drive)):
   raise ValueError('配置路径不属于当前系统或缺少完整盘符，请重新选择数据库')
  target=value if flavor.isabs(value) else flavor.join(base,value)
+ # Resolve native Windows aliases before computing a portable relative path.
+ if windows and os.name=='nt':
+  target=str(Path(target).resolve());base=str(Path(base).resolve())
  try:return flavor.relpath(flavor.normpath(target),base).replace('\\','/')
  except ValueError as error:
   raise ValueError('数据库与config.ini位于不同盘符或共享根目录，无法保存相对路径；请将数据库放到配置文件同一盘符（建议同一文件夹）后重新选择') from error

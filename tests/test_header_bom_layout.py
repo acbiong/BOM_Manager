@@ -16,7 +16,7 @@ class HeaderBomLayoutTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    db=Database(str(Path(tmp)/'db'));svc=Services(db)
    svc.update_project(dict(project_code='PRJ',project_name='项目名称'))
-   root=svc.create_material(dict(base_code='SKU',version='100',name='这是滚动显示的长物料名称'*8,unit='pcs'))
+   root=svc.create_material(dict(base_code='SKU',version='100',name='SKU scrolling header ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789 这是滚动显示的长物料名称'*8,unit='pcs'))
    child=svc.create_material(dict(base_code='PART',version='100',name='子物料',description='很长的规格描述'*30,unit='pcs'))
    sid=svc.create_sku(root);svc.save_bom(root,[dict(material_id=child,quantity=1,unit='pcs')])
    library=MaterialWindow(svc);bom=BomWindow(svc,root)
