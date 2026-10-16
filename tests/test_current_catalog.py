@@ -194,3 +194,18 @@ class CurrentCatalogTests(unittest.TestCase):
     self.assertTrue(w.save())
    self.assertEqual(self.s.for_sku(self.tid).bom(self.p)[0]['quantity'],14)
   finally:w.dirty=False;w.close()
+
+ def test_import_unchanged_public_subtree_does_not_request_sync_or_revision(self):
+  from services.current_catalog import synchronization_plan
+  fresh=self.s.create_material(dict(base_code='FRESH',version='1',name='new SKU',unit='pcs'))
+  sid=self.s.create_sku(fresh);target=self.s.for_sku(sid)
+  rows=[self.row(self.p,replace_children=True),self.row(self.c,quantity=2,parent_material_id=self.p,replace_children=True)]
+  self.assertEqual(synchronization_plan(target,fresh,rows),[])
+  w=BomWindow(target,fresh)
+  try:
+   w.insert_material(w.root_item,self.s.material_snapshot(self.p))
+   from ui.bom_sync_confirmation import BomSyncConfirmationDialog
+   with patch.object(BomSyncConfirmationDialog,'exec_') as confirmation,patch.object(QMessageBox,'information'):
+    self.assertTrue(w.save());confirmation.assert_not_called()
+   self.assertEqual(target.bom(fresh)[1]['quantity'],2)
+  finally:w.dirty=False;w.close()

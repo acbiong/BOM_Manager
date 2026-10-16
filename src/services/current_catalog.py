@@ -176,7 +176,8 @@ def synchronization_plan(service,root,items):
     primary=service.primary
     latest=latest_skus(primary)
     if service.sku_id not in {s['id'] for s in latest}:return []
-    old=groups(service);retained={root}|{r['material_id'] for r in items}
+    old=groups(service);public=groups(primary);existing=reachable(old,root)
+    retained={root}|{r['material_id'] for r in items}
     touched={root}|{mid for mid in old if mid in retained}|{r['material_id'] for r in items if r.get('replace_children')}
     desired={mid:[] for mid in touched}
     by_id={r.get('id'):r for r in items if r.get('id') is not None}
@@ -215,7 +216,7 @@ def synchronization_plan(service,root,items):
         return '\n'.join(details)
     plan=[]
     for mid,after in desired.items():
-        before=old.get(mid,[])
+        before=old.get(mid,[]) if mid in existing else public.get(mid,[])
         if [payload(r) for r in before]==[payload(r) for r in after]:continue
         owners={r[0] for r in primary.db.conn.execute('SELECT sku_id FROM mirror_material_usage WHERE material_id=?',(mid,))}
         affected=[s for s in latest if s['id']!=service.sku_id and (s['id'] in owners or s['material_id']==mid)]
