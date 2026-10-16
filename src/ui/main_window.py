@@ -1720,7 +1720,7 @@ class MaterialUsageDialog(QDialog):
    QMessageBox.information(self,'SKU不存在','该SKU已删除，请重新进行物料反查。'); return
   self.accept()  # 先结束模态反查，避免目标BOM被反查弹窗阻挡。
   window=main.open_bom_id(sku_id)
-  if window is not None:window.locate_material(self.material_id,self.usages[row].get('parent_id'))
+  if window is not None:window.locate_material(self.usages[row].get('focus_material_id',self.material_id),self.usages[row].get('parent_id'))
  def resizeEvent(self,event):
   super().resizeEvent(event)
   self.table.resizeRowsToContents()

@@ -602,6 +602,8 @@ class Services:
  def material_version_references(self,i):
   """以实际共享父级BOM为选择单位，列出所有受影响SKU。"""
   parents=self.db.conn.execute('SELECT DISTINCT m.* FROM material_bom_items b JOIN materials m ON m.id=b.parent_material_id WHERE b.child_material_id=? ORDER BY m.base_code,m.version',(i,)).fetchall()
+  from services.current_catalog import enabled as catalog_enabled
+  if catalog_enabled(self) and not getattr(self,'scope_id',0):parents=[]  # 公共目录是镜像缓存，不是独立SKU引用。
   result=[]
   for parent in parents:
    usages=[]; sku_ids=[]
@@ -621,6 +623,10 @@ class Services:
      result.append(dict(parent_id=f"mirror:{sku['id']}:{parent_id}",material_parent_id=parent_id,sku_ids=[sku['id']],sku_labels=[sku_label],parent_label=label,labels=[sku_label+'/'+label]))
   return result
  def material_usage(self,i):
+  from services.current_catalog import enabled as catalog_enabled
+  if catalog_enabled(self):
+   from services.bom_maintenance import actual_material_usage
+   return actual_material_usage(self,i)
   result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label'],'parent_id':reference.get('material_parent_id',reference['parent_id'])} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
   for sku in self.skus():
    if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}",'parent':'SKU根节点（无父级）'})
