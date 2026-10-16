@@ -28,7 +28,7 @@ commands=[[sys.executable,'tests/audit_requirements.py']]
 if os.name == 'nt':
     test_files=sorted((root/'tests').glob('test_*.py'))
     if not test_files:raise SystemExit('No test modules discovered')
-    commands.extend([sys.executable,'-X','faulthandler','-m','unittest','discover','-s','tests','-p',path.name,'-q'] for path in test_files)
+    commands.extend([sys.executable,'-X','faulthandler','tools/run_test_module.py',str(path)] for path in test_files)
 else:
     commands.append([sys.executable,'-m','unittest','discover','-s','tests','-q'])
 passed_steps=0
