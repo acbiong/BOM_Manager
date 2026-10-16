@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QPlainTextEdit
+from PyQt5.QtCore import QRect
+from PyQt5.QtGui import QImage,QPainter
 from database.database import Database
 from services.services import Services
 from ui.main_window import MaterialWindow,BomWindow
@@ -26,8 +28,18 @@ class HeaderBomLayoutTests(unittest.TestCase):
     library._selected_skus={sid};library.refresh();library.show();self.app.processEvents()
     library.t.horizontalScrollBar().setValue(library.t.horizontalScrollBar().maximum());self.app.processEvents()
     header=library.t.horizontalHeader();header.timer.stop()
-    header.clock=SimpleNamespace(elapsed=lambda:0);first=header.viewport().grab().toImage()
-    header.clock=SimpleNamespace(elapsed=lambda:2500);second=header.viewport().grab().toImage()
+    # Paint the SKU section explicitly: native Windows viewport grabs may
+    # reuse a cached backing store and never invoke the animation painter.
+    column=header.first_sku_column
+    self.assertFalse(header.isSectionHidden(column))
+    def frame(elapsed):
+     header.clock=SimpleNamespace(elapsed=lambda:elapsed)
+     result=QImage(header.sectionSize(column),header.height(),QImage.Format_ARGB32)
+     result.fill(0);painter=QPainter(result)
+     try:header.paintSection(painter,QRect(0,0,result.width(),result.height()),column)
+     finally:painter.end()
+     return result
+    first=frame(0);second=frame(2500)
     self.assertNotEqual(first,second)
     header.hide();self.assertFalse(header.timer.isActive())
     bom.show();self.app.processEvents()
