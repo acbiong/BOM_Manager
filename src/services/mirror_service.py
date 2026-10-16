@@ -38,7 +38,9 @@ class MirrorServices(Services):
 
     def bom_graph_edges(self):
         from services.current_catalog import enabled
-        if enabled(self):return list(self.primary.bom_graph_edges())
+        if enabled(self):
+            from services.current_catalog import catalog_edges
+            return catalog_edges(self)
         captured={row[0] for row in self.db.conn.execute('SELECT material_id FROM mirror_captured_materials WHERE sku_id=?',(self.sku_id,))}
         return list(super().bom_graph_edges())+[row for row in self.primary.bom_graph_edges() if row[0] not in captured]
 

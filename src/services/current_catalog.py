@@ -114,13 +114,51 @@ def initialize(db):
     ensure_indexes(db)
     db.conn.execute('PRAGMA optimize')
 
+def material_structure_sources(service):
+    """Newest containing mirror per SKU, then most recently saved across SKUs.
+
+    Read reachable relationships, not the public cache or a possibly stale usage index.
+    An empty definition in a newer containing mirror is authoritative too.
+    """
+    primary=getattr(service,'primary',service);candidates={};graphs={}
+    skus=sorted(primary.skus(),key=lambda row:row['mirror_version'],reverse=True)
+    for sku in skus:
+        source=primary.for_sku(sku['id']);scope=sku['scope_id']
+        if scope not in graphs:
+            graph={}
+            for row in source.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items'):
+                graph.setdefault(row[0],set()).add(row[1])
+            graphs[scope]=graph
+        graph=graphs[scope];pending=[sku['material_id']];seen=set()
+        while pending:
+            mid=pending.pop()
+            if mid in seen:continue
+            seen.add(mid);pending.extend(graph.get(mid,()))
+            owners=candidates.setdefault(mid,{})
+            if sku['material_id'] not in owners:
+                owners[sku['material_id']]=dict(sku=dict(sku),children=graph.get(mid,set()))
+    return {mid:sorted(owners.values(),key=lambda value:(value['sku']['updated_at'] or '',value['sku']['id']),reverse=True)
+            for mid,owners in candidates.items()}
+
+def material_structure_source(service,mid):
+    primary=getattr(service,'primary',service)
+    sources=material_structure_sources(primary).get(mid,[])
+    return primary.for_sku(sources[0]['sku']['id']) if sources else primary
+
+def catalog_edges(service):
+    primary=getattr(service,'primary',service);sources=material_structure_sources(primary)
+    edges=[(mid,child) for mid,owners in sources.items() for child in owners[0]['children']]
+    edges.extend(row for row in primary.bom_graph_edges() if row[0] not in sources)
+    return edges
+
 def selection_tree(service,root):
     """Read public metadata and descendants without mutating editor snapshots."""
-    primary=getattr(service,'primary',service)
+    source=material_structure_source(service,root)
+    from services.services import Services
     nodes={};roots=[]
-    for row in primary.bom(root):
+    for row in Services.bom(source,root):
         node={'data':dict(row),'children':[]}
-        node['data']['_db_alternates']=[a['material_id'] for a in primary.alternates(row['id'])]
+        node['data']['_db_alternates']=[a['material_id'] for a in source.alternates(row['id'])]
         nodes[row['node_id']]=node;parent=nodes.get(row['parent_node_id'])
         (parent['children'] if parent else roots).append(node)
     return roots

@@ -191,6 +191,10 @@ def latest_usage(service):
 
 def material_sources(service,mid):
     primary=getattr(service,'primary',service);latest={}
+    from services.current_catalog import enabled as catalog_enabled,material_structure_sources
+    if catalog_enabled(primary):
+        sources=material_structure_sources(primary).get(mid,[])
+        return [sources[0]['sku']] if sources and sources[0]['children'] else []
     for sku in primary.skus():
         key=(sku['base_code'],sku['version'])
         if key not in latest or sku['mirror_version']>latest[key]['mirror_version']:latest[key]=sku
@@ -200,6 +204,8 @@ def material_sources(service,mid):
 
 def template_service(primary,mid):
     from services.current_catalog import enabled as catalog_enabled
-    if catalog_enabled(primary):return primary
+    if catalog_enabled(primary):
+        from services.current_catalog import material_structure_source
+        return material_structure_source(primary,mid)
     sources=material_sources(primary,mid)
     return primary.for_sku(sources[0]['id']) if sources else primary

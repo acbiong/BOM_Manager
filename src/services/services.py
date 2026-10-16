@@ -101,6 +101,10 @@ class Services:
    if catalog_enabled(self):
     primary=getattr(self,'primary',self)
     parents={r[0] for r in primary.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items')}
+    from services.current_catalog import material_structure_sources
+    for mid,sources in material_structure_sources(primary).items():
+     if sources[0]['children']:parents.add(mid)
+     else:parents.discard(mid)
     return [dict(row,latest_used='Y' if row['id'] in used else 'N',has_bom='Y' if row['id'] in parents else 'N') for row in rows]
    return [dict(row,latest_used='Y' if row['id'] in used else 'N') for row in rows]
   return rows

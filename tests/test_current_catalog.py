@@ -209,3 +209,56 @@ class CurrentCatalogTests(unittest.TestCase):
     self.assertTrue(w.save());confirmation.assert_not_called()
    self.assertEqual(target.bom(fresh)[1]['quantity'],2)
   finally:w.dirty=False;w.close()
+ def historical_105_only(self):
+  self.s.for_sku(self.tid).save_bom(self.t,[])
+  self.s.change_mirror_version(self.sid,105)
+  newer=self.s.copy_sku_bom(self.sid)
+  self.s.for_sku(newer).save_bom(self.r,[])
+  return newer
+ def test_material_present_only_in_105_has_bom_and_selection_uses_105(self):
+  self.historical_105_only()
+  self.assertEqual(self.s.bom(self.p),[])
+  self.assertEqual(next(r['has_bom'] for r in self.s.materials() if r['id']==self.p),'Y')
+  self.assertEqual(selection_tree(self.s,self.p)[0]['data']['material_id'],self.c)
+  from services.snapshot_bom import material_sources
+  self.assertEqual(material_sources(self.s,self.p)[0]['mirror_version'],105)
+  from ui.main_window import MainWindow,MaterialWindow
+  main=MainWindow(self.s);library=MaterialWindow(self.s,main)
+  try:
+   index=next(i for i in range(library.t.rowCount()) if library.t.item(i,0).text()=='P' and library.t.item(i,1).text()=='1')
+   self.assertEqual(library.t.item(index,9).text(),'Y')
+   window=main.open_material_bom(self.p)
+   self.assertEqual(window.svc.sku_id,self.sid)
+   self.assertEqual(window.current_item.data(0,Qt.UserRole)['material_id'],self.p)
+  finally:
+   for window in list(main._bom_windows.values()):window.dirty=False;window.close()
+   library.close();main.close()
+ def test_newest_containing_empty_wins_over_older_nonempty_and_stale_public(self):
+  self.s.for_sku(self.tid).save_bom(self.t,[])
+  self.s.change_mirror_version(self.sid,105);newer=self.s.copy_sku_bom(self.sid)
+  target=self.s.for_sku(newer)
+  with self.db.transaction():
+   target.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(self.p,));target.refresh_usage()
+   self.db.conn.execute("UPDATE skus SET updated_at='2099-01-01' WHERE id=?",(self.sid,))
+  self.assertTrue(self.s.bom(self.p))
+  self.assertEqual(next(r['has_bom'] for r in self.s.materials() if r['id']==self.p),'N')
+  self.assertEqual(selection_tree(self.s,self.p),[])
+ def test_structure_detection_uses_actual_graph_even_if_usage_index_missing(self):
+  self.historical_105_only()
+  self.db.conn.execute('DELETE FROM mirror_material_usage');self.db.conn.commit()
+  self.assertEqual(next(r['has_bom'] for r in self.s.materials() if r['id']==self.p),'Y')
+  # An unreachable residual parent does not count as belonging to this SKU.
+  self.m.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit) VALUES(?,?,1,?)',(self.p2,self.a,'pcs'));self.db.conn.commit()
+  self.assertEqual(next(r['has_bom'] for r in self.s.materials() if r['id']==self.p2),'N')
+ def test_structure_flag_export_and_reopen_preserve_historical_source(self):
+  from openpyxl import load_workbook
+  self.historical_105_only();path=Path(self.tmp.name)/'materials.xlsx';self.s.export_materials(path)
+  book=load_workbook(path)
+  try:
+   sheet=book['物料库'];headers=[c.value for c in sheet[1]]
+   flag=headers.index('是否存在BOM') if '是否存在BOM' in headers else headers.index('是否存在BOM结构')
+   row=next(row for row in sheet.iter_rows(min_row=2,values_only=True) if row[1]=='P' and row[2]=='1')
+   self.assertEqual(row[flag],'Y')
+  finally:book.close()
+  self.db.close();self.db=Database(str(Path(self.tmp.name)/'db'));self.s=Services(self.db);initialize(self.db)
+  self.assertEqual(next(r['has_bom'] for r in self.s.materials() if r['id']==self.p),'Y')
