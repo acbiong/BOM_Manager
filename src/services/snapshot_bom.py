@@ -107,22 +107,42 @@ def draft_definitions(service,root,items):
         if row.get('replace_children'):groups.setdefault(row['material_id'],set())
     return {mid:signature(codes) for mid,codes in groups.items()}
 
+def other_sku_usages(service,material_id):
+    """Every saved mirror except the current editor counts as another BOM."""
+    conn=getattr(service.db.conn,'raw',service.db.conn)
+    sid=getattr(service,'sku_id',None)
+    return [dict(row) for row in conn.execute(
+        'SELECT DISTINCT s.id,s.mirror_version,m.base_code,m.version,m.name '
+        'FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id '
+        'JOIN materials m ON m.id=s.material_id '
+        'WHERE u.material_id=? AND s.id<>? ORDER BY m.base_code,m.version,s.mirror_version,s.id',
+        (material_id,sid if sid is not None else -1))]
+
+def exclusive_to_current_sku(service,material_id):
+    sid=getattr(service,'sku_id',None)
+    if sid is None:return False
+    if not service.db.conn.execute('SELECT 1 FROM skus WHERE id=?',(sid,)).fetchone():return False
+    return not other_sku_usages(service,material_id)
+
 def revision_conflicts(service,root,items):
     if not enabled(service.db):return []
     conflicts=[]
     for mid,codes in draft_definitions(service,root,items).items():
         if service.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
+        if exclusive_to_current_sku(service,mid):continue
         known=service.db.conn.execute('SELECT child_codes FROM bom_revision_definitions WHERE material_id=?',(mid,)).fetchone()
         if known and known[0]!=codes:
             material=service.material_snapshot(mid)
-            conflicts.append(dict(material_id=mid,label=material['base_code']+material['version']+' '+material['name'],before=json.loads(known[0]),after=json.loads(codes)))
+            conflicts.append(dict(material_id=mid,label=material['base_code']+material['version']+' '+material['name'],before=json.loads(known[0]),after=json.loads(codes),other_skus=other_sku_usages(service,mid)))
     return conflicts
 
 def record_definitions(service,root):
     conn=getattr(service.db.conn,'raw',service.db.conn)
     for mid,codes in scope_definitions(conn,getattr(service,'scope_id',0),root).items():
         if conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
-        conn.execute('INSERT OR IGNORE INTO bom_revision_definitions VALUES(?,?)',(mid,codes))
+        if exclusive_to_current_sku(service,mid):
+            conn.execute('INSERT INTO bom_revision_definitions VALUES(?,?) ON CONFLICT(material_id) DO UPDATE SET child_codes=excluded.child_codes',(mid,codes))
+        else:conn.execute('INSERT OR IGNORE INTO bom_revision_definitions VALUES(?,?)',(mid,codes))
         if getattr(service,'scope_id',0):conn.execute('DELETE FROM bom_revision_legacy_conflicts WHERE sku_id=? AND material_id=?',(service.scope_id,mid))
 
 def save_with_revisions(service,root,items,versions,progress=None):

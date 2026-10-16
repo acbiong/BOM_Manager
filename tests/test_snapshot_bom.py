@@ -25,6 +25,7 @@ class SnapshotTests(unittest.TestCase):
   self.assertEqual(self.s.for_sku(copy).bom(self.r)[0]['material_id'],self.p)
   self.m.save_bom(self.r,[]);self.assertEqual(self.m.bom(self.r),[])
  def test_non_sku_change_requires_revision_and_preserves_history(self):
+  self.share_parent()
   copy=self.s.copy_sku_bom(self.sid)
   rows=[self.row(self.p),self.row(self.a,parent_material_id=self.p)]
   with self.assertRaises(ParentRevisionRequired):self.m.save_bom(self.r,rows)
@@ -40,12 +41,14 @@ class SnapshotTests(unittest.TestCase):
   self.assertEqual(self.s.for_sku(copy).bom(self.r)[1]['material_id'],self.c)
   self.assertEqual(self.s.for_sku(copy).alternates(self.s.for_sku(copy).bom(self.r)[1]['id']),[])
  def test_delete_children_requires_revision_preview_does_not(self):
+  self.share_parent()
   rows=[self.row(self.p,replace_children=True)]
   self.assertEqual([x['material_id'] for x in revision_conflicts(self.m,self.r,rows)],[self.p])
   self.m.save_bom(self.r,rows,preview=True)
   save_with_revisions(self.m,self.r,rows,{self.p:'2'})
   self.assertEqual(len(self.m.bom(self.r)),1)
  def test_revision_failure_rolls_back_material_and_tree(self):
+  self.share_parent()
   rows=[self.row(self.p),self.row(self.a,parent_material_id=self.p)]
   before=[dict(r) for r in self.m.bom(self.r)]
   with patch.object(self.m,'save_bom',side_effect=ValueError('failure')):
@@ -70,6 +73,7 @@ class SnapshotTests(unittest.TestCase):
   self.m.save_bom(self.r,[self.row(self.p),self.row(self.a,parent_material_id=self.p)])
   self.assertEqual(self.s.material_snapshot(self.p)['version'],'1')
  def test_legacy_conflict_preserved_and_requires_explicit_revision(self):
+  self.share_parent()
   copy=self.s.copy_sku_bom(self.sid)
   self.db.conn.execute('DELETE FROM app_metadata WHERE key=?',('whole_tree_snapshots_v2',))
   self.db.conn.execute(f'UPDATE mirror_{copy}_material_bom_items SET child_material_id=? WHERE parent_material_id=?',(self.a,self.p));self.db.conn.commit()
@@ -79,17 +83,20 @@ class SnapshotTests(unittest.TestCase):
   self.assertEqual(self.m.bom(self.r)[1]['material_id'],self.c)
   self.assertEqual(len(revision_conflicts(target,self.r,target.bom(self.r))),1)
  def test_revision_retains_unedited_alternates(self):
+  self.share_parent()
   self.m.add_alternate(self.m.bom(self.r)[0]['id'],self.a)
   rows=[dict(r) for r in self.m.bom(self.r)];rows[1]['material_id']=self.a
   save_with_revisions(self.m,self.r,rows,{self.p:'2'})
   self.assertEqual(self.m.alternates(self.m.bom(self.r)[0]['id'])[0]['material_id'],self.a)
  def test_existing_incompatible_revision_rejected(self):
+  self.share_parent()
   p2=self.material('P','2')
   self.db.conn.execute('INSERT INTO bom_revision_definitions VALUES(?,?)',(p2,'["C"]'));self.db.conn.commit()
   rows=[self.row(self.p),self.row(self.a,parent_material_id=self.p)]
   with self.assertRaisesRegex(ValueError,'不同的子料'):save_with_revisions(self.m,self.r,rows,{self.p:'2'})
   self.assertEqual(self.m.bom(self.r)[0]['material_id'],self.p)
  def test_parent_dialog_cancel_retains_draft_and_sku_save_no_dialog(self):
+  self.share_parent()
   from PyQt5.QtWidgets import QApplication,QMessageBox,QDialog
   from ui.main_window import BomWindow
   from ui.parent_revision import ParentRevisionDialog
@@ -132,3 +139,57 @@ class SnapshotTests(unittest.TestCase):
   dialog=ParentRevisionDialog(self.m,[dict(problem,before=['SAME'],after=['SAME','NEW'])])
   try:self.assertEqual(dialog.table.item(0,1).text(),'（无）')
   finally:dialog.close()
+
+ def share_parent(self):
+  other=self.material('OTHER');sid=self.s.create_sku(other)
+  self.s.for_sku(sid).save_bom(other,[self.row(self.p),self.row(self.c,parent_material_id=self.p)])
+  return sid,other
+ def test_exclusive_parent_can_change_without_revision(self):
+  rows=[self.row(self.p),self.row(self.a,parent_material_id=self.p)]
+  self.assertEqual(revision_conflicts(self.m,self.r,rows),[])
+  self.m.save_bom(self.r,rows)
+  self.assertEqual(self.s.material_snapshot(self.p)['version'],'1')
+  self.m.save_bom(self.r,[self.row(self.p,replace_children=True)])
+  self.assertEqual(len(self.m.bom(self.r)),1)
+  self.m.save_bom(self.r,rows)
+  self.assertEqual(self.m.bom(self.r)[1]['material_id'],self.a)
+ def test_same_sku_other_mirror_requires_revision_and_is_listed(self):
+  copy=self.s.copy_sku_bom(self.sid)
+  rows=[self.row(self.p),self.row(self.a,parent_material_id=self.p)]
+  conflicts=revision_conflicts(self.m,self.r,rows)
+  self.assertEqual([r['id'] for r in conflicts[0]['other_skus']],[copy])
+  with self.assertRaises(ParentRevisionRequired):self.m.save_bom(self.r,rows)
+  from PyQt5.QtWidgets import QApplication
+  from ui.parent_revision import ParentRevisionDialog
+  app=QApplication.instance() or QApplication([])
+  d=ParentRevisionDialog(self.m,conflicts)
+  try:
+   self.assertIn('R1 R / 镜像101',d.table.item(0,3).text())
+   self.assertNotIn('镜像100',d.table.item(0,3).text())
+   self.assertIs(d.table.cellWidget(0,4),d.combos[self.p])
+  finally:d.close()
+  save_with_revisions(self.m,self.r,rows,{self.p:'2'})
+  self.assertEqual(self.s.for_sku(copy).bom(self.r)[1]['material_id'],self.c)
+ def test_other_sku_historical_mirror_and_alternate_usage_require_revision(self):
+  sid,root=self.share_parent();copy=self.s.copy_sku_bom(sid)
+  self.s.for_sku(copy).save_bom(root,[])
+  rows=[self.row(self.p),self.row(self.a,parent_material_id=self.p)]
+  conflicts=revision_conflicts(self.m,self.r,rows)
+  self.assertEqual([r['id'] for r in conflicts[0]['other_skus']],[sid])
+  self.assertEqual(conflicts[0]['other_skus'][0]['base_code'],'OTHER')
+  self.s.for_sku(sid).save_bom(root,[self.row(self.a,alternate_material_ids=[self.p])])
+  self.assertEqual(len(revision_conflicts(self.m,self.r,rows)),1)
+  self.s.for_sku(sid).save_bom(root,[])
+  self.assertEqual(revision_conflicts(self.m,self.r,rows),[])
+  self.m.save_bom(self.r,rows)
+ def test_ui_exclusive_parent_save_does_not_open_revision_dialog(self):
+  from PyQt5.QtWidgets import QApplication,QMessageBox
+  from ui.main_window import BomWindow
+  from ui.parent_revision import ParentRevisionDialog
+  app=QApplication.instance() or QApplication([]);w=BomWindow(self.m,self.r)
+  try:
+   w.remove_relation(w.root_item.child(0).child(0))
+   with patch.object(ParentRevisionDialog,'exec_') as dialog,patch.object(QMessageBox,'information'):
+    self.assertTrue(w.save());dialog.assert_not_called()
+   self.assertEqual(self.s.material_snapshot(self.p)['version'],'1')
+  finally:w.dirty=False;w.close()
