@@ -21,9 +21,6 @@ def relative_config_path(value, base):
  if windows and ((drive and not ntpath.isabs(value)) or (value.startswith('/') and not drive)):
   raise ValueError('配置路径不属于当前系统或缺少完整盘符，请重新选择数据库')
  target=value if flavor.isabs(value) else flavor.join(base,value)
- # Resolve native Windows aliases before computing a portable relative path.
- if windows and os.name=='nt':
-  target=str(Path(target).resolve());base=str(Path(base).resolve())
  try:return flavor.relpath(flavor.normpath(target),base).replace('\\','/')
  except ValueError as error:
   raise ValueError('数据库与config.ini位于不同盘符或共享根目录，无法保存相对路径；请将数据库放到配置文件同一盘符（建议同一文件夹）后重新选择') from error
@@ -50,6 +47,9 @@ class ConfigService:
  def relative_path(self,value):
   value=str(value)
   if value.startswith('~'):value=str(Path(value).expanduser())
+  # Canonicalize actual native paths here; the pure cross-platform converter
+  # must not probe foreign drives or network shares.
+  if os.name=='nt' and Path(value).is_absolute():value=str(Path(value).resolve())
   return relative_config_path(value,self.base)
  def resolve_path(self,value):
   return (self.base/self.relative_path(value)).resolve()
