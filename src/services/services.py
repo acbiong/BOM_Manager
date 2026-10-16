@@ -2,7 +2,7 @@ from domain.quantity import format_quantity
 import math
 """业务服务层：物料、SKU、BOM、日志和Excel；UI不得直接访问数据库。编辑时间：2026-09-24。"""
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from openpyxl import Workbook,load_workbook
 class BomImportError(ValueError):
  def __init__(self,issues):
@@ -318,7 +318,7 @@ class Services:
    return mapping
   old_alternates=alternate_map()
   report(40,'正在写入BOM关系…')
-  saved_at=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+  saved_time=datetime.now(timezone.utc)
   affected_skus=[]
   with self.db.transaction():
    for key,row in old.items():
@@ -355,13 +355,24 @@ class Services:
    if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
    # 使用保存前后包含的父物料判断影响范围，覆盖新增和删除共享分支。
    # 在同一事务内更新时间，保证界面收到通知时读取的是已提交数据。
+   affected_rows=[]
    for sku in self.bom_skus():
     sku_root=sku['material_id']
     contained=log_roots.get(sku_root,{sku_root})|reachable(sku_root,graph)
     if contained & changed_parents:
-     if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(saved_at,sku_root))
-     self.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(saved_at,sku['id']))
-     affected_skus.append(sku['id'])
+     affected_rows.append(sku)
+     # Windows can return the same wall-clock instant for consecutive saves.
+     # Keep one strictly increasing UTC timestamp for all affected SKU rows.
+     try:
+      previous=datetime.fromisoformat(str(sku['updated_at']))
+      if previous.tzinfo is None:previous=previous.replace(tzinfo=timezone.utc)
+      if previous>=saved_time:saved_time=previous.astimezone(timezone.utc)+timedelta(microseconds=1)
+     except ValueError:pass
+   saved_at=saved_time.strftime('%Y-%m-%d %H:%M:%S.%f')
+   for sku in affected_rows:
+    if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(saved_at,sku['material_id']))
+    self.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(saved_at,sku['id']))
+    affected_skus.append(sku['id'])
    after={ (r['parent_material_id'],r['child_material_id'],r['position'] or ''):dict(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items') }
    report(70,'正在生成变更记录…')
    after_alternates=alternate_map()

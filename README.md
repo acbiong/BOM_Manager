@@ -346,8 +346,35 @@ BOM对比支持通过“载入其他BOM”选择 .xlsx/.xls，选择工作表并
 
 新增、替换和版本更新从公共物料目录读取最新子BOM。保存最新镜像时，如果子BOM被其他SKU最新镜像使用，会列出变化和受影响BOM供勾选；全部勾选同步，未全部勾选需要父物料升版，未勾选的BOM保留原版本。历史镜像不参与自动同步。
 
-首次启用此模式会先创建 `.pre-latest-catalog-时间.db` 备份，再按最近保存的最新镜像统一现有公共结构。删除分支自动清理当前镜像的不可达结构与缓存；物料主资料和其他历史数据保留。SQLite空闲页复用，轻量索引统计维护不等同于文件体积立即缩小。
+已有业务数据的数据库首次启用此模式会先创建 `.pre-latest-catalog-时间.db` 备份，再按最近保存的最新镜像统一现有公共结构。全新空库只初始化结构，不创建此备份；首次新建及重新打开后，数据库目录只保留所选数据库文件。删除分支自动清理当前镜像的不可达结构与缓存；物料主资料和其他历史数据保留。SQLite空闲页复用，轻量索引统计维护不等同于文件体积立即缩小。
 
 ## 孤立BOM自动维护
 
 打开数据库时检查所有SKU及历史镜像的可达关系，清理真正孤立的结构和缓存，保留物料资料及历史记录。清理前生成 `.pre-orphan-cleanup-时间.db` 备份；实际删除结构后尝试VACUUM缩小主数据库文件。备份本身保留并占用额外空间，维护结果存储在 `app_metadata.last_orphan_cleanup`。无孤立数据时不重复压缩。
+
+## Windows签名发布与SmartScreen
+
+“Windows已保护你的电脑 / 无法识别的应用”属于SmartScreen信誉提示。数字签名验证发布者身份和文件完整性，但新文件仍可能因信誉不足触发提醒，不能承诺签名后立即在所有Windows电脑无提示。微软说明与发行选择见[SmartScreen应用信誉](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)。本项目目前没有受信任代码签名证书，本轮输出为未签名包。
+
+Windows构建现在嵌入产品名称及版本资源，并支持从Windows证书存储区精确选取证书，通过SDK的SignTool完成SHA256签名、RFC3161时间戳及Authenticode信任链验证，之后执行包内自检，最后计算签名后的SHA256。配置不完整、签名/时间戳/验证失败或自检失败时中止，不能回退为未签名的成功发布。
+
+取得受信任的代码签名证书（私钥由证书提供方/硬件令牌保管，证书可通过Windows存储区使用）并安装Windows SDK的SignTool后，在PowerShell中配置：
+
+```powershell
+$env:BOM_SIGN_CERT_SHA1 = '证书的40位十六进制指纹'
+$env:BOM_SIGN_TIMESTAMP_URL = 'https://证书提供方的RFC3161时间戳地址'
+$env:BOM_REQUIRE_SIGNED = '1'
+# 默认CurrentUser\My；证书在LocalMachine\My时才设置：
+# $env:BOM_SIGN_MACHINE_STORE = '1'
+# SignTool不在PATH或标准Windows SDK目录时指定完整路径：
+# $env:BOM_SIGNTOOL = 'C:\路径\signtool.exe'
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 build
+```
+
+指纹中的SHA1仅用于选择证书，实际文件签名和时间戳摘要均为SHA256。不要在Git、配置文件或聊天中保存私钥及密码。`build`和`finish`使用相同环境变量；CI需由组织另行配置受保护的签名凭据及SDK，当前GitHub工作流不会自动获得证书。
+
+未配置签名时允许本地开发构建，控制台输出`UNSIGNED`，`test_reports/<包名>_signing.json`明确记录`unsigned`；已配置并验证成功时记录`verified`、证书指纹和最终SHA256。正式要求签名时设置`BOM_REQUIRE_SIGNED=1`，缺少证书即在构建前拒绝。自签证书和版本资源不能替代受信任签名，也不会用于关闭SmartScreen、修改防病毒策略或移除下载来源标记。
+
+后续需实际接入证书完成签名构建，并从真实下载渠道在干净目标Windows环境验收首次启动；受SmartScreen信誉影响仍可能有提示。若要求广泛分发时尽量避免这类首次下载警告，可另行评估Microsoft Store分发，账号及审核发布不属于本轮已完成事项。
+
+Windows测试入口按`tests/test_*.py`逐文件启用独立Python/Qt进程，避免整套测试的残留窗口状态影响后续用例；保留全部用例、原有性能阈值和完整日志。每个文件超时180秒或进程异常退出均记为失败；`TEST_STEPS`包含需求审计，不是业务用例数。

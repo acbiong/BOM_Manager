@@ -21,13 +21,31 @@ if os.name == 'nt':
     # The offscreen plugin does not discover native Windows fonts itself.
     env.setdefault('QT_QPA_FONTDIR',str(Path(os.environ.get('WINDIR','C:/Windows'))/'Fonts'))
 failed=False
+# Windows Qt can retain native widgets/styles between otherwise independent
+# unittest modules. Give every module its own QApplication/process so earlier
+# windows cannot affect later first-paint timings or stylesheet lifetime.
+commands=[[sys.executable,'tests/audit_requirements.py']]
+if os.name == 'nt':
+    test_files=sorted((root/'tests').glob('test_*.py'))
+    if not test_files:raise SystemExit('No test modules discovered')
+    commands.extend([sys.executable,'-X','faulthandler','-m','unittest','discover','-s','tests','-p',path.name,'-q'] for path in test_files)
+else:
+    commands.append([sys.executable,'-m','unittest','discover','-s','tests','-q'])
+passed_steps=0
 with report.open('w',encoding='utf-8') as output:
     output.write(f'BOM管理系统测试报告\n时间：{datetime.datetime.now().astimezone().isoformat()}\n项目：{root}\nPython：{sys.executable}\n平台：{platform.platform()}\n')
-    for args in ([sys.executable,'tests/audit_requirements.py'],[sys.executable,'-m','unittest','discover','-s','tests','-q']):
+    for args in commands:
         output.write('\n$ '+subprocess.list2cmdline(args)+'\n');output.flush()
-        result=subprocess.run(args,env=env,stdout=output,stderr=subprocess.STDOUT)
-        output.write(f'[exit={result.returncode}]\n')
-        failed=failed or result.returncode!=0
+        try:
+            result=subprocess.run(args,env=env,stdout=output,stderr=subprocess.STDOUT,
+                                  timeout=180 if os.name == 'nt' else None)
+            output.write(f'[exit={result.returncode}]\n')
+            passed_steps+=int(result.returncode==0)
+            failed=failed or result.returncode!=0
+        except subprocess.TimeoutExpired:
+            output.write('[TIMEOUT after 180 seconds; failed]\n');failed=True
+        output.flush()
+    output.write(f'\nTEST_STEPS {passed_steps}/{len(commands)} (including requirement audit)\n')
     try:
         for source in (root/'src').rglob('*.py'):
             dest=root/'.tmp'/'compile'/source.relative_to(root/'src').with_suffix('.pyc')

@@ -1,6 +1,6 @@
 # Codex项目记忆与交接记录
 
-更新日期：2026-10-10。此文件记录可供其他开发者和新Codex会话使用的项目事实、用户约定与验证方法，不保存内部推理、账号凭证或完整聊天历史。每轮先检查真实文件，本文不能替代代码及用户最新要求。
+更新日期：2026-10-16。此文件记录可供其他开发者和新Codex会话使用的项目事实、用户约定与验证方法，不保存内部推理、账号凭证或完整聊天历史。每轮先检查真实文件，本文不能替代代码及用户最新要求。
 
 ## 接手时先做什么
 
@@ -596,3 +596,17 @@ SKU右键新增编辑变更描述，使用可保存/取消的多行纯文本编�
 ## v0.6.0 发布流程
 
 GitHub原始基准标签为大写V0.5.1。v0.6.0发布说明位于docs/RELEASE_v0.6.0.md，记录最终生效功能。现有Desktop packages工作流在v*标签推送后分别构建Linux和Windows，通过后release job使用短期github.token创建Release并上传包及校验文件；仅该job授予contents: write。本机SSH可以推送，但未配置Release API令牌；不输出或存储凭据。指定正式版本使用BOM_RELEASE_VERSION=0.6.0执行收尾。
+
+## 2026-10-16：Windows签名支持、新建空库与本机验证
+
+- 接手基线为0.6.0 / 857e553，工作区干净；已先读取最新规格、审计和本记忆，以公共目录、最新镜像勾选同步及历史保护等末尾规则为准。当前App中没有可见的其他机器开发会话，跨机交接依据为最新仓库文件，不声称读取了不可见会话。当前实际版本、提交和产物仍应查询VERSION、git log和package。
+- 用户确认弹窗是SmartScreen“Windows已保护你的电脑 / 无法识别的应用”，且暂时没有受信任代码签名证书，授权先完善签名支持并说明后续条件。tools/windows_signing.py支持证书存储区指纹选证、SignTool SHA256签名、RFC3161时间戳和Authenticode信任链验证；tools/build_windows.py嵌入产品/版本资源，签名后自检，最后生成SHA256及_signing.json。无配置明确unsigned；BOM_REQUIRE_SIGNED=1缺证、配置不完整、签名/验证失败均中止，不静默降级。
+- 尚未执行真实证书签名。受信任签名也不能保证新文件立即取得SmartScreen信誉，不得承诺所有电脑免提示，不通过禁用保护、自签信任或移除下载来源标记绕过。后续需组织证书/签名身份及SDK SignTool，再完成真实渠道下载、干净目标Windows首次启动验收；README记录配置。Microsoft Store分发可另行评估，未在本轮发布。
+- 新建空库不再无条件生成.pre-latest-catalog备份：current_catalog.initialize仅对存在物料、SKU、关系、替代料或历史记录的库先备份后迁移。启动新建、切换新库、重开均验证只留下选定数据库文件；真实旧库备份失败会阻止迁移，已有备份不删除。此调整不改变BOM未保存草稿、同步确认与历史保护，不打开修改用户业务库。
+- 本机.venv已补齐最新requirements中的xlrd 2.0.2（原缺失导致外部Excel/自检失败），pip check通过。Windows整套共享Qt进程出现原生访问异常，堆栈位于apply_theme全局样式刷新；物料选择性能在整套状态下约2047ms，独立用例约92ms。tools/run_tests.py现按测试文件隔离Windows进程，保留所有用例和300ms阈值，开启faulthandler及单文件180秒失败超时，不掩盖错误或跳过测试。真实GUI长期多窗口压力验收仍是独立事项。
+- 本轮新增test_database_creation_files.py的3项数据库回归、test_windows_signing.py的5项签名流水线回归；签名命令采用模拟失败/成功验证控制流，不能视为真实证书验收。收尾使用tools/windows.ps1 finish调用tools/finish_ai_change.sh及打包钩子；最终完整测试、需求编号审计、编译和EXE自检报告保留于test_reports，SHA256位于package，提交对应成功标记为.tmp/package_success_commit。
+- 提交前完整验证证据：test_reports/test_20261016_174059.txt，66个文件共373项测试通过，TRACE_OK 137/137、TEST_STEPS 67/67（含审计）、COMPILE_OK；一万物料替换/替代选择首帧85.3/75.8ms。后续收尾和打包会按同一入口重新验证，以最新报告及产物为准。
+- 收尾复测曾因Windows连续读取相同系统时间失败并在提交前停止。固定时钟回归已稳定复现并验证修复：Services.save_bom在同一事务中取受影响SKU原时间，必要时将统一UTC保存时间推进1微秒，保持所有受影响SKU/根物料相同，无关SKU及未实际修改不更新。test_sku_timestamp_title.py现8项通过，最终全套增至374项，收尾按新代码重新执行；不靠休眠、放宽断言或忽略失败处理。
+- 收尾复测曾因Windows连续读取相同系统时间失败并在提交前停止。固定时钟回归已稳定复现并验证修复：Services.save_bom在同一事务中取受影响SKU原时间，必要时将统一UTC保存时间推进1微秒，保持所有受影响SKU/根物料相同，无关SKU及未实际修改不更新。test_sku_timestamp_title.py现8项通过，最终全套增至374项，收尾按新代码重新执行；不靠休眠、放宽断言或忽略失败处理。
+- 提交前完整验证证据：test_reports/test_20261016_174059.txt，66个文件共373项测试通过，TRACE_OK 137/137、TEST_STEPS 67/67（含审计）、COMPILE_OK；一万物料替换/替代选择首帧85.3/75.8ms。后续收尾和打包会按同一入口重新验证，以最新报告及产物为准。
+- 用户此前已明确先完成Windows环境和EXE，本机仍无WSL/Linux；本轮AppImage构建和SHA256核验待Linux环境完成，不安装WSL、不启动常驻监控、不自动push或发布Release。

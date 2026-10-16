@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime,timezone
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 from PyQt5.QtWidgets import QApplication, QFileDialog
@@ -108,6 +109,7 @@ class SkuTimestampTitleTests(unittest.TestCase):
         for quantity in (2,3):
             self.s.save_bom(self.parent,[dict(material_id=self.child,quantity=quantity,unit='pcs')])
             current={row['material_id']:row['updated_at'] for row in self.s.skus()}
+            self.assertEqual(current[self.root],current[self.other])
             for root in (self.root,self.other):
                 self.assertGreater(current[root],previous[root])
                 stored=self.db.conn.execute('SELECT updated_at FROM skus WHERE material_id=?',(root,)).fetchone()[0]
@@ -118,3 +120,8 @@ class SkuTimestampTitleTests(unittest.TestCase):
             previous=current
         self.s.save_bom(self.parent,[dict(material_id=self.child,quantity=3,unit='pcs')])
         self.assertEqual({row['material_id']:row['updated_at'] for row in self.s.skus()},previous)
+
+    def test_rapid_saves_when_windows_clock_returns_the_same_instant(self):
+        with patch('services.services.datetime',wraps=datetime) as clock:
+            clock.now.return_value=datetime(2030,1,1,tzinfo=timezone.utc)
+            self.test_rapid_saves_update_both_tables_and_linked_list()

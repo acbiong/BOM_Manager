@@ -91,7 +91,11 @@ def initialize(db):
         ensure_indexes(db)
         return
     if not snapshots_enabled(db):raise ValueError('请先迁移整树镜像')
-    if db.path!=':memory:':
+    # 新建空库只初始化结构和标记，没有需要迁移保护的业务数据。
+    # 已有物料、镜像、关系或历史的旧库仍必须先成功备份。
+    has_data=any(db.conn.execute('SELECT 1 FROM '+table+' LIMIT 1').fetchone()
+                 for table in ('materials','skus','material_bom_items','bom_items','alternates','change_logs'))
+    if db.path!=':memory:' and has_data:
         path=Path(str(db.path)+'.pre-latest-catalog-'+datetime.now().strftime('%Y%m%d_%H%M%S_%f')+'.db')
         backup=sqlite3.connect(str(path))
         try:db.conn.backup(backup)
