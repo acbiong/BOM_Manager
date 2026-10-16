@@ -40,7 +40,11 @@ class ScrollingSkuHeader(QHeaderView):
         option.rect = rect
         option.section = logical_index
         option.text = ''
-        self.style().drawControl(QStyle.CE_Header, option, painter, self)
+        painter.save()
+        try:
+            self.style().drawControl(QStyle.CE_Header, option, painter, self)
+        finally:
+            painter.restore()
         lines = str(self.model().headerData(logical_index, Qt.Horizontal) or '').split('\n')
         painter.save()
         painter.setFont(self.font())

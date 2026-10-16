@@ -42,7 +42,10 @@ class HeaderBomLayoutTests(unittest.TestCase):
      finally:painter.end()
      return result
     first=frame(0);second=frame(2500)
-    self.assertNotEqual(first,second)
+    if first==second:
+     output=Path(__file__).parents[1]/'test_reports';output.mkdir(exist_ok=True)
+     first.save(str(output/'header_frame0.png'));second.save(str(output/'header_frame2500.png'))
+    self.assertNotEqual(first,second,f'size={first.width()}x{first.height()}, font={header.font().toString()}, text={header.model().headerData(column,1)!r}, style={header.style().objectName()}')
     header.hide();self.assertFalse(header.timer.isActive())
     bom.show();self.app.processEvents()
     self.assertEqual(bom.default_panel_width,bom.fontMetrics().horizontalAdvance('M')*100)
