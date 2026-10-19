@@ -126,7 +126,10 @@ def startup_database(config_service,cfg):
    elif candidate is not None:path=candidate
 
 def main():
- app=QApplication(sys.argv); guard=SingleInstance(); db=None; base=None; geometry_memory=None
+ app=QApplication(sys.argv)
+ from ui.save_shortcut import install_save_shortcuts
+ save_shortcuts=install_save_shortcuts(app)
+ guard=SingleInstance(); db=None; base=None; geometry_memory=None
  try:
   if not guard.acquire():
    if not guard.notify_existing():QMessageBox.information(None,'软件已运行','该目录下的BOM管理系统已在运行或正在启动，请切换到已有窗口。')
@@ -152,6 +155,7 @@ def main():
   QMessageBox.critical(None,'BOM管理系统启动失败',f'{exc}\n\n详细信息已写入：{log}')
   return 1
  finally:
+  save_shortcuts.shutdown()
   if geometry_memory is not None:
    app.removeEventFilter(geometry_memory);app.aboutToQuit.disconnect(geometry_memory.save_visible);geometry_memory.deleteLater()
   try:
