@@ -10,7 +10,7 @@ class ChangeDescriptionDialog(QDialog):
     def __init__(self,text,parent=None):
         super().__init__(parent);self.setWindowTitle('编辑变更描述');self.resize(560,320)
         layout=QVBoxLayout(self);self.editor=QPlainTextEdit();self.editor.setPlainText(text or '')
-        self.editor.setPlaceholderText('输入此SKU镜像的变更描述，可分多行填写');layout.addWidget(self.editor)
+        self.editor.setPlaceholderText('输入此SKU历史版本的变更描述，可分多行填写');layout.addWidget(self.editor)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
     def description(self):return self.editor.toPlainText()

@@ -62,22 +62,22 @@ class Services:
    create_namespace(self.db,new_id,source)
    copied=self.for_sku(new_id);copied.refresh_usage()
    copied.db.conn.execute("UPDATE change_logs SET object_id=? WHERE object_type='sku' AND object_id=?",(new_id,sid))
-   copied.log('sku',new_id,'copy',f'复制BOM；源镜像版本：{sku["mirror_version"]}；新镜像版本：{version}')
+   copied.log('sku',new_id,'copy',f'复制BOM；源历史版本：{sku["mirror_version"]}；新历史版本：{version}')
    from services.current_catalog import refresh_latest_from_catalog
    refresh_latest_from_catalog(self)
   self.publish({'type':'sku_changed','id':new_id});return new_id
  def change_mirror_version(self,sid,value):
   try:value=int(value)
-  except (TypeError,ValueError):raise ValueError('镜像版本号必须为正整数')
-  if value<1:raise ValueError('镜像版本号必须为正整数')
+  except (TypeError,ValueError):raise ValueError('历史版本号必须为正整数')
+  if value<1:raise ValueError('历史版本号必须为正整数')
   row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
   if row is None:raise ValueError('SKU不存在')
-  if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=? AND mirror_version=? AND id<>?',(row['material_id'],value,sid)).fetchone():raise ValueError('此SKU镜像版本号已存在')
+  if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=? AND mirror_version=? AND id<>?',(row['material_id'],value,sid)).fetchone():raise ValueError('此SKU历史版本号已存在')
   with self.db.transaction():
    stamp=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
    self.db.conn.execute('UPDATE skus SET mirror_version=?,updated_at=? WHERE id=?',(value,stamp,sid))
    if not row['scope_id']:self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,row['material_id']))
-   self.for_sku(sid).log('sku',sid,'mirror_version',f'镜像版本号：{row["mirror_version"]} → {value}')
+   self.for_sku(sid).log('sku',sid,'mirror_version',f'历史版本号：{row["mirror_version"]} → {value}')
    from services.current_catalog import refresh_latest_from_catalog
    refresh_latest_from_catalog(self)
   self.publish({'type':'sku_changed','id':sid})
@@ -126,7 +126,7 @@ class Services:
   from infrastructure.events import WindowRefreshBus
   self.publish({'type':'material_changed','id':i})
  def delete_material(self,i):
-  if self.db.conn.execute('SELECT 1 FROM mirror_material_usage WHERE material_id=?',(i,)).fetchone():raise ValueError('物料仍被镜像BOM引用，请先删除引用')
+  if self.db.conn.execute('SELECT 1 FROM mirror_material_usage WHERE material_id=?',(i,)).fetchone():raise ValueError('物料仍被历史版本BOM引用，请先删除引用')
   if self.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(i,)).fetchone(): raise ValueError('物料是SKU，请先删除SKU引用')
   r=self.db.conn.execute('SELECT COUNT(*) n FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)).fetchone();
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
@@ -402,7 +402,7 @@ class Services:
     previous=old_alternates.get(before['id'],[]) if before else []
     following=after_alternates.get(current['id'],[]) if current else []
     for mid in following:
-     if mid not in previous:detail.append('增加替代料：'+label(mid))
+     if mid not in previous:detail.append('新增替代料：'+label(mid))
     for mid in previous:
      if mid not in following:detail.append('删除替代料：'+label(mid))
     if not detail:continue
@@ -614,7 +614,7 @@ class Services:
   """以实际共享父级BOM为选择单位，列出所有受影响SKU。"""
   parents=self.db.conn.execute('SELECT DISTINCT m.* FROM material_bom_items b JOIN materials m ON m.id=b.parent_material_id WHERE b.child_material_id=? ORDER BY m.base_code,m.version',(i,)).fetchall()
   from services.current_catalog import enabled as catalog_enabled
-  if catalog_enabled(self) and not getattr(self,'scope_id',0):parents=[]  # 公共目录是镜像缓存，不是独立SKU引用。
+  if catalog_enabled(self) and not getattr(self,'scope_id',0):parents=[]  # 公共目录是历史版本缓存，不是独立SKU引用。
   result=[]
   for parent in parents:
    usages=[]; sku_ids=[]
@@ -630,7 +630,7 @@ class Services:
     parent_ids={row['parent_material_id'] for row in service.bom(sku['material_id']) if row['material_id']==i}
     for parent_id in sorted(parent_ids):
      parent=self.material_snapshot(parent_id);label=parent['base_code']+parent['version']+' '+parent['name']
-     sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}"
+     sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}"
      result.append(dict(parent_id=f"mirror:{sku['id']}:{parent_id}",material_parent_id=parent_id,sku_ids=[sku['id']],sku_labels=[sku_label],parent_label=label,labels=[sku_label+'/'+label]))
   return result
  def material_usage(self,i):
@@ -640,7 +640,7 @@ class Services:
    return actual_material_usage(self,i)
   result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label'],'parent_id':reference.get('material_parent_id',reference['parent_id'])} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
   for sku in self.skus():
-   if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}",'parent':'SKU根节点（无父级）'})
+   if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}",'parent':'SKU根节点（无父级）'})
   return result
  def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
   new_version=new_version.strip()
@@ -753,7 +753,7 @@ class Services:
   self.write_material_sheet(wb.create_sheet('物料库'))
   self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
   for r in self.skus():
-   self.for_sku(r['id']).write_bom_sheet(wb.create_sheet((r['base_code']+r['version']+(' 镜像'+str(r['mirror_version']) if sum(x['material_id']==r['material_id'] for x in self.skus())>1 else ''))[:31]),r['material_id'])
+   self.for_sku(r['id']).write_bom_sheet(wb.create_sheet((r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if sum(x['material_id']==r['material_id'] for x in self.skus())>1 else ''))[:31]),r['material_id'])
   wb.save(path)
  def export_materials(self,path):
   wb=Workbook(); ws=wb.active; ws.title='变更记录'
@@ -762,13 +762,14 @@ class Services:
   wb.save(path)
  def write_material_sheet(self,sheet):
   from services.snapshot_bom import enabled
-  extra=['是否被最新镜像使用'] if enabled(self.db) else []
+  extra=['是否被最新历史版本使用'] if enabled(self.db) else []
   sheet.append(['序号','物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料']+extra)
   for number,row in enumerate(self.materials(),1):
    sheet.append([number]+[row[key] for key in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag','has_bom','idle')]+([row['latest_used']] if extra else []))
-  self.format_export_sheet(sheet,{'序号','单位','物料等级','M/P','是否存在BOM结构','是否为呆滞料','是否被最新镜像使用'})
+  self.format_export_sheet(sheet,{'序号','单位','物料等级','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用'})
  def write_change_sheet(self,sheet,records):
   import re
+  from domain.terminology import history_display_text
   sheet.append(['序号','变更日期','变更时间','变更物料编码','变更物料名称','变更类型','变更详细内容'])
   legacy_codes={}
   for historical in self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id"):
@@ -813,12 +814,14 @@ class Services:
      code=current['base_code']+current['version'] if current else '已删除对象'
      name=current.get('name','已删除对象')
     else:code='历史记录未保存';name=name or '历史记录未保存'
+   # Render legacy wording after extracting material identity from the raw record.
+   detail=history_display_text(detail)
    detail=re.sub(r'[；;][ \t]*','\n',detail)
    object_name={'material':'物料','bom':'BOM','sku':'SKU','project':'项目'}.get(row['object_type'],row['object_type'] or '')
    action_name={'create':'新建','update':'修改','delete':'删除','version':'版本变更'}.get(row['action'],row['action'] or '')
    change_type=action_name+object_name if row['action']!='version' else object_name+action_name
    if row['action']=='copy':change_type='复制BOM'
-   elif row['action']=='mirror_version':change_type='镜像版本变更'
+   elif row['action']=='mirror_version':change_type='历史版本变更'
    prefixes={'复制BOM','新建物料','修改物料','删除物料','创建SKU','新建SKU','修改BOM','删除SKU','创建物料'}
    first,separator,remainder=detail.partition('\n')
    if first.strip() in prefixes:
@@ -828,7 +831,7 @@ class Services:
     if any(line.startswith('新增物料') for line in detail.splitlines()):types.append('新增物料')
     if any(line.startswith('删除物料') for line in detail.splitlines()):types.append('删除物料')
     if any(line.startswith(('数量：','单位：','备注：','位置：')) and ' → ' in line for line in detail.splitlines()):types.append('修改物料')
-    if '增加替代料：' in detail:types.append('新增替代料')
+    if '新增替代料：' in detail:types.append('新增替代料')
     if '删除替代料：' in detail:types.append('删除替代料')
     change_type='、'.join(types) or ('删除物料' if row['action']=='delete' else '修改物料')
    if row['object_type']=='material' and row['action']=='create':detail=''

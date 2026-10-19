@@ -166,7 +166,7 @@ class BomCompareDialog(QDialog):
         node=diff.left if side==0 else diff.right
         if node is None or node.get('_external'):return
         menu=QMenu(self);edit=menu.addAction('打开BOM进行编辑')
-        material_edit=menu.addAction('编辑此物料')
+        menu.addSeparator();material_edit=menu.addAction('编辑此物料')
         action=menu.exec_(global_pos)
         if action==edit:self.open_editor(side,index.row())
         elif action==material_edit:self.edit_material(side,index.row())
@@ -234,7 +234,7 @@ class BomCompareDialog(QDialog):
             combo.blockSignals(True);combo.clear()
             combo.addItem('请显示对比的BOM',None)
             for row in rows:
-                combo.addItem(f"{row['base_code']}{row['version']} {row['name']}  镜像{row['mirror_version']}",row['id'])
+                combo.addItem(f"{row['base_code']}{row['version']} {row['name']}  历史版本{row['mirror_version']}",row['id'])
             for key,source in self.external_sources.items():combo.addItem(source['label'],key)
             combo.addItem('载入其他BOM','load_external')
             chosen=combo.findData(previous[index])

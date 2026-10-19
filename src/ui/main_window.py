@@ -71,7 +71,7 @@ class MaterialHeaderMappingDialog(QDialog):
   self.source_headers=headers; self.alternate_groups=[]
   layout=QVBoxLayout(self); layout.addWidget(QLabel('请确认需求字段与文件列的映射关系（* 为必选）：'))
   if required:
-   button=QPushButton('增加替代料'); button.clicked.connect(self.add_alternate_mapping); layout.addWidget(button)
+   button=QPushButton('新增替代料'); button.clicked.connect(self.add_alternate_mapping); layout.addWidget(button)
   self.mapping_table=QTableWidget(2,len(self.required)); self.mapping_table.setVerticalHeaderLabels(['需求表头','目标表头']); self.mapping_table.horizontalHeader().hide(); self.mapping_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   for column,need in enumerate(self.required):
    item=QTableWidgetItem(need if need in self.optional else need+' *'); item.setToolTip(('可选；新建未映射默认：'+(MATERIAL_IMPORT_DEFAULTS.get(need) or '空值')+'；覆盖时未映射保留原值') if need in self.optional else '必需映射'); item.setTextAlignment(Qt.AlignCenter); self.mapping_table.setItem(0,column,item)
@@ -309,7 +309,7 @@ class MainWindow(QMainWindow):
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
   self.setCentralWidget(self.table)
   self.count_label=QLabel(''); self.version_label=QLabel('版本 '+self.version); self.version_label.setAlignment(Qt.AlignCenter)
-  self.latest_bom_only=QCheckBox('只显示最新BOM'); self.latest_bom_only.setChecked(False); self.latest_bom_only.setToolTip('同一SKU仅显示镜像版本号最高的BOM'); self.latest_bom_only.toggled.connect(self.apply_sku_filters)
+  self.latest_bom_only=QCheckBox('只显示最新BOM'); self.latest_bom_only.setChecked(False); self.latest_bom_only.setToolTip('同一SKU仅显示历史版本号最高的BOM'); self.latest_bom_only.toggled.connect(self.apply_sku_filters)
   footer=QWidget(); footer_l=QGridLayout(footer); footer_l.setContentsMargins(8,2,8,2)
   footer_l.addWidget(self.count_label,0,0,Qt.AlignLeft|Qt.AlignVCenter); footer_l.addWidget(self.version_label,0,1); footer_l.addWidget(self.latest_bom_only,0,2,Qt.AlignRight|Qt.AlignVCenter)
   for column in range(3):footer_l.setColumnStretch(column,1)
@@ -392,21 +392,21 @@ class MainWindow(QMainWindow):
    if visible:visible_codes.add(code)
    self.table.setRowHidden(row,not visible);count+=int(visible)
   self.count_label.setText(f'共计{len(sku_codes)}个SKU，{self.table.rowCount()}个BOM')
-  self.count_label.setToolTip(f'SKU按编码去重，每个镜像计为一个BOM。当前显示{len(visible_codes)}个SKU，{count}个BOM。')
+  self.count_label.setToolTip(f'SKU按编码去重，每个历史版本计为一个BOM。当前显示{len(visible_codes)}个SKU，{count}个BOM。')
  def copy_sku_bom(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
   window=self._bom_windows.get(sid) or (self._material_bom_windows.get(row['material_id']) if row and not row['scope_id'] else None)
-  if window and window.dirty:QMessageBox.information(self,'请先保存','当前镜像有未保存编辑，请先保存再复制BOM。');return
+  if window and window.dirty:QMessageBox.information(self,'请先保存','当前历史版本有未保存编辑，请先保存再复制BOM。');return
   try:
    new_id=self.svc.copy_sku_bom(sid);self.open_bom_id(new_id)
   except Exception as error:QMessageBox.warning(self,'复制BOM失败',str(error))
  def change_mirror_version(self,sid):
   row=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(sid,)).fetchone()
   if row is None:return
-  value,ok=QInputDialog.getInt(self,'镜像版本变更','新镜像版本号',row[0],1,2147483647)
+  value,ok=QInputDialog.getInt(self,'历史版本变更','新历史版本号',row[0],1,2147483647)
   if ok:
    try:self.svc.change_mirror_version(sid,value)
-   except Exception as error:QMessageBox.warning(self,'镜像版本变更失败',str(error))
+   except Exception as error:QMessageBox.warning(self,'历史版本变更失败',str(error))
  def select_database(self):
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close();self._compare_dialog.deleteLater();self._compare_dialog=None
   current=Path(self.svc.db.path).expanduser()
@@ -560,7 +560,11 @@ class MainWindow(QMainWindow):
   row=self.table.rowAt(pos.y())
   if row<0:return
   self.table.selectRow(row); sid=int(self.table.item(row,6).text())
-  menu=QMenu(self); description=menu.addAction('编辑变更描述'); version=menu.addAction('SKU版本变更');mirror=menu.addAction('镜像版本变更');copy=menu.addAction('复制BOM'); compare=menu.addAction('BOM对比'); export_action=menu.addAction('导出BOM'); purchase_action=menu.addAction('采购BOM导出'); delete=menu.addAction('删除SKU')
+  menu=QMenu(self)
+  description=menu.addAction('编辑变更描述');version=menu.addAction('SKU版本变更');mirror=menu.addAction('历史版本变更')
+  menu.addSeparator();copy=menu.addAction('复制BOM');compare=menu.addAction('BOM对比')
+  menu.addSeparator();export_action=menu.addAction('导出BOM');purchase_action=menu.addAction('采购BOM导出')
+  menu.addSeparator();delete=menu.addAction('删除SKU')
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
   if action==description:self.edit_sku_change_description(sid)
   elif action==copy:self.copy_sku_bom(sid)
@@ -574,7 +578,7 @@ class MainWindow(QMainWindow):
   row=self.svc.db.conn.execute('SELECT m.id AS material_id,m.base_code,m.version,m.name,s.mirror_version,s.scope_id FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
   if not row:return
   title='采购BOM导出' if purchase else '导出BOM'
-  filename=row['base_code']+row['version']+' '+row['name']+(' 镜像'+str(row['mirror_version']) if row['scope_id'] else '')+(' 采购BOM' if purchase else '')
+  filename=row['base_code']+row['version']+' '+row['name']+(' 历史版本'+str(row['mirror_version']) if row['scope_id'] else '')+(' 采购BOM' if purchase else '')
   p=QFileDialog.getSaveFileName(self,title,export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
   if p:
    remember_export_path(p)
@@ -598,10 +602,10 @@ class MainWindow(QMainWindow):
   if enabled(self.svc.db):
    sources=material_sources(self.svc,material_id)
    if sources:
-    labels=[f"{r['base_code']}{r['version']} {r['name']} 镜像{r['mirror_version']}" for r in sources]
+    labels=[f"{r['base_code']}{r['version']} {r['name']} 历史版本{r['mirror_version']}" for r in sources]
     chosen=labels[0]
     if len(sources)>1:
-     chosen,ok=QInputDialog.getItem(self,'选择要编辑的BOM镜像','子BOM属于独立镜像，请选择：',labels,0,False)
+     chosen,ok=QInputDialog.getItem(self,'选择要编辑的BOM历史版本','子BOM属于独立历史版本，请选择：',labels,0,False)
      if not ok:return
     window=self.open_bom_id(sources[labels.index(chosen)]['id'])
     if window is not None:window.locate_material(material_id)
@@ -700,13 +704,13 @@ class BomWindow(QMainWindow):
  def mirror_suffix(self):
   if getattr(self.svc,'sku_id',None):
    row=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(self.svc.sku_id,)).fetchone()
-   if row:return ' 镜像'+str(row[0])
+   if row:return ' 历史版本'+str(row[0])
   return ''
  def update_mirror_title(self):
   if getattr(self.svc,'sku_id',None):
    sku=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(self.svc.sku_id,)).fetchone()
    material=self.svc.material_snapshot(self.root)
-   if sku:self.setWindowTitle(f"{material['base_code']}{material['version']} {material['name']} 镜像{sku[0]}")
+   if sku:self.setWindowTitle(f"{material['base_code']}{material['version']} {material['name']} 历史版本{sku[0]}")
  def mark_dirty(self):
   self.dirty=True
   self.save_action.setEnabled(True)
@@ -733,30 +737,50 @@ class BomWindow(QMainWindow):
   it=self.tree.itemAt(pos)
   if not it:return
   d=it.data(0,Qt.UserRole) or {}
+  menu=QMenu(self)
   if d.get('_deleted'):
-   menu=QMenu(self);restore=menu.addAction('取消删除')
-   if menu.exec_(self.tree.viewport().mapToGlobal(pos))==restore:self.restore_relation(it)
+   restore=menu.addAction('取消删除');menu.addSeparator();reverse=menu.addAction('物料反查')
+   act=menu.exec_(self.tree.viewport().mapToGlobal(pos))
+   if act==restore:self.restore_relation(it)
+   elif act==reverse:self.reverse_tree_material(it)
    return
-  if it is getattr(self,'root_item',None):
-   m=QMenu(self); edit=m.addAction('编辑此物料'); child=m.addAction('增加子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(self.root)) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
-   if self.handle_clipboard_action(act,clipboard_actions,it):return
-   if act==edit:self.edit_tree_material(it)
-   elif act==child:self.add_relative(d,True)
-   elif act==imp:self.import_bom(it)
-   return
-  m=QMenu(self); edit=m.addAction('编辑此物料'); same=m.addAction('新增同级物料'); child=m.addAction('新增子级物料'); imp=m.addAction('导入BOM'); (imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id'))) if hasattr(imp,'setEnabled') else None); (imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM') if hasattr(imp,'setToolTip') else None); dele=m.addAction('删除物料'); replace=m.addAction('替换物料'); version=m.addAction('物料版本更新'); version.setEnabled(bool(self.material_versions(it))); alternate=m.addAction('增加替代料'); up=m.addAction('物料上移'); down=m.addAction('物料下移'); up.setEnabled(self.can_move_item(it,-1)); down.setEnabled(self.can_move_item(it,1)); clipboard_actions=self.clipboard_actions(m,it); act=m.exec_(self.tree.viewport().mapToGlobal(pos))
+  root=it is self.root_item
+  edit=menu.addAction('编辑此物料');reverse=menu.addAction('物料反查')
+  replace=version=same=alternate=up=down=dele=None
+  if not root:
+   menu.addSeparator();replace=menu.addAction('替换物料');version=menu.addAction('物料版本更新');version.setEnabled(bool(self.material_versions(it)))
+  menu.addSeparator()
+  if not root:same=menu.addAction('新增同级物料')
+  child=menu.addAction('新增子级物料')
+  if not root:alternate=menu.addAction('新增替代料')
+  imp=menu.addAction('导入BOM');imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id',self.root)))
+  imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM')
+  menu.addSeparator();clipboard_actions=self.clipboard_actions(menu,it)
+  if not root:
+   menu.addSeparator();up=menu.addAction('物料上移');down=menu.addAction('物料下移')
+   up.setEnabled(self.can_move_item(it,-1));down.setEnabled(self.can_move_item(it,1))
+   menu.addSeparator();dele=menu.addAction('删除物料')
+  act=menu.exec_(self.tree.viewport().mapToGlobal(pos))
+  if act is None:return
   if self.handle_clipboard_action(act,clipboard_actions,it):return
   if act==edit:self.edit_tree_material(it);return
+  if act==reverse:self.reverse_tree_material(it);return
   if act==replace:self.replace_material(it);return
   if act==version:self.update_material_version(it);return
-  if act==up:self.move_item(it,-1); return
-  if act==down:self.move_item(it,1); return
-  if act==imp:self.import_bom(it); return
+  if act==up:self.move_item(it,-1);return
+  if act==down:self.move_item(it,1);return
+  if act==imp:self.import_bom(it);return
   if act==alternate:
-   self.tree.setCurrentItem(it); self.show_item_info(it); self.add_alternate(); return
-  if act in (same,child): self.add_relative(d, act==child); return
-  if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:
-   self.remove_relation(it)
+   self.tree.setCurrentItem(it);self.show_item_info(it);self.add_alternate();return
+  if act in (same,child):self.add_relative(d,act==child);return
+  if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:self.remove_relation(it)
+ def reverse_tree_material(self,item):
+  material_id=(item.data(0,Qt.UserRole) or {}).get('material_id',self.root if item is self.root_item else None)
+  service=getattr(self.svc,'primary',self.svc)
+  material=service.material_snapshot(material_id)
+  if not material:
+   QMessageBox.warning(self,'物料不存在','目标物料已不存在，请刷新BOM后重试。');return
+  MaterialUsageDialog(material,service.material_usage(material_id),self).exec_()
  def edit_tree_material(self,item):
   data=item.data(0,Qt.UserRole) or {}
   if data.get('_deleted'):return
@@ -1308,9 +1332,9 @@ class BomWindow(QMainWindow):
   if item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   existing=self.alternate_ids(item); data=item.data(0,Qt.UserRole) or {}
   rows=[row for row in self.svc.db.conn.execute('SELECT id,base_code,version,name FROM materials ORDER BY base_code,version') if row['id']!=data.get('material_id') and row['id'] not in existing]
-  if not rows: QMessageBox.information(self,'增加替代料','没有可选替代料'); return
+  if not rows: QMessageBox.information(self,'新增替代料','没有可选替代料'); return
   choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
-  choice,ok=MaterialSelectionDialog.getItem(self,'增加替代料','选择物料',choices,0,False)
+  choice,ok=MaterialSelectionDialog.getItem(self,'新增替代料','选择物料',choices,0,False)
   if not ok:return
   self._alternate_edits[self.alternate_key(item)]=existing+[rows[choices.index(choice)]['id']]
   self.mark_dirty(); self.show_item_info(item)
@@ -1318,7 +1342,7 @@ class BomWindow(QMainWindow):
   row=self.alt_table.rowAt(pos.y()); item=self.current_item
   if row<0 or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   material_id=self.alt_table.item(row,0).data(Qt.UserRole)
-  menu=QMenu(self); promote=menu.addAction('切换成主物料');remove=menu.addAction('删除替代料')
+  menu=QMenu(self); promote=menu.addAction('切换成主物料');menu.addSeparator();remove=menu.addAction('删除替代料')
   reason=self.paste_block_reason(item,False,material_id);promote.setEnabled(not reason);promote.setToolTip(reason.replace('粘贴','切换') if reason else '与主物料互换，保留数量、位置、备注及其他替代料')
   action=menu.exec_(self.alt_table.viewport().mapToGlobal(pos))
   if action==promote:
@@ -1495,7 +1519,7 @@ class MaterialWindow(QMainWindow):
   menu=self.menuBar(); a=menu.addAction('新建物料'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(parent.new_material if parent else self.new_material); a=menu.addAction('导入物料'); a.triggered.connect(parent.import_materials if parent else self.import_materials); a=menu.addAction('导出物料库'); a.triggered.connect(parent.export_materials if parent else self.export_materials); a=menu.addAction('导出模板'); a.triggered.connect(parent.template if parent else self.template); a=menu.addAction('查找物料'); a.setShortcut('Ctrl+F');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.search_materials); self.resize(1000,600); self.t=FrozenMaterialTable(); self.t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn); self.t.setEditTriggers(QAbstractItemView.NoEditTriggers); self.t.setColumnCount(11); self.t.setHorizontalHeaderLabels(['基础编码','版本号','名称','规格描述','单位','物料等级','制造商','MPN','M/P','是否存在BOM结构','是否为呆滞料']); self.t.setWordWrap(True); self.setCentralWidget(self.t); self.t.setContextMenuPolicy(Qt.CustomContextMenu); self.t.customContextMenuRequested.connect(self.menu); self.t.cellDoubleClicked.connect(self.edit_current)
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
   from services.snapshot_bom import enabled
-  if enabled(self.svc.db):self._column_labels.append('是否被最新镜像使用')
+  if enabled(self.svc.db):self._column_labels.append('是否被最新历史版本使用')
   self._base_column_labels=list(self._column_labels);self._sku_column_ids=[];self._hidden_skus=set()
   self._column_config=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
   self._selected_skus=self._column_config.sku_columns(self.svc.db.path)
@@ -1527,7 +1551,7 @@ class MaterialWindow(QMainWindow):
    return True
   return False
  def filter_menu(self,column):
-  menu=QMenu(self); choose=menu.addAction('筛选此列…'); clear=menu.addAction('清除此列筛选'); clear.setEnabled(column in self._filters); clear_all=menu.addAction('清除全部筛选'); clear_all.setEnabled(bool(self._filters))
+  menu=QMenu(self); choose=menu.addAction('筛选此列…');menu.addSeparator(); clear=menu.addAction('清除此列筛选'); clear.setEnabled(column in self._filters); clear_all=menu.addAction('清除全部筛选'); clear_all.setEnabled(bool(self._filters))
   header=self.t.horizontalHeader(); from PyQt5.QtCore import QPoint
   action=menu.exec_(header.mapToGlobal(QPoint(header.sectionViewportPosition(column),header.height())))
   if action==choose:
@@ -1563,10 +1587,12 @@ class MaterialWindow(QMainWindow):
   row=self.t.rowAt(pos.y())
   if row<0:return
   material=self.svc.materials()[row]; rid=material['id']
-  m=QMenu(self); e=m.addAction('编辑物料'); v=m.addAction('物料版本变更'); v.setEnabled(not any(sku['material_id']==rid for sku in self.svc.skus())); d=m.addAction('删除物料'); d.setEnabled(material['idle']=='Y')
+  m=QMenu(self);e=m.addAction('编辑物料');v=m.addAction('物料版本变更');v.setEnabled(not any(sku['material_id']==rid for sku in self.svc.skus()))
+  if material['has_bom']=='Y' or material['idle']=='N':m.addSeparator()
   edit_bom=m.addAction('编辑物料BOM结构') if material['has_bom']=='Y' else None
   reverse=m.addAction('物料反查') if material['idle']=='N' else None
-  copy=m.addAction('复制物料')
+  m.addSeparator();copy=m.addAction('复制物料')
+  m.addSeparator();d=m.addAction('删除物料');d.setEnabled(material['idle']=='Y')
   a=m.exec_(self.t.viewport().mapToGlobal(pos))
   if a==copy:copy_material(self.svc,rid); return
   if a is None:return
@@ -1653,7 +1679,7 @@ class MaterialWindow(QMainWindow):
   self._filters={col:condition for col,condition in self._filters.items() if col<base}
   self._filters.update({base+i:remembered[sid] for i,sid in enumerate(ids) if sid in remembered})
   self._sku_column_ids=ids
-  self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+(' [镜像'+str(sku['mirror_version'])+']' if sum(x['material_id']==sku['material_id'] for x in skus)>1 else '')+'\n'+sku['name'] for sku in skus]
+  self._column_labels=self._base_column_labels+[sku['base_code']+sku['version']+(' [历史版本'+str(sku['mirror_version'])+']' if sum(x['material_id']==sku['material_id'] for x in skus)>1 else '')+'\n'+sku['name'] for sku in skus]
   self.t.setColumnCount(len(self._column_labels));self.t.setHorizontalHeaderLabels(self._column_labels)
   self._hidden_skus=set(ids)-self._selected_skus
   for i,sid in enumerate(ids):
@@ -1665,7 +1691,7 @@ class MaterialWindow(QMainWindow):
   for i,r in enumerate(rs):
    for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+([r['latest_used']] if 'latest_used' in r.keys() else [])+[format_quantity(quantities[sku['id']][r['id']]) if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
     item=QTableWidgetItem(str(v or '')); item.setData(Qt.UserRole,r['id'])
-    if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新镜像使用'):item.setTextAlignment(Qt.AlignCenter)
+    if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用'):item.setTextAlignment(Qt.AlignCenter)
     if j>=base:
      item.setBackground(QColor('#eeeeee' if v=='NA' else '#d9ead3'));item.setForeground(QColor('black'))
     if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))

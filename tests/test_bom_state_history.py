@@ -67,12 +67,12 @@ class BomStateHistoryTests(unittest.TestCase):
    initial=count();s.save_bom(root,[row(other,[]),row(child,[])]);self.assertEqual(count(),initial)
    s.save_bom(root,[row(other,[]),row(child,[a,b])]);self.assertEqual(count(),initial+1)
    detail=db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0]
-   for text in ['父项：R1 R','物料：C1 C','物料位置：左侧','增加替代料：A1 A','增加替代料：B1 B']:self.assertIn(text,detail)
+   for text in ['父项：R1 R','物料：C1 C','物料位置：左侧','新增替代料：A1 A','新增替代料：B1 B']:self.assertIn(text,detail)
    self.assertNotIn('排序',detail)
    s.save_bom(root,[row(other,[]),row(child,[b,a])]);self.assertEqual(count(),initial+1)
    s.save_bom(root,[row(other,[]),row(child,[b])]);self.assertEqual(count(),initial+2)
    detail=db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0]
-   self.assertIn('删除替代料：A1 A',detail);self.assertNotIn('增加替代料',detail)
+   self.assertIn('删除替代料：A1 A',detail);self.assertNotIn('新增替代料',detail)
    s.save_bom(root,[row(other,[])]);detail=db.conn.execute('SELECT detail FROM change_logs ORDER BY id DESC LIMIT 1').fetchone()[0]
    self.assertIn('删除替代料：B1 B',detail)
   finally:db.close()

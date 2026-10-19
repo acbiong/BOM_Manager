@@ -33,7 +33,7 @@ class SharedChildBomTests(unittest.TestCase):
   dialog=SharedBomMigrationDialog(self.db,pending)
   try:
    with patch.object(QMessageBox,'warning') as warn:dialog.validate();warn.assert_called_once()
-   self.assertFalse(is_shared(self.db.conn));self.assertIn('镜像107',dialog.preview.toPlainText())
+   self.assertFalse(is_shared(self.db.conn));self.assertIn('历史版本107',dialog.preview.toPlainText())
    combo=dialog.combos[self.p];combo.setCurrentIndex(combo.findData(sid));dialog.validate();self.assertEqual(dialog.result(),QDialog.Accepted)
   finally:dialog.close()
   self.assertTrue(is_shared(self.db.conn));self.assertEqual(len(list(self.path.parent.glob('*.pre-shared-bom-*.db'))),1)

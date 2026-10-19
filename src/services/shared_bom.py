@@ -15,7 +15,7 @@ def migration_candidates(db):
     sources=[(0,'公共结构',conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items').fetchall())]
     for sku in conn.execute('SELECT s.*,m.base_code,m.version,m.name FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.scope_id<>0'):
         mids=conn.execute('SELECT material_id FROM mirror_captured_materials WHERE sku_id=?',(sku['id'],)).fetchall()
-        sources.append((sku['id'],f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}",mids))
+        sources.append((sku['id'],f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}",mids))
     parents={r[0] for _,_,rows in sources for r in rows}-sku_materials
     result={}
     for mid in sorted(parents):

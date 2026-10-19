@@ -186,7 +186,7 @@ class CurrentCatalogTests(unittest.TestCase):
    with patch.object(BomSyncConfirmationDialog,'exec_',return_value=QDialog.Rejected):self.assertFalse(w.save())
    self.assertTrue(w.dirty);self.assertEqual(self.m.bom(self.p)[0]['quantity'],2)
    def accept(dialog):
-    self.assertIn('T1 T / 镜像100',dialog.table.item(0,3).text())
+    self.assertIn('T1 T / 历史版本100',dialog.table.item(0,3).text())
     self.assertIn('数量：2 → 14',dialog.table.item(0,2).text())
     self.assertEqual(dialog.selections(),{self.p:{self.tid}})
     return QDialog.Accepted

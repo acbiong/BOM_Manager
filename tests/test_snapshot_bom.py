@@ -164,8 +164,8 @@ class SnapshotTests(unittest.TestCase):
   app=QApplication.instance() or QApplication([])
   d=ParentRevisionDialog(self.m,conflicts)
   try:
-   self.assertIn('R1 R / 镜像101',d.table.item(0,3).text())
-   self.assertNotIn('镜像100',d.table.item(0,3).text())
+   self.assertIn('R1 R / 历史版本101',d.table.item(0,3).text())
+   self.assertNotIn('历史版本100',d.table.item(0,3).text())
    self.assertIs(d.table.cellWidget(0,4),d.combos[self.p])
   finally:d.close()
   save_with_revisions(self.m,self.r,rows,{self.p:'2'})

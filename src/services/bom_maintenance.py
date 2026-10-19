@@ -13,7 +13,7 @@ def actual_material_usage(service,material_id):
         return material.get('base_code','')+material.get('version','')+' '+material.get('name','')
     for sku in primary.skus():
         scoped=primary.for_sku(sku['id'])
-        sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 镜像{sku['mirror_version']}"
+        sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}"
         if sku['material_id']==material_id:
             result.append(dict(sku_id=sku['id'],sku=sku_label,parent='SKU根节点（无父级）'))
         alternatives={r[0] for r in scoped.db.conn.execute('SELECT bom_item_id FROM alternates WHERE material_id=?',(material_id,))}

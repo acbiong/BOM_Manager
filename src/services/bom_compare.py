@@ -110,7 +110,7 @@ def align_children(left, right):
 def compare_boms(service, left_id, right_id, snapshot_provider=None):
     skus = {s['id']: dict(s) for s in service.skus()}
     if left_id not in skus or right_id not in skus:
-        raise ValueError('所选SKU或镜像已不存在，请重新选择。')
+        raise ValueError('所选SKU或历史版本已不存在，请重新选择。')
     provider=snapshot_provider or (lambda sku:snapshot(service,sku))
     return compare_trees(provider(skus[left_id]),provider(skus[right_id]))
 

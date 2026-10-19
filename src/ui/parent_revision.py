@@ -5,8 +5,8 @@ class ParentRevisionDialog(QDialog):
     def __init__(self,service,conflicts,parent=None):
         super().__init__(parent);self.setWindowTitle('子物料基础编码变化 — 父物料需要升版');self.resize(1000,500)
         self.combos={};layout=QVBoxLayout(self)
-        label=QLabel('以下非SKU父物料还被其他SKU或镜像使用，且直接子料基础编码集合发生变化，请选择或输入父物料新版本号。\n表格仅显示移除和新增的子料，相同子料不显示。\nSKU不受此检查限制；仅子项版本及数量、位置、备注、顺序、替代料变化不要求父项升版。取消将保留编辑缓存。');label.setWordWrap(True);layout.addWidget(label)
-        table=QTableWidget(len(conflicts),5);self.table=table;table.setHorizontalHeaderLabels(['父物料','移除的子料基础编码','新增的子料基础编码','引用此父物料的其他SKU / 镜像','父物料新版本号']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
+        label=QLabel('以下非SKU父物料还被其他SKU或历史版本使用，且直接子料基础编码集合发生变化，请选择或输入父物料新版本号。\n表格仅显示移除和新增的子料，相同子料不显示。\nSKU不受此检查限制；仅子项版本及数量、位置、备注、顺序、替代料变化不要求父项升版。取消将保留编辑缓存。');label.setWordWrap(True);layout.addWidget(label)
+        table=QTableWidget(len(conflicts),5);self.table=table;table.setHorizontalHeaderLabels(['父物料','移除的子料基础编码','新增的子料基础编码','引用此父物料的其他SKU / 历史版本','父物料新版本号']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -16,7 +16,7 @@ class ParentRevisionDialog(QDialog):
             before=set(problem['before']);after=set(problem['after'])
             removed=[code for code in problem['before'] if code not in after]
             added=[code for code in problem['after'] if code not in before]
-            usages='\n'.join(f"{sku['base_code']}{sku['version']} {sku['name']} / 镜像{sku['mirror_version']}" for sku in problem.get('other_skus',[]))
+            usages='\n'.join(f"{sku['base_code']}{sku['version']} {sku['name']} / 历史版本{sku['mirror_version']}" for sku in problem.get('other_skus',[]))
             for col,value in enumerate([problem['label']+('\n'+problem['detail'] if problem.get('detail') else ''),'\n'.join(removed) or '（无）','\n'.join(added) or '（无）',usages or '（无其他SKU引用）']):
                 item=QTableWidgetItem(value);item.setTextAlignment(Qt.AlignLeft|Qt.AlignTop);table.setItem(row,col,item)
             combo=QComboBox();combo.setEditable(True);combo.addItem('')

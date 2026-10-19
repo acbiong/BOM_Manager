@@ -51,7 +51,7 @@ def run_smoke_test(report_path):
             assert tree['children'][0]['quantity']==1.5 and xlrd.__version__, '外部Excel读取依赖不可用'
             mirror_id=svc.copy_sku_bom(sid);mirror=svc.for_sku(mirror_id)
             mirror.save_bom(root,[dict(material_id=child,quantity=2.5,unit='pcs')])
-            assert svc.bom(root)[0]['quantity']==1.5 and mirror.bom(root)[0]['quantity']==2.5, '镜像BOM未隔离'
+            assert svc.bom(root)[0]['quantity']==1.5 and mirror.bom(root)[0]['quantity']==2.5, '历史版本BOM未隔离'
             from services.snapshot_bom import migrate
             from services.current_catalog import initialize,synchronization_plan,save_confirmed,selection_tree
             migrate(db);initialize(db);mirror=svc.for_sku(mirror_id)

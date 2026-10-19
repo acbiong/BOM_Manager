@@ -188,11 +188,11 @@ class BomUiTests(unittest.TestCase):
   item=self.w.root_item.child(0)
   with patch.object(self.w.tree,'itemAt',return_value=item), patch('ui.main_window.QMenu') as menu:
    from unittest.mock import MagicMock
-   menu.return_value.addAction.side_effect=[MagicMock() for _ in range(11)]
+   menu.return_value.addAction.side_effect=[MagicMock() for _ in range(12)]
    menu.return_value.exec_.return_value=None
    from PyQt5.QtCore import QPoint
    self.w.context_menu(QPoint())
-   self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['编辑此物料','新增同级物料','新增子级物料','导入BOM','删除物料','替换物料','物料版本更新','增加替代料','物料上移','物料下移','复制物料'])
+   self.assertEqual([call.args[0] for call in menu.return_value.addAction.call_args_list],['编辑此物料','物料反查','替换物料','物料版本更新','新增同级物料','新增子级物料','新增替代料','导入BOM','复制物料','物料上移','物料下移','删除物料'])
  def test_idle_flags_recursive_shared_skus_and_red_rows(self):
   from ui.main_window import MaterialWindow
   from PyQt5.QtGui import QColor
@@ -295,7 +295,7 @@ class BomUiTests(unittest.TestCase):
   self.assertEqual(self.s.alternates(relation)[0]['material_id'],o)
   node=self.w.root_item.child(0); self.w.tree.setCurrentItem(node); self.w.show_item_info(node)
   def choose(menu,pos):
-   self.assertEqual([a.text() for a in menu.actions()],['切换成主物料','删除替代料']); return menu.actions()[1]
+   self.assertEqual([a.text() for a in menu.actions()],['切换成主物料','','删除替代料']); self.assertTrue(menu.actions()[1].isSeparator()); return menu.actions()[2]
   with patch.object(self.w.alt_table,'rowAt',return_value=0),patch.object(QMenu,'exec_',choose),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes):self.w.alternate_menu(QPoint())
   self.assertEqual(self.w.alt_table.rowCount(),0); self.assertEqual(len(self.s.alternates(relation)),1)
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())

@@ -7,7 +7,7 @@ class SharedBomMigrationDialog(QDialog):
         super().__init__(parent);self.setWindowTitle('统一公共子BOM结构 — 逐项确认');self.resize(1100,700)
         self.db=db;self.candidates=candidates;self.combos={}
         layout=QVBoxLayout(self)
-        label=QLabel('仅SKU保留镜像。以下非SKU物料在公共结构和镜像中存在差异，请逐项选择保留的结构。\n选择包含子项、数量、位置、备注、排序及替代料。确认前不会迁移；取消则不打开此数据库。迁移前自动备份。');label.setWordWrap(True);layout.addWidget(label)
+        label=QLabel('仅SKU保留历史版本。以下非SKU物料在公共结构和历史版本中存在差异，请逐项选择保留的结构。\n选择包含子项、数量、位置、备注、排序及替代料。确认前不会迁移；取消则不打开此数据库。迁移前自动备份。');label.setWordWrap(True);layout.addWidget(label)
         self.table=QTableWidget(len(candidates),2);self.table.setHorizontalHeaderLabels(['物料','保留结构来源']);layout.addWidget(self.table)
         for row,(mid,variants) in enumerate(candidates.items()):
             material=db.conn.execute('SELECT base_code,version,name FROM materials WHERE id=?',(mid,)).fetchone()
