@@ -51,6 +51,33 @@ class MaterialDialog(QDialog):
   b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
  def data(self):
   d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
+class CreateMaterialDialog(MaterialDialog):
+ def __init__(self,owner):
+  super().__init__(owner);self.setWindowTitle('新建物料');self.setWindowModality(Qt.NonModal)
+  self.service=owner.svc;self.database=owner.svc.db;self._saving=False;self._saved=False
+ def accept(self):
+  if self._saving or self._saved:return
+  if self.service.db is not self.database:
+   QMessageBox.warning(self,'数据库已切换','此窗口属于之前的数据库，请关闭后重新新建物料。');return
+  self._saving=True
+  try:
+   self.service.create_material(self.data())
+  except Exception as error:
+   QMessageBox.warning(self,'校验失败',str(error));return
+  finally:self._saving=False
+  self._saved=True;super().accept()
+
+def show_create_material(owner):
+ dialog=getattr(owner,'_create_material_dialog',None)
+ if dialog is None:
+  dialog=CreateMaterialDialog(owner);owner._create_material_dialog=dialog
+  def finished(result):
+   if getattr(owner,'_create_material_dialog',None) is dialog:owner._create_material_dialog=None
+   dialog.deleteLater()
+  dialog.finished.connect(finished)
+ dialog.show();dialog.raise_();dialog.activateWindow()
+ return dialog
+
 def choose_material_sheet(path,parent=None,kind='物料库'):
  from openpyxl import load_workbook
  wb=load_workbook(path,read_only=True,data_only=True)
@@ -291,6 +318,8 @@ class MainWindow(QMainWindow):
  def on_data_change(self,event):
   if event.get('type') in ('bom_changed','material_changed','sku_changed'):self.refresh()
  def closeEvent(self,event):
+  if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
+  if self._materials is not None and getattr(self._materials,'_create_material_dialog',None):self._materials._create_material_dialog.reject()
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
@@ -441,6 +470,7 @@ class MainWindow(QMainWindow):
     if not window.close(): new_db.close(); return
    if self._materials is not None: self._materials.close()
    c=config_service.load(); c['database']['path']=relative_selected; config_service.save(c)
+   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
    old_db=self.svc.db
    self.svc.db=new_db
    old_db.close()
@@ -495,12 +525,8 @@ class MainWindow(QMainWindow):
     except Exception as e:
      progress.close(); QMessageBox.warning(owner,'导入失败',str(e))
  def new_material(self):
-  d=MaterialDialog(self)
-  if d.exec_():
-   try:
-    self.svc.create_material(d.data()); self.refresh();
-    if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
-   except Exception as e: QMessageBox.warning(self,'校验失败',str(e))
+  owner=self._materials if self._materials is not None and self._materials.isVisible() else self
+  return show_create_material(owner)
  def new_sku(self):
   dialog=NewSkuDialog(self.svc,self)
   if dialog.exec_()==QDialog.Accepted:
@@ -1638,8 +1664,7 @@ class MaterialWindow(QMainWindow):
    if self.parent() is not None and hasattr(self.parent(),'refresh'): self.parent().refresh()
   except Exception as error: QMessageBox.warning(self,'版本变更失败',str(error))
  def new_material(self):
-  d=MaterialDialog(self)
-  if d.exec_(): self.svc.create_material(d.data()); self.refresh()
+  return show_create_material(self)
  def import_materials(self):
   p=QFileDialog.getOpenFileName(self,'导入物料清单','','Excel (*.xlsx)')[0]
   if p:
@@ -1666,6 +1691,7 @@ class MaterialWindow(QMainWindow):
  def closeEvent(self,event):
   for window in list(self._local_bom_windows.values()):
    if not window.close(): event.ignore(); return
+  if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
   WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept()
  def refresh(self):
   from decimal import Decimal,ROUND_HALF_UP
