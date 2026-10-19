@@ -465,34 +465,35 @@ class MainWindow(QMainWindow):
    self._materials.closed.connect(lambda:setattr(self,'_materials',None))
   self.activate_window(self._materials)
  def import_materials(self):
+  owner=self._materials if self._materials is not None and self._materials.isVisible() else self
   config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent); cfg=config_service.load()
   last=config_service.resolve_path(cfg['database']['last_import_dir']) if cfg['database'].get('last_import_dir') else Path.home()/'Desktop'
   last=str(last if last.is_dir() else Path.home()/'Desktop')
-  p=QFileDialog.getOpenFileName(self,'导入物料清单',last,'Excel (*.xlsx)')[0]
+  p=QFileDialog.getOpenFileName(owner,'导入物料清单',last,'Excel (*.xlsx)')[0]
   if p:
     cfg['database']['last_import_dir']=str(Path(p).parent); config_service.save(cfg)
-    try:sheet_name=choose_material_sheet(p,self)
-    except Exception as error:QMessageBox.warning(self,'导入失败',str(error)); return
+    try:sheet_name=choose_material_sheet(p,owner)
+    except Exception as error:QMessageBox.warning(owner,'导入失败',str(error)); return
     def resolver(d,old):
-     dialog=MaterialConflictDialog(d,old,self); dialog.exec_(); return dialog.choice
-    progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
+     dialog=MaterialConflictDialog(d,old,owner); dialog.exec_(); return dialog.choice
+    progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,owner); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
     def update_progress(current,total):
      progress.setMaximum(max(total,1)); progress.setValue(min(current,total)); QApplication.processEvents()
     try:
      try: ok,fail=self.svc.import_materials(p,resolver,header_mapping=config_service.import_mapping('materials') or None,progress_callback=update_progress,sheet_name=sheet_name)
      except MaterialHeaderError as header_error:
       progress.close()
-      mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,self,sheet_name=sheet_name,config_service=config_service)
+      mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,owner,sheet_name=sheet_name,config_service=config_service)
       if mapping_dialog.exec_()!=QDialog.Accepted:
-       progress.close(); QMessageBox.warning(self,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
-      progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,self); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
+       progress.close(); QMessageBox.warning(owner,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
+      progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,owner); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
       ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping(),update_progress,sheet_name=sheet_name)
      progress.setValue(progress.maximum()); progress.close()
      self.refresh();
      if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
-     MaterialImportResultDialog(ok,fail,self).exec_()
+     MaterialImportResultDialog(ok,fail,owner).exec_()
     except Exception as e:
-     progress.close(); QMessageBox.warning(self,'导入失败',str(e))
+     progress.close(); QMessageBox.warning(owner,'导入失败',str(e))
  def new_material(self):
   d=MaterialDialog(self)
   if d.exec_():

@@ -3,7 +3,8 @@ import hashlib
 import logging
 import weakref
 from PyQt5.QtCore import QObject, QEvent, QByteArray, Qt, QTimer
-from PyQt5.QtWidgets import QWidget, QApplication
+from PyQt5.QtGui import QCursor
+from PyQt5.QtWidgets import QWidget, QApplication, QDialog, QProgressDialog, QMessageBox, QInputDialog, QLabel
 
 
 class WindowGeometryMemory(QObject):
@@ -43,10 +44,73 @@ class WindowGeometryMemory(QObject):
         return isinstance(obj, QWidget) and obj.isWindow() and obj.windowType() in (Qt.Window, Qt.Dialog)
 
     @staticmethod
+    def transient(window):
+        # Short-lived prompts must not inherit stale/shared progress geometry.
+        return isinstance(window, (QProgressDialog, QMessageBox, QInputDialog))
+
+    @staticmethod
+    def target_screen(window):
+        parent = window.parentWidget()
+        owner = parent.window() if parent is not None else QApplication.activeWindow()
+        if owner is not None and owner is not window and owner.isVisible():
+            return QApplication.screenAt(owner.frameGeometry().center()) or owner.screen()
+        return QApplication.screenAt(QCursor.pos()) or window.screen() or QApplication.primaryScreen()
+
+    def center_dialog(self, window):
+        if window in self.restoring:
+            return
+        screen = self.target_screen(window)
+        if screen is None or window.isMaximized() or window.isFullScreen():
+            return
+        self.restoring.add(window)
+        try:
+            available = screen.availableGeometry()
+            if isinstance(window, QProgressDialog):
+                for label in window.findChildren(QLabel):
+                    label.setWordWrap(True)
+                window.setMaximumWidth(max(200, available.width()-20))
+                window.resize(min(window.width(), window.maximumWidth()), window.height())
+            frame = window.frameGeometry()
+            offset = available.center()-frame.center()
+            offset.setX(max(available.left()-frame.left(), offset.x()))
+            offset.setY(max(available.top()-frame.top(), offset.y()))
+            window.move(window.pos()+offset)
+        finally:
+            self.restoring.discard(window)
+
+    def place_transient(self, window):
+        if window in self.restoring:
+            return
+        self.center_dialog(window)
+        # Native decorations and progress text sizing can finish after Show/Resize.
+        # Position immediately, then settle with a bounded window-owned timer.
+        timer = getattr(window, '_bom_placement_timer', None)
+        if timer is None:
+            timer = QTimer(window)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: self.settle_transient(window))
+            window._bom_placement_timer = timer
+        window._bom_placement_passes = 3
+        timer.start(0)
+
+    def settle_transient(self, window):
+        if not window.isVisible():
+            return
+        self.safely(self.center_dialog, window)
+        window._bom_placement_passes -= 1
+        # X11 window managers add native title bars asynchronously. A bounded
+        # pair of follow-ups accounts for them; never track/override user moves.
+        if window._bom_placement_passes > 0:
+            window._bom_placement_timer.start(50)
+
+    @staticmethod
     def geometry(window):
         return bytes(window.saveGeometry().toBase64()).decode('ascii')
 
     def restore(self, window):
+        if self.transient(window):
+            self.place_transient(window)
+            return
         if window in self.seen:
             return
         self.seen.add(window)
@@ -54,6 +118,7 @@ class WindowGeometryMemory(QObject):
         try:
             key = self.key(window)
             value = self.values.get(key) or self.values.get(self.key(window, legacy=True), '')
+            restored = False
             if value:
                 restored = window.restoreGeometry(QByteArray.fromBase64(value.encode('ascii', errors='ignore')))
                 if restored and key not in self.values:
@@ -69,12 +134,15 @@ class WindowGeometryMemory(QObject):
                         frame = window.frameGeometry()
                         window.move(max(available.left(), min(frame.x(), available.right()-frame.width()+1)),
                                     max(available.top(), min(frame.y(), available.bottom()-frame.height()+1)))
+            if not restored and isinstance(window, QDialog):
+                self.restoring.discard(window)
+                self.place_transient(window)
         finally:
             self.restoring.discard(window)
             self.last_geometry[window] = self.geometry(window)
 
     def save(self, window):
-        if window not in self.seen or window in self.restoring:
+        if self.transient(window) or window not in self.seen or window in self.restoring:
             return
         value = self.geometry(window)
         key = self.key(window)
@@ -117,6 +185,9 @@ class WindowGeometryMemory(QObject):
         if kind in (QEvent.Show, QEvent.Hide, QEvent.Resize, QEvent.Move, QEvent.WindowStateChange) and self.eligible(obj):
             if kind == QEvent.Show:
                 self.safely(self.restore, obj)
+            elif self.transient(obj):
+                if kind == QEvent.Resize and obj.isVisible():
+                    self.safely(self.place_transient, obj)
             elif kind == QEvent.Hide:
                 self.safely(self.save, obj)
                 self.flush()

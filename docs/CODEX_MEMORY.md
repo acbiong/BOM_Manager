@@ -630,3 +630,13 @@ GitHub原始基准标签为大写V0.5.1。v0.6.0发布说明位于docs/RELEASE_v
 Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出前，统一对残留顶层窗口deleteLater、处理DeferredDelete并验证原生对象已删除，随后在Python回调仍存活时显式销毁QApplication；清理异常仍导致非零退出，不使用os._exit或屏蔽失败。原失败模块专项验证中，镜像和时间戳模块分别确有8个、34个残留顶层窗口被释放。三个模块均通过并正常退出。test_windows_test_runner.py新增真实子进程回归，故意失败的断言依然返回1，正常断言返回0，两者均完成Qt资源清理。完整套件增至375项/67文件，含需求审计共68步骤。报告windows_qt_cleanup_validation.txt；最终全量结果以收尾报告为准，不将此前失败写成成功。此调整只作用于测试执行，不修改产品业务、打包参数或防护设置。
 
 清理入口的首次全量验证还发现补全弹窗/子对话框也会出现在topLevelWidgets中，不应与所属窗口分别安排销毁。最终清理仅对无父对象、类型为Window/Dialog的独立窗口执行deleteLater，内部弹窗及子对话框由Qt所有者释放；新增真实子进程回归同时覆盖父窗口、子对话框和已显示的补全弹窗。test_restore_delete_enter及原异常模块已专项通过，报告windows_qt_owner_cleanup_validation.txt。首次失败记录保留test_reports/test_20261016_181141.txt，不视为发布成功。
+
+
+## 2026-10-19：进度框与弹窗居中定位
+
+- 物料导入/映射后重新导入、BOM保存进度框不再使用持久化窗口位置；QMessageBox提示框及QInputDialog简单输入框同样排除旧位置恢复。进度框旧记录不再生效，不改写其他窗口配置。
+- 短时弹窗按所属可见窗口所在屏幕可用区域居中；无可见所属窗口时回退鼠标所在屏幕。首次打开或布局记录损坏的业务对话框也居中，已有有效业务窗口尺寸/位置记忆保持。
+- 从物料库发起导入时，文件选择、sheet选择、映射、重复提示、结果及进度弹窗归属物料库，避免SKU主窗口位于另一屏幕时错屏显示。
+- 进度提示自动换行且限制屏幕宽度。适配Deepin异步原生标题栏：先立即定位，再执行最多3次短期校正，完成后停止，不持续跟踪用户移动。隐藏/再次显示及进度提示变长时重新计算。
+- 验证：test_dialog_placement.py覆盖旧进度位置、不同提示框、长标签、负坐标副屏、映射重试、BOM保存、业务布局保留及校正停止；test_window_geometry_shortcuts.py保留原布局/快捷键回归。Deepin xcb实际显示验证进度、提示、输入框中心偏差均为0，证据test_reports/dialog_placement_xcb.json。完整测试与包自检由收尾执行，报告放test_reports。
+- 用户确认“不进行Git提交”仅限上一轮按现有提交构建，本轮起恢复自动测试、补丁升版、详细Git提交与AppImage打包；不自动推送。
