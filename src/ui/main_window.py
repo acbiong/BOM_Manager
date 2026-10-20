@@ -52,8 +52,8 @@ class MaterialDialog(QDialog):
  def data(self):
   d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
 class CreateMaterialDialog(MaterialDialog):
- def __init__(self,owner):
-  super().__init__(owner);self.setWindowTitle('新建物料');self.setWindowModality(Qt.NonModal)
+ def __init__(self,owner,data=None):
+  super().__init__(owner,data=data);self.setWindowTitle('新建物料');self.setWindowModality(Qt.NonModal)
   self.service=owner.svc;self.database=owner.svc.db;self._saving=False;self._saved=False
  def accept(self):
   if self._saving or self._saved:return
@@ -67,10 +67,16 @@ class CreateMaterialDialog(MaterialDialog):
   finally:self._saving=False
   self._saved=True;super().accept()
 
-def show_create_material(owner):
+def show_create_material(owner,data=None):
  dialog=getattr(owner,'_create_material_dialog',None)
+ if data is not None and dialog is not None:
+  if QMessageBox.question(owner,'替换新建物料草稿','已打开新建物料窗口，是否放弃该窗口的输入，改为从选中物料类似新增？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:
+   dialog.show();dialog.raise_();dialog.activateWindow();return dialog
+  dialog.reject();dialog=None
  if dialog is None:
-  dialog=CreateMaterialDialog(owner);owner._create_material_dialog=dialog
+  initial=dict(data) if data is not None else None
+  if initial is not None:initial.update(base_code='',version='')
+  dialog=CreateMaterialDialog(owner,data=initial);owner._create_material_dialog=dialog
   def finished(result):
    if getattr(owner,'_create_material_dialog',None) is dialog:owner._create_material_dialog=None
    dialog.deleteLater()
@@ -1617,9 +1623,11 @@ class MaterialWindow(QMainWindow):
   if material['has_bom']=='Y' or material['idle']=='N':m.addSeparator()
   edit_bom=m.addAction('编辑物料BOM结构') if material['has_bom']=='Y' else None
   reverse=m.addAction('物料反查') if material['idle']=='N' else None
-  m.addSeparator();copy=m.addAction('复制物料')
+  m.addSeparator();similar=m.addAction('类似新增物料');copy=m.addAction('复制物料')
   m.addSeparator();d=m.addAction('删除物料');d.setEnabled(material['idle']=='Y')
   a=m.exec_(self.t.viewport().mapToGlobal(pos))
+  if a==similar:
+   show_create_material(self,data=dict(self.svc.material_snapshot(rid)));return
   if a==copy:copy_material(self.svc,rid); return
   if a is None:return
   if edit_bom is not None and a==edit_bom:

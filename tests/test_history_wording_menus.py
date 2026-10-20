@@ -66,7 +66,7 @@ class HistoryWordingMenuTests(unittest.TestCase):
   self.assertIn('历史版本变更',captured[-1][0]);self.assertEqual(captured[-1][-2],['导出BOM','采购BOM导出']);self.assertEqual(captured[-1][-1],['删除SKU'])
   self.main.show_materials();library=self.main._materials;row=next(i for i,m in enumerate(self.s.materials()) if m['id']==self.part)
   with patch.object(QMenu,'exec_',capture),patch.object(library.t,'rowAt',return_value=row):library.menu(QPoint())
-  self.assertEqual(captured[-1][-2],['复制物料']);self.assertEqual(captured[-1][-1],['删除物料']);self.assertIn('物料反查',sum(captured[-1],[]))
+  self.assertEqual(captured[-1][-2],['类似新增物料','复制物料']);self.assertEqual(captured[-1][-1],['删除物料']);self.assertIn('物料反查',sum(captured[-1],[]))
  def test_legacy_export_wording_converted_without_rewriting_stored_history(self):
   scoped=self.s.for_sku(self.other)
   with self.db.transaction():
