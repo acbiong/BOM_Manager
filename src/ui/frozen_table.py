@@ -9,6 +9,7 @@ class FrozenMaterialTable(QTableWidget):
   super().__init__(parent)
   self.setHorizontalHeader(ScrollingSkuHeader(self))
   self.frozen=QTableView(self);self.frozen.setModel(self.model());self.frozen.setSelectionModel(self.selectionModel())
+  self.setSelectionBehavior(QAbstractItemView.SelectRows);self.frozen.setSelectionBehavior(QAbstractItemView.SelectRows)
   self.frozen.setFrameShape(QFrame.NoFrame);self.frozen.setFocusPolicy(Qt.NoFocus);self.frozen.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.frozen.setWordWrap(True);self.frozen.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.frozen.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
   self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel);self.frozen.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)

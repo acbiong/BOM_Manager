@@ -4,7 +4,7 @@ from domain.quantity import format_quantity
 from ui.time_display import sku_timestamp
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import Qt, pyqtSignal, QSettings, QTimer, QEvent, QSize, QSortFilterProxyModel
+from PyQt5.QtCore import Qt, pyqtSignal, QSettings, QTimer, QEvent, QSize, QSortFilterProxyModel, QItemSelectionModel
 from PyQt5.QtGui import QColor, QBrush, QFont, QStandardItemModel, QStandardItem
 from pathlib import Path
 import os
@@ -353,7 +353,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
-  self.table=QTableWidget(); self.table.setColumnCount(8); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID','锁定']); self.table.horizontalHeader().moveSection(7,1); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
+  self.table=QTableWidget(); self.table.setColumnCount(8); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID','锁定']); self.table.horizontalHeader().moveSection(7,1); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self.table._fixed_column_widths={7:max(44,self.table.horizontalHeader().minimumSectionSize(),self.table.fontMetrics().horizontalAdvance('锁定')+20)};self.table.setItemDelegateForColumn(7,CenteredLockDelegate(self.table))
   self._sku_sort=None;self._sku_filters={}
   self._description_hover=VersionDescriptionHover(self.table)
@@ -408,6 +408,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   update_actions(self.menuBar());self.table.setEnabled(available);self.latest_bom_only.setEnabled(available)
   if not available:
    self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单新建或导入项目');return
+  selected_ids={self.table.item(index.row(),6).text() for index in self.table.selectionModel().selectedRows() if self.table.item(index.row(),6)}
   current=self.table.currentRow(); column=max(1,self.table.currentColumn())
   selected_id=str(self._description_target) if getattr(self,'_description_target',None) is not None else (self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None)
   scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
@@ -431,6 +432,10 @@ class MainWindow(ProjectManagement,QMainWindow):
    if selected_row is not None and not self.table.isRowHidden(selected_row):
     self.table.setCurrentCell(selected_row,column);self.table.selectRow(selected_row)
    else:self.table.setCurrentItem(None)
+  if selected_ids and not getattr(self,'_description_target',None):
+   self.table.clearSelection()
+   for r in range(self.table.rowCount()):
+    if self.table.item(r,6).text() in selected_ids and not self.table.isRowHidden(r):self.table.selectionModel().select(self.table.model().index(r,1),QItemSelectionModel.Select|QItemSelectionModel.Rows)
   self.table.horizontalScrollBar().setValue(scroll[0]);self.table.verticalScrollBar().setValue(scroll[1])
   if selected_id is not None and selected_row is not None and not self.table.isRowHidden(selected_row):
    item=self.table.item(selected_row,column)
@@ -607,27 +612,59 @@ class MainWindow(ProjectManagement,QMainWindow):
    QMessageBox.warning(self,'请先处理未保存内容','请先保存或放弃此BOM的未保存修改，再锁定SKU。');return
   try:self.svc.set_sku_locked(sid,not row['locked'])
   except Exception as error:show_operation_error(self,'锁定操作失败',error)
+ def set_selected_sku_locks(self,sids,locked):
+  if locked:
+   for sid in sids:
+    row=self.svc.db.conn.execute('SELECT material_id,locked FROM skus WHERE id=?',(sid,)).fetchone()
+    if row is None:continue
+    window=self._bom_windows.get(sid) or self._material_bom_windows.get(row['material_id'])
+    if not row['locked'] and window and window.dirty:
+     QMessageBox.warning(self,'请先处理未保存内容','选中的BOM包含未保存修改，请先保存或放弃修改后再锁定。');return
+  try:
+   with self.svc.db.transaction():
+    for sid in sids:self.svc.set_sku_locked(sid,locked)
+  except Exception as error:show_operation_error(self,'锁定操作失败',error)
  def sku_context_menu(self,pos):
   row=self.table.rowAt(pos.y())
   if row<0:return
-  self.table.selectRow(row); sid=int(self.table.item(row,6).text())
+  if not self.table.selectionModel().isRowSelected(row):
+   index=self.table.model().index(row,1);self.table.selectionModel().setCurrentIndex(index,QItemSelectionModel.ClearAndSelect|QItemSelectionModel.Rows)
+  rows=sorted(index.row() for index in self.table.selectionModel().selectedRows() if not self.table.isRowHidden(index.row()))
+  sids=[int(self.table.item(r,6).text()) for r in rows]
+  if not sids:return
+  sid=int(self.table.item(row,6).text());multiple=len(sids)>1
+  states={r['id']:bool(r['locked']) for r in self.svc.skus() if r['id'] in sids};locked=states[sid]
   menu=QMenu(self)
   description=menu.addAction('编辑变更描述');version=menu.addAction('SKU版本变更');mirror=menu.addAction('历史版本变更')
-  locked=bool(self.svc.db.conn.execute('SELECT locked FROM skus WHERE id=?',(sid,)).fetchone()[0])
-  for edit in (description,version,mirror):edit.setEnabled(not locked)
-  menu.addSeparator();lock=menu.addAction('取消锁定' if locked else '锁定SKU')
+  for edit in (description,version,mirror):edit.setEnabled(not locked and not multiple)
+  menu.addSeparator();open_action=menu.addAction('编辑/浏览BOM')
+  menu.addSeparator()
+  lock=unlock=None
+  if multiple:
+   lock=menu.addAction('锁定SKU');lock.setEnabled(not all(states.values()))
+   unlock=menu.addAction('取消锁定');unlock.setEnabled(any(states.values()))
+  else:lock=menu.addAction('取消锁定' if locked else '锁定SKU')
   menu.addSeparator();copy=menu.addAction('复制BOM');compare=menu.addAction('BOM对比')
+  copy.setEnabled(not multiple);compare.setEnabled(not multiple)
   menu.addSeparator();export_action=menu.addAction('导出BOM');purchase_action=menu.addAction('采购BOM导出')
-  menu.addSeparator();delete=menu.addAction('删除SKU');delete.setEnabled(not locked)
+  menu.addSeparator();delete=menu.addAction('删除SKU');delete.setEnabled(not locked and not multiple)
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
-  if action==lock:self.toggle_sku_lock(sid)
+  if action is None or not action.isEnabled():return
+  if action==open_action:
+   for selected in sids:self.open_bom_id(selected)
+  elif action==lock:
+   if multiple:self.set_selected_sku_locks(sids,True)
+   else:self.toggle_sku_lock(sid)
+  elif action==unlock:self.set_selected_sku_locks(sids,False)
   elif action==description:self.edit_sku_change_description(sid)
   elif action==copy:self.copy_sku_bom(sid)
   elif action==compare:self.compare_sku_bom(sid)
   elif action==mirror:self.change_mirror_version(sid)
   elif action==version:self.change_sku_version(sid)
-  elif action==export_action:self.export_sku_id(sid)
-  elif action==purchase_action:self.export_sku_id(sid,purchase=True)
+  elif action in (export_action,purchase_action):
+   for selected in sids:
+    try:self.export_sku_id(selected,purchase=action==purchase_action)
+    except Exception as error:show_operation_error(self,'导出失败',error)
   elif action==delete:self.delete_sku(sid)
  def export_sku_id(self,sid,purchase=False):
   row=self.svc.db.conn.execute('SELECT m.id AS material_id,m.base_code,m.version,m.name,s.mirror_version,s.scope_id FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
