@@ -662,21 +662,42 @@ class MainWindow(ProjectManagement,QMainWindow):
   elif action==mirror:self.change_mirror_version(sid)
   elif action==version:self.change_sku_version(sid)
   elif action in (export_action,purchase_action):
-   for selected in sids:
-    try:self.export_sku_id(selected,purchase=action==purchase_action)
+   if multiple:self.export_sku_batch(sids,purchase=action==purchase_action)
+   else:
+    try:self.export_sku_id(sid,purchase=action==purchase_action)
     except Exception as error:show_operation_error(self,'导出失败',error)
   elif action==delete:self.delete_sku(sid)
- def export_sku_id(self,sid,purchase=False):
+ def export_sku_batch(self,sids,purchase=False):
+  title='批量采购BOM导出' if purchase else '批量导出BOM'
+  folder=QFileDialog.getExistingDirectory(self,title+'：选择统一导出文件夹',str(Path(export_start_path('BOM.xlsx')).parent))
+  if not folder:return
+  remember_export_path(Path(folder)/'BOM.xlsx')
+  success=[];failed=[]
+  for sid in sids:
+   row=self.svc.db.conn.execute('SELECT m.base_code,m.version,m.name,s.mirror_version FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
+   if row is None:failed.append(str(sid)+'：SKU已不存在');continue
+   label=row['base_code']+row['version']+' '+row['name']+' 历史版本'+str(row['mirror_version'])
+   filename=export_filename(label+(' 采购BOM' if purchase else ''))
+   path=Path(folder)/filename;number=2
+   while path.exists():path=Path(folder)/(Path(filename).stem+f' ({number}).xlsx');number+=1
+   try:
+    self.export_sku_id(sid,purchase= purchase,destination=path,notify=False);success.append(path.name)
+   except Exception as error:failed.append(label+'：'+str(error))
+  box=QMessageBox(self);box.setWindowTitle(title+'结果');box.setIcon(QMessageBox.Warning if failed else QMessageBox.Information)
+  box.setText(f'成功导出{len(success)}个BOM，失败{len(failed)}个。\n导出目录：{folder}')
+  box.setDetailedText('成功文件：\n'+'\n'.join(success)+('\n\n失败原因：\n'+'\n'.join(failed) if failed else ''))
+  box.exec_()
+ def export_sku_id(self,sid,purchase=False,destination=None,notify=True):
   row=self.svc.db.conn.execute('SELECT m.id AS material_id,m.base_code,m.version,m.name,s.mirror_version,s.scope_id FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
   if not row:return
   title='采购BOM导出' if purchase else '导出BOM'
   filename=row['base_code']+row['version']+' '+row['name']+(' 历史版本'+str(row['mirror_version']) if row['scope_id'] else '')+(' 采购BOM' if purchase else '')
-  p=QFileDialog.getSaveFileName(self,title,export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
+  p=str(destination) if destination is not None else QFileDialog.getSaveFileName(self,title,export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
   if p:
    remember_export_path(p)
    if purchase:self.svc.for_sku(sid).export_purchase_bom(row['material_id'],p)
    else:self.svc.export_sku(sid,p)
-   QMessageBox.information(self,'完成',title+'成功')
+   if notify:QMessageBox.information(self,'完成',title+'成功')
  def open_bom(self,row,col): self.open_bom_id(int(self.table.item(row,6).text()))
  def open_bom_id(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()

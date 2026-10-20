@@ -43,8 +43,8 @@ class MultiSelectTests(unittest.TestCase):
   self.select(0,2)
   with patch.object(self.w,'open_bom_id') as opened:self.menu(0,'编辑/浏览BOM');self.assertEqual([c.args[0] for c in opened.call_args_list],[self.ids[0],self.ids[2]])
   for label,purchase in [('导出BOM',False),('采购BOM导出',True)]:
-   with patch.object(self.w,'export_sku_id') as exported:
-    self.menu(0,label);self.assertEqual([c.args[0] for c in exported.call_args_list],[self.ids[0],self.ids[2]]);self.assertTrue(all(c.kwargs['purchase']==purchase for c in exported.call_args_list))
+   with patch.object(self.w,'export_sku_batch') as exported:
+    self.menu(0,label);exported.assert_called_once_with([self.ids[0],self.ids[2]],purchase=purchase)
   self.menu(0,'锁定SKU');self.assertEqual([r['locked'] for r in self.s.skus()],[1,0,1]);self.assertEqual(len(self.w.table.selectionModel().selectedRows()),2)
   self.menu(0,'取消锁定');self.assertEqual([r['locked'] for r in self.s.skus()],[0,0,0])
  def test_mixed_locks_and_dirty_preflight(self):
@@ -62,3 +62,25 @@ class MultiSelectTests(unittest.TestCase):
     index=view.model().index(1,col);QTest.mouseClick(view.viewport(),Qt.LeftButton,Qt.NoModifier,view.visualRect(index).center())
     self.assertTrue(table.selectionModel().isRowSelected(1))
   finally:library.close();library.deleteLater()
+
+ def test_batch_export_one_folder_real_files_and_collision(self):
+  from PyQt5.QtWidgets import QFileDialog
+  from openpyxl import load_workbook
+  folder=Path(self.tmp.name)/'exports';folder.mkdir()
+  for purchase in (False,True):
+   with patch.object(QFileDialog,'getExistingDirectory',return_value=str(folder)) as choose,patch.object(QFileDialog,'getSaveFileName') as save,patch.object(QMessageBox,'exec_',return_value=QMessageBox.Ok),patch('ui.main_window.remember_export_path'):
+    self.w.export_sku_batch(self.ids[:2],purchase);choose.assert_called_once();save.assert_not_called()
+   self.assertEqual(len(list(folder.glob('*.xlsx'))),4 if purchase else 2)
+  originals={p.name:p.read_bytes() for p in folder.glob('*.xlsx')}
+  with patch.object(QFileDialog,'getExistingDirectory',return_value=str(folder)),patch.object(QMessageBox,'exec_',return_value=QMessageBox.Ok),patch('ui.main_window.remember_export_path'):
+   self.w.export_sku_batch(self.ids[:2])
+  self.assertEqual(len(list(folder.glob('*.xlsx'))),6)
+  for name,data in originals.items():self.assertEqual((folder/name).read_bytes(),data)
+  for path in folder.glob('*.xlsx'):
+   book=load_workbook(path);self.assertTrue(book.sheetnames);book.close()
+ def test_batch_export_cancel_and_failure_continues(self):
+  from PyQt5.QtWidgets import QFileDialog
+  with patch.object(QFileDialog,'getExistingDirectory',return_value=''),patch.object(self.w,'export_sku_id') as export:
+   self.w.export_sku_batch(self.ids);export.assert_not_called()
+  with patch.object(QFileDialog,'getExistingDirectory',return_value=self.tmp.name),patch.object(self.w,'export_sku_id',side_effect=[OSError('无法写入'),None,None]) as export,patch.object(QMessageBox,'exec_',return_value=QMessageBox.Ok),patch('ui.main_window.remember_export_path'):
+   self.w.export_sku_batch(self.ids);self.assertEqual(export.call_count,3)
