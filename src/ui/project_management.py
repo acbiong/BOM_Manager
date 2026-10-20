@@ -21,6 +21,22 @@ class ProjectManagement:
   self.history_menu.setContextMenuPolicy(Qt.CustomContextMenu)
   self.history_menu.customContextMenuRequested.connect(self.project_context_menu)
   project_menu.addSeparator()
+ def remember_last_bom(self,sid):
+  if not self._project_id:return
+  import json
+  row=self.svc.db.conn.execute('SELECT s.id,s.mirror_version,m.base_code,m.version FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
+  if row is None:return
+  config=self.svc.config_service.load();section='project:'+self._project_id
+  config[section]['last_bom']=json.dumps(dict(row),ensure_ascii=False);self.svc.config_service.save(config)
+ def restore_last_bom(self):
+  if self.svc.db is None or not self._project_id:return
+  import json
+  record=self.projects.get(self._project_id) or {}
+  try:
+   saved=json.loads(record.get('last_bom','{}'))
+   row=self.svc.db.conn.execute('SELECT s.id,s.mirror_version,m.base_code,m.version FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(saved.get('id'),)).fetchone()
+   if row is not None and dict(row)==saved:self.open_bom_id(row['id'])
+  except (ValueError,TypeError,AttributeError):return
  def refresh_project_menu(self):
   self.history_menu.clear()
   for record in self.projects.entries():

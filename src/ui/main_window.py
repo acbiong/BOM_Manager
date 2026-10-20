@@ -606,6 +606,7 @@ class MainWindow(ProjectManagement,QMainWindow):
  def open_bom_id(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
   if row is None:return
+  self.remember_last_bom(sid)
   if row['scope_id']:
    if sid not in self._bom_windows:
     window=BomWindow(self.svc.for_sku(sid),row['material_id'],self);self._bom_windows[sid]=window

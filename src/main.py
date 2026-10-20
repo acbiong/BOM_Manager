@@ -88,7 +88,10 @@ def selected_database_path(value):
   if os.name=='nt' and len(value)>3 and value[0]=='/' and value[1].isalpha() and value[2]==':':value=value[1:]
  return Path(value).expanduser().resolve()
 
-def startup_database(config_service,cfg):
+def startup_database(config_service,cfg,project_recovery=False):
+ if project_recovery:
+  from ui.startup_project import restore_project
+  return restore_project(config_service,cfg)
  if not cfg['database'].get('path','').strip():return None
  path=config_service.base/'bom.db'
  try:
@@ -141,11 +144,9 @@ def main():
   geometry_memory=WindowGeometryMemory(app,config_service);cfg=config_service.load()
   if getattr(sys,'frozen',False) and os.environ.get('APPIMAGE') and base!=Path(os.environ['APPIMAGE']).resolve().parent:
    QMessageBox.information(None,'使用本地配置目录','软件所在目录为只读或无写入权限（网络共享可能以只读方式挂载）。\n配置保存在：'+str(config_service.path)+'\n新建数据库将默认使用可写目录，您也可以自行选择其他可写位置。')
-  db=startup_database(config_service,cfg)
+  db=startup_database(config_service,cfg,project_recovery=True)
   if db is None and cfg['database'].get('path','').strip():return 0
-  from ui.snapshot_migration import prepare_snapshot_bom
-  if db is not None and not prepare_snapshot_bom(db):return 0
-  w=MainWindow(Services(db,config_service),VERSION); w.show(); guard.set_window(w); return app.exec_()
+  w=MainWindow(Services(db,config_service),VERSION); w.show(); guard.set_window(w); w.restore_last_bom(); return app.exec_()
  except Exception as exc:
   log=(base or Path(tempfile.gettempdir()))/'startup_error.log'
   try: log.write_text(traceback.format_exc(),encoding='utf-8')
