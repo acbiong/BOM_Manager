@@ -13,7 +13,7 @@ class LockRecoveryTests(unittest.TestCase):
  def test_locked_new_file_is_cleaned_and_next_create_uses_local(self):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);share=root/'share';share.mkdir();local=root/'local';local.mkdir()
-   config=ConfigService(share);cfg=config.load();target=share/'locked.db'
+   config=ConfigService(share);cfg=config.load();cfg['database']['path']='bom.db';target=share/'locked.db'
    def create(path):
     if Path(path)==target:raise sqlite3.OperationalError('database is locked')
     return Database(path)

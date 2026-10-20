@@ -27,7 +27,7 @@ class DatabaseCreationFilesTests(unittest.TestCase):
     def test_startup_and_reopen_leave_only_requested_database(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);data=base/'数据库';data.mkdir();target=data/'新项目.sqlite'
-            config=ConfigService(base);cfg=config.load()
+            config=ConfigService(base);cfg=config.load();cfg['database']['path']='bom.db'
             with patch.object(main,'choose_database_recovery',return_value='create'),patch.object(QFileDialog,'getSaveFileName',return_value=(str(target),'')):
                 db=main.startup_database(config,cfg)
             try:

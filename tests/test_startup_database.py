@@ -10,7 +10,7 @@ import main
 
 class StartupDatabaseTests(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name);self.config=ConfigService(self.base);self.cfg=self.config.load()
+  self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name);self.config=ConfigService(self.base);self.cfg=self.config.load();self.cfg['database']['path']='bom.db'
  def tearDown(self):self.tmp.cleanup()
  def test_missing_prompts_and_creates_named_file(self):
   target=self.base/'用户自定义.sqlite'

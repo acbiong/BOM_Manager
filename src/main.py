@@ -89,6 +89,7 @@ def selected_database_path(value):
  return Path(value).expanduser().resolve()
 
 def startup_database(config_service,cfg):
+ if not cfg['database'].get('path','').strip():return None
  path=config_service.base/'bom.db'
  try:
   path=config_service.resolve_path(cfg['database'].get('path','bom.db'))
@@ -141,9 +142,9 @@ def main():
   if getattr(sys,'frozen',False) and os.environ.get('APPIMAGE') and base!=Path(os.environ['APPIMAGE']).resolve().parent:
    QMessageBox.information(None,'使用本地配置目录','软件所在目录为只读或无写入权限（网络共享可能以只读方式挂载）。\n配置保存在：'+str(config_service.path)+'\n新建数据库将默认使用可写目录，您也可以自行选择其他可写位置。')
   db=startup_database(config_service,cfg)
-  if db is None:return 0
+  if db is None and cfg['database'].get('path','').strip():return 0
   from ui.snapshot_migration import prepare_snapshot_bom
-  if not prepare_snapshot_bom(db):return 0
+  if db is not None and not prepare_snapshot_bom(db):return 0
   w=MainWindow(Services(db,config_service),VERSION); w.show(); guard.set_window(w); return app.exec_()
  except Exception as exc:
   log=(base or Path(tempfile.gettempdir()))/'startup_error.log'
@@ -159,7 +160,7 @@ def main():
   if geometry_memory is not None:
    app.removeEventFilter(geometry_memory);app.aboutToQuit.disconnect(geometry_memory.save_visible);geometry_memory.deleteLater()
   try:
-   if w is not None and w.svc.db is not db:w.svc.db.close()
+   if w is not None and w.svc.db is not None and w.svc.db is not db:w.svc.db.close()
    if db is not None:db.close()
   finally:guard.close()
 if __name__=='__main__':

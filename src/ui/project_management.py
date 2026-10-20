@@ -8,11 +8,11 @@ from database.database import Database
 
 class ProjectManagement:
  def setup_projects(self,file_menu,project_menu):
-  self.svc.config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
+  self.svc.config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent if self.svc.db is not None else None)
   self.projects=ProjectRegistry(self.svc.config_service)
   config=self.svc.config_service.load()
   excluded=config.get('projects','excluded_current',fallback='')
-  self._project_id=None if excluded==self.svc.config_service.relative_path(self.svc.db.path) else self.projects.remember(self.svc.db.path,dict(self.svc.project()),settings=self.projects.settings(),active=True)
+  self._project_id=None if self.svc.db is None or excluded==self.svc.config_service.relative_path(self.svc.db.path) else self.projects.remember(self.svc.db.path,dict(self.svc.project()),settings=self.projects.settings(),active=True)
   file_menu.addAction('导入项目数据库',self.import_project_database)
   project_menu.addAction('新增项目',self.new_project)
   project_menu.addAction('导入项目',self.import_project)
@@ -88,7 +88,7 @@ class ProjectManagement:
   try:
    path=selected_database_path(str(path));self.svc.config_service.relative_path(path)
    if create and path.exists():raise ValueError('目标文件已存在，请为新项目选择一个未使用的数据库文件名。不会覆盖已有文件。')
-   if path==Path(self.svc.db.path).resolve():
+   if self.svc.db is not None and path==Path(self.svc.db.path).resolve():
     if metadata:
      current=dict(self.svc.project());current.update({k:metadata[k] for k in FIELDS if k in metadata});self.svc.update_project(current)
     self._project_id=self.projects.remember(path,dict(self.svc.project()),key=key,settings=settings or self.projects.settings(),active=True)
@@ -115,7 +115,8 @@ class ProjectManagement:
    if getattr(self,'_compare_dialog',None):self._compare_dialog.close();self._compare_dialog.deleteLater();self._compare_dialog=None
    if self._materials is not None:self._materials.close()
    if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
-   old=self.svc.db;self.svc.db=candidate;candidate=None;created_path=None;old.close()
+   old=self.svc.db;self.svc.db=candidate;candidate=None;created_path=None
+   if old is not None:old.close()
    self.svc.UNITS=self.svc.config_service.material_units();self._project_id=new_key
    self._sku_filters={};self.refresh();return True
   except Exception as error:

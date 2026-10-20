@@ -17,7 +17,7 @@ class ConfigPathTests(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name);self.config=ConfigService(self.base/'原项目')
  def tearDown(self):self.tmp.cleanup()
  def test_default_and_absolute_path_migration(self):
-  cfg=self.config.load();self.assertEqual(cfg['database']['path'],'bom.db')
+  cfg=self.config.load();self.assertEqual(cfg['database']['path'],'')
   target=self.config.base/'数据'/'50% BOM.db'
   cfg['database']['path']=str(target);cfg['database']['last_import_dir']=str(self.base/'Excel 文件')
   self.config.save(cfg)

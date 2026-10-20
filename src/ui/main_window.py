@@ -378,6 +378,14 @@ class MainWindow(ProjectManagement,QMainWindow):
   self.svc.sku_display_order=[int(self.table.item(row,6).text()) for row in range(self.table.rowCount())]
   WindowRefreshBus.publish({'type':'sku_order_changed'})
  def refresh(self):
+  available=self.svc.db is not None
+  def update_actions(menu):
+   for action in menu.actions():
+    if action.menu():update_actions(action.menu())
+    elif action.text() in ('选择SQLite数据库','导出资料库','修改项目信息','物料库','新建SKU','筛选','BOM对比'):action.setEnabled(available)
+  update_actions(self.menuBar());self.table.setEnabled(available);self.latest_bom_only.setEnabled(available)
+  if not available:
+   self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单新建或导入项目');return
   current=self.table.currentRow(); column=max(1,self.table.currentColumn())
   selected_id=str(self._description_target) if getattr(self,'_description_target',None) is not None else (self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None)
   scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
@@ -445,7 +453,7 @@ class MainWindow(ProjectManagement,QMainWindow):
    try:self.svc.change_mirror_version(sid,value)
    except Exception as error:QMessageBox.warning(self,'历史版本变更失败',str(error))
  def select_database(self):
-  current=Path(self.svc.db.path).expanduser()
+  current=Path(self.svc.db.path).expanduser() if self.svc.db is not None else self.svc.config_service.base
   # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
   # 这样已有文件会直接作为候选数据库打开，输入新文件名仍可创建数据库。
   chooser=QFileDialog(self,'选择SQLite数据库',str(current),'SQLite (*.db *.sqlite);;所有文件 (*)')
@@ -458,7 +466,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if not p:return
   selected=Path(p).expanduser()
   existed=selected.exists()
-  if selected.resolve() == current.resolve():
+  if self.svc.db is not None and selected.resolve() == current.resolve():
    QMessageBox.information(self,'数据库未切换','当前已经在使用该数据库：\n'+str(selected)); return
   if self.switch_project(selected,create=not existed):
    QMessageBox.information(self,'数据库已切换',('已打开已有数据库' if existed else '已创建并打开新数据库')+'：\n'+str(selected))
