@@ -62,7 +62,7 @@ Linux每次开启新终端可先进入项目并执行 `. .venv/bin/activate`。�
 python3 src/main.py
 ```
 
-首次启动选择“新建数据库”并指定文件名，或选用现有本软件 SQLite 数据库。源码模式的 `config.ini` 位于项目根目录，数据库位置保存在其中；数据库及导入目录以相对config.ini的路径保存，使用统一的`/`分隔符；保持目录相对位置一起复制即可跨Windows、Deepin和Ubuntu读取。旧的本机绝对路径会自动迁移；无法识别的异系统绝对路径需重新选择数据库。同一软件目录只能运行一个实例。
+首次启动只生成默认config并进入未打开项目状态；通过“新增项目”指定数据库名称/位置，或导入已有项目。源码模式的 `config.ini` 位于项目根目录，数据库位置保存在其中；数据库及导入目录以相对config.ini的路径保存，使用统一的`/`分隔符；保持目录相对位置一起复制即可跨Windows、Deepin和Ubuntu读取。旧的本机绝对路径会自动迁移；无法识别的异系统绝对路径需重新选择数据库。同一软件目录允许多个实例同时运行，但本机同一项目数据库只允许一个实例打开。占用时可选择打开其他项目或关闭项目进入空项目状态。
 
 配置与业务数据库被 Git 忽略，不随 clone 迁移。需要迁移业务数据时，先关闭软件，再单独复制数据库和配置，并在新机核对路径。界面主题、导出路径等部分偏好保存在 Qt 的 `Biong/BOMManager` 用户设置中，不属于源码。
 
@@ -192,7 +192,7 @@ codex
 
 AppImage内部改用PyInstaller目录模式，外部仍只有一个AppImage文件，避免AppImage与onefile双重解压。构建会检查所有ELF的x86_64架构、缺失动态库及所需glibc符号不高于2.38（deepin25基线；Ubuntu24.04为2.39）。这不是对所有未来Ubuntu版本/驱动组合的保证。Ubuntu Wayland桌面通常通过XWayland运行Qt xcb；需保留系统图形栈，不在包内替换glibc和图形驱动。
 
-新增 `test_reports/linux_bundle_audit.json` 和包自检报告。自检使用临时数据库，检查Qt主窗口/物料库/BOM/关于、SQLite、Excel及单实例。构建结束会自动运行离屏自检；目标桌面仍需验收。
+新增 `test_reports/linux_bundle_audit.json` 和包自检报告。自检使用临时数据库，检查Qt主窗口/物料库/BOM/关于、SQLite、Excel及项目数据库互斥。构建结束会自动运行离屏自检；目标桌面仍需验收。
 
 ### Windows：生成单个EXE
 
@@ -213,7 +213,7 @@ Get-FileHash .\package\BOM_Manager_版本_日期时间_windows_x64.exe -Algorith
 .\package\BOM_Manager_版本_日期时间_windows_x64.exe
 ```
 
-EXE优先使用可写同目录配置；安装目录不可写时回退`%LOCALAPPDATA%\BOM管理系统`。单实例使用Windows文件锁和Qt本地通信；无需管理员身份运行。发行EXE暂未配置代码签名证书，下载文件可能触发Windows SmartScreen/杀毒软件信誉提示，不能保证所有设备均无提示双击启动，不应关闭系统防护规避。
+EXE优先使用可写同目录配置；安装目录不可写时回退`%LOCALAPPDATA%\BOM管理系统`。项目占用保护使用Windows文件锁；无需管理员身份运行。发行EXE暂未配置代码签名证书，下载文件可能触发Windows SmartScreen/杀毒软件信誉提示，不能保证所有设备均无提示双击启动，不应关闭系统防护规避。
 
 ### CI及目标系统验证状态
 

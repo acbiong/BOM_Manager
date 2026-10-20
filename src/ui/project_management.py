@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QMenu,QFileDialog,QDialog,QMessageBox
 from config.config_service import ConfigService
 from config.project_registry import ProjectRegistry,FIELDS
 from database.database import Database
+from infrastructure.project_lock import ProjectInUseError
 
 class ProjectManagement:
  def setup_projects(self,file_menu,project_menu):
@@ -114,8 +115,8 @@ class ProjectManagement:
     # Exclusive creation prevents accidentally opening/overwriting a competing file.
     with path.open('xb'):pass
     created_path=path
-    candidate=Database(str(path))
-   else:candidate=open_existing_database(path)
+    candidate=Database(str(path),exclusive=True)
+   else:candidate=open_existing_database(path,exclusive=True)
    if not prepare_snapshot_bom(candidate,self):return False
    windows=set(self._material_bom_windows.values())|set(self._bom_windows.values())
    if self._materials is not None:windows.update(self._materials._local_bom_windows.values())
@@ -135,8 +136,35 @@ class ProjectManagement:
    if old is not None:old.close()
    self.svc.UNITS=self.svc.config_service.material_units();self._project_id=new_key
    self._sku_filters={};self.refresh();return True
+  except ProjectInUseError as error:
+   return self.handle_occupied_project(error)
   except Exception as error:
    QMessageBox.critical(self,'项目数据库错误','项目未切换，请重新选择可用的数据库。\n\n'+str(error));return False
   finally:
    if candidate is not None:candidate.close()
    if created_path is not None:created_path.unlink(missing_ok=True)
+
+ def close_project(self):
+  windows=set(self._material_bom_windows.values())|set(self._bom_windows.values())
+  if self._materials is not None:windows.update(self._materials._local_bom_windows.values())
+  for window in windows:
+   if not window.close():return False
+  self.remember_current_project()
+  if getattr(self,'_compare_dialog',None):self._compare_dialog.close();self._compare_dialog.deleteLater();self._compare_dialog=None
+  if self._materials is not None:self._materials.close()
+  if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
+  config=self.svc.config_service.load();config['database']['path']=''
+  if config.has_section('projects'):config.remove_option('projects','active')
+  self.svc.config_service.save(config)
+  if self.svc.db is not None:self.svc.db.close()
+  self.svc.db=None;self._project_id=None;self.refresh();return True
+ def handle_occupied_project(self,error):
+  from ui.startup_project import occupied_choice
+  from PyQt5.QtWidgets import QInputDialog
+  if occupied_choice(str(error),self)=='close':self.close_project();return False
+  records=self.projects.entries()
+  if not records:QMessageBox.information(self,'无历史项目','暂无其他历史项目，可关闭项目后新建或导入项目。');return False
+  labels=[' '.join(r.get(k,'') for k in ('project_code','project_name')).strip()+' — '+r['path'] for r in records]
+  label,ok=QInputDialog.getItem(self,'打开其他项目','请选择项目：',labels,0,False)
+  if ok:self.open_history_project(records[labels.index(label)]['id'])
+  return False

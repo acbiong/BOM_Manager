@@ -69,15 +69,6 @@ guard.close()
    first=installation_directory()
    with patch.dict(os.environ,APPIMAGE=str(self.path/'软件'/'v2.AppImage')):self.assertEqual(first,installation_directory())
    with patch.dict(os.environ,APPIMAGE=''),patch.object(sys,'executable',str(self.path/'standalone'/'bom')):self.assertEqual(installation_directory(),self.path/'standalone')
- def test_duplicate_stops_before_config_and_database(self):
-  import main
-  guard=SingleInstance(self.path/'app',self.path)
-  with patch.object(main,'QApplication',return_value=self.app),patch.object(main,'SingleInstance',return_value=guard),patch.object(guard,'acquire',return_value=False),patch.object(guard,'notify_existing',return_value=True),patch.object(main,'ConfigService') as config,patch.object(main,'startup_database') as database,patch.object(main,'app_base') as base:
-   self.assertEqual(main.main(),0);config.assert_not_called();database.assert_not_called();base.assert_not_called()
- def test_startup_cancel_releases_lock(self):
-  import main
-  guard=SingleInstance(self.path/'app',self.path)
-  with patch.object(main,'QApplication',return_value=self.app),patch.object(main,'SingleInstance',return_value=guard),patch.object(main,'ConfigService'),patch.object(main,'startup_database',return_value=None),patch.object(main,'app_base',return_value=self.path),patch.object(main.QMessageBox,'critical'):self.assertEqual(main.main(),0)
-  replacement=SingleInstance(self.path/'app',self.path)
-  try:self.assertTrue(replacement.acquire())
-  finally:replacement.close()
+ def test_app_entry_no_longer_uses_installation_directory_lock(self):
+  import inspect,main
+  self.assertNotIn('SingleInstance',inspect.getsource(main.main))

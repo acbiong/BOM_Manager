@@ -32,7 +32,7 @@
 
 ## 代码地图
 
-- src/main.py：启动、单实例、数据库恢复、源码/冻结配置路径。
+- src/main.py：多实例启动、项目占用检查、数据库恢复、源码/冻结配置路径。
 - src/database/database.py：SQLite结构、迁移与事务。
 - src/services/services.py：物料、SKU、共享BOM关系、Excel导入导出、版本及变更日志。
 - src/ui/main_window.py：SKU、物料库、BOM编辑、映射/反查等窗口。
@@ -40,7 +40,7 @@
 - src/ui/material_clipboard.py：同库跨窗口物料身份剪贴板。
 - src/ui/table_layout.py：默认列宽与宽窗口比例扩展。
 - src/ui/about_dialog.py、src/infrastructure/build_info.py：关于窗口与冻结构建信息。
-- src/infrastructure/events.py：窗口变更事件；single_instance.py：QLocalServer单实例。
+- src/infrastructure/events.py：窗口变更事件；project_lock.py：本机项目数据库互斥及配置写入锁（single_instance.py仅保留旧兼容工具）。
 - src/config/config_service.py：INI默认配置与可配置单位；src/version.py、VERSION：版本读取与升版。
 - tools/run_tests.sh：137条追踪编号审计、unittest、源码编译并保存报告；通过不代表所有业务已被形式化证明。
 - tools/finish_ai_change.sh、.githooks/post-commit、tools/build_appimage.sh：当前收尾/构建链。
@@ -705,3 +705,14 @@ Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出�
 - 记录每个项目最后打开的SKU BOM及历史版本身份（SKU ID、基础编码、物料版本、历史版本号），重启后自动恢复该BOM编辑窗口。恢复以数据库实际身份核对为准，已删除或身份改变的SKU不误打开，不恢复未保存编辑缓存。正常数据库每次重新连接查询，不依赖config中的旧业务数据。
 - 新增tests/test_startup_project_restore.py的7项测试，覆盖最新数据库数据与BOM恢复、缺失关闭及下次空启动、移动数据库重关联、切换其他项目及其设置、损坏/无效选择文件不修改、取消选择返回决策、SKU身份变化不误打开。旧启动恢复工具函数保留兼容测试，应用入口使用新的项目恢复策略。
 - 完整测试/审计/打包报告保存在test_reports，按自动收尾脚本升版提交并生成AppImage。
+
+
+## 2026-10-20：允许同目录多开，按项目数据库互斥
+
+- 本条替代之前“同软件目录单实例”的限制：应用入口不再获取软件目录锁，允许同目录启动多个软件进程；每个进程可打开不同项目或保持未打开项目状态。
+- 新增infrastructure/project_lock.py：项目数据库在本机使用系统文件锁持有占用权，使用数据库文件身份（设备/文件号）识别同一文件，避免相对路径、符号链接和硬链接绕过。Linux使用flock，Windows使用msvcrt；锁文件保留在系统临时目录，关闭连接释放锁，异常退出由内核释放，不使用后台监控。占用锁与SQLite事务锁分开，不关闭SQLite锁，不修改用户数据库锁配置。文件身份互斥范围为本机，网络数据库本身仍须满足SQLite文件锁要求。
+- 启动恢复、指定/导入已有数据库、新建项目及历史项目切换均在数据库业务初始化/迁移前获取占用权。占用失败显示“当前项目已经被打开”，仅提供“打开其他项目”“关闭项目”；其他项目照常校验。关闭项目处理原窗口未保存BOM，取消则保留当前项目，确认后释放本实例连接并回到空项目，其他软件连接不受影响。
+- Database通过exclusive参数持有项目锁，初始化失败、正常关闭、切换及软件退出均释放。只读结构校验不会改写被占用数据库。非UI测试/数据维护连接保持显式非独占模式。
+- 共用config的读改写增加短时系统互斥，保存时按加载快照合并改动，避免并发修改不同历史项目或界面偏好时整份覆盖。继续同目录临时文件原子替换；配置锁只在读写时持有。
+- tests/test_project_ownership.py新增10项测试：真实双软件进程同目录进入窗口、跨进程同库拒绝/不同库允许、异常退出释放、符号/硬链接、连接失败释放、占用启动关闭/选择其他项目、两窗口切换关闭保护、真实占用弹窗选项、旧快照合并及双进程并发写配置。AppImage自检改为project_ownership项目互斥；旧软件目录锁工具仅保留兼容测试，不被应用入口调用。
+- 全量测试、需求追踪、编译检查和AppImage自检按收尾脚本执行，报告保存在test_reports；自动升版和Git提交，不自动推送。

@@ -20,4 +20,4 @@ class CrossPlatformTests(unittest.TestCase):
    report=Path(tmp)/'smoke.json';root=Path(__file__).parents[1]
    result=subprocess.run([sys.executable,str(root/'src/main.py'),'--smoke-test-report',str(report)],env=dict(os.environ,QT_QPA_PLATFORM='offscreen',PYTHONUTF8='1'),capture_output=True,timeout=40)
    self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
-   data=json.loads(report.read_text(encoding='utf-8'));self.assertTrue(data['passed']);self.assertIn('single_instance',data['checks']);self.assertIn('excel',data['checks'])
+   data=json.loads(report.read_text(encoding='utf-8'));self.assertTrue(data['passed']);self.assertIn('project_ownership',data['checks']);self.assertIn('excel',data['checks'])

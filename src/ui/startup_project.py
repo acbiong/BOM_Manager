@@ -10,20 +10,27 @@ def recovery_choice(reason):
  close=box.addButton('关闭项目',QMessageBox.RejectRole);box.setDefaultButton(close);box.exec_()
  return 'select' if box.clickedButton()==select else 'other' if box.clickedButton()==other else 'close'
 
+def occupied_choice(reason,parent=None):
+ box=QMessageBox(parent);box.setWindowTitle('当前项目已经被打开');box.setIcon(QMessageBox.Warning)
+ box.setText('当前项目已经被其他软件打开，请打开其他项目或关闭项目。');box.setInformativeText(str(reason))
+ other=box.addButton('打开其他项目',QMessageBox.ActionRole);close=box.addButton('关闭项目',QMessageBox.RejectRole)
+ box.setDefaultButton(close);box.exec_();return 'other' if box.clickedButton()==other else 'close'
+
 def restore_project(config,cfg):
  from main import open_existing_database,selected_database_path,database_error_message
  from ui.snapshot_migration import prepare_snapshot_bom
  from services.services import Services
+ from infrastructure.project_lock import ProjectInUseError
  registry=ProjectRegistry(config);value=cfg['database'].get('path','').strip()
  key=cfg.get('projects','active',fallback='') or None
  if not value:return None
  candidate=None
  while True:
-  db=None
+  db=None;occupied=False
   try:
    path=selected_database_path(candidate) if candidate else config.resolve_path(value)
    config.relative_path(path)
-   db=open_existing_database(path)
+   db=open_existing_database(path,exclusive=True)
    if not prepare_snapshot_bom(db):raise ValueError('项目数据库结构升级或校验未通过')
    if candidate:
     key=registry.remember(path,dict(Services(db).project()),key=key)
@@ -32,9 +39,10 @@ def restore_project(config,cfg):
    return db
   except Exception as error:
    if db is not None:db.close()
+   occupied=isinstance(error,ProjectInUseError)
    reason=database_error_message(error,candidate or value)
   while True:
-   choice=recovery_choice(reason)
+   choice=occupied_choice(reason) if occupied else recovery_choice(reason)
    if choice=='close':
     latest=config.load();latest['database']['path']=''
     if latest.has_section('projects'):latest.remove_option('projects','active')

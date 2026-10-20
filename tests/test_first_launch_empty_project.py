@@ -58,10 +58,9 @@ class FirstLaunchTests(unittest.TestCase):
   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(path),'')):w.import_project_database()
   self.assertEqual(Path(w.svc.db.path),path);self.assertIn('OLD 旧项目',w.windowTitle());self.assertEqual(len(w.projects.entries()),1)
  def test_main_enters_event_loop_without_database_or_recovery_prompt(self):
-  guard=Mock();guard.acquire.return_value=True
   def event_loop():
-   w=guard.set_window.call_args.args[0];self.assertIsNone(w.svc.db);self.assertTrue(w.isVisible());w.close();w.deleteLater();return 0
-  with patch.object(main,'QApplication',return_value=self.app),patch.object(main,'SingleInstance',return_value=guard),patch.object(main,'app_base',return_value=self.base),patch.object(main,'choose_database_recovery') as recovery,patch.object(self.app,'exec_',side_effect=event_loop),patch.object(main.QMessageBox,'critical') as error:
+   w=next(w for w in self.app.topLevelWidgets() if isinstance(w,MainWindow) and w.isVisible());self.assertIsNone(w.svc.db);self.assertTrue(w.isVisible());w.close();w.deleteLater();return 0
+  with patch.object(main,'QApplication',return_value=self.app),patch.object(main,'app_base',return_value=self.base),patch.object(main,'choose_database_recovery') as recovery,patch.object(self.app,'exec_',side_effect=event_loop),patch.object(main.QMessageBox,'critical') as error:
    self.assertEqual(main.main(),0);recovery.assert_not_called();error.assert_not_called()
-  self.assertEqual(list(self.base.iterdir()),[self.config.path]);guard.close.assert_called_once()
+  self.assertEqual(list(self.base.iterdir()),[self.config.path])
   manager=self.app._bom_save_shortcuts;del self.app._bom_save_shortcuts;manager.deleteLater()

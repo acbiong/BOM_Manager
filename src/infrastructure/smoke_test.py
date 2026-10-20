@@ -17,16 +17,17 @@ def run_smoke_test(report_path):
         from ui.about_dialog import AboutDialog
         from version import get_version
         from infrastructure.build_info import load_build_info
-        from infrastructure.single_instance import SingleInstance
+        from infrastructure.project_lock import ProjectLock
         from openpyxl import load_workbook
         import xlrd
         from services.external_bom import ExcelSource,build_external_bom,ALIASES
         app = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory(prefix='bom-smoke-') as tmp:
-            guard = SingleInstance(Path(tmp)/'app', tmp)
-            other = SingleInstance(Path(tmp)/'app', tmp)
+            lock_target=Path(tmp)/'lock-test.db';lock_target.touch()
+            guard = ProjectLock(lock_target)
+            other = ProjectLock(lock_target)
             try:
-                assert guard.acquire() and not other.acquire(), '单实例互斥失败'
+                assert guard.acquire() and not other.acquire(), '项目数据库互斥失败'
             finally:
                 other.close(); guard.close()
             db = Database(str(Path(tmp)/'测试.db'))
@@ -67,7 +68,7 @@ def run_smoke_test(report_path):
             windows = [BomWindow(mirror,root),MainWindow(svc,get_version()),MaterialWindow(svc),BomWindow(svc,root),AboutDialog(get_version())]
             for window in windows:window.show()
             app.processEvents()
-            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['single_instance','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved'])
+            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved'])
             for window in windows:window.close()
             windows=[];db.close();db=None
     except Exception:

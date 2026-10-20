@@ -2,8 +2,15 @@
 import sqlite3
 from contextlib import contextmanager
 class Database:
- def __init__(self,path):
-  self.path=path; self.conn=sqlite3.connect(path); self.conn.row_factory=sqlite3.Row
+ def __init__(self,path,exclusive=False):
+  self._project_lock=None
+  if exclusive:
+   from infrastructure.project_lock import ProjectLock
+   self._project_lock=ProjectLock(path).require()
+  try:self.path=path; self.conn=sqlite3.connect(path); self.conn.row_factory=sqlite3.Row
+  except Exception:
+   if self._project_lock:self._project_lock.close()
+   raise
   try:
    columns={row[1] for row in self.conn.execute('PRAGMA table_info(skus)')}
    if columns and 'mirror_version' not in columns and path!=':memory:':
@@ -14,7 +21,7 @@ class Database:
     try:self.conn.backup(destination)
     finally:destination.close()
    self.create_schema()
-  except Exception:self.conn.close(); raise
+  except Exception:self.close(); raise
  def create_schema(self):
   self.conn.executescript('''CREATE TABLE IF NOT EXISTS materials(id INTEGER PRIMARY KEY,base_code TEXT NOT NULL,version TEXT NOT NULL,name TEXT NOT NULL,description TEXT DEFAULT '',unit TEXT NOT NULL,manufacturer TEXT DEFAULT '',mpn TEXT DEFAULT '',mp_flag TEXT DEFAULT 'M',has_bom INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(base_code,version));CREATE TABLE IF NOT EXISTS skus(id INTEGER PRIMARY KEY,material_id INTEGER UNIQUE,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS bom_items(id INTEGER PRIMARY KEY,bom_root_id INTEGER NOT NULL,parent_item_id INTEGER,material_id INTEGER NOT NULL,quantity REAL NOT NULL,unit TEXT NOT NULL,position TEXT DEFAULT '',level_no INTEGER DEFAULT 1,remark TEXT DEFAULT '',sort_no INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS material_bom_items(id INTEGER PRIMARY KEY,parent_material_id INTEGER NOT NULL,child_material_id INTEGER NOT NULL,quantity REAL NOT NULL,unit TEXT NOT NULL,position TEXT DEFAULT '',remark TEXT DEFAULT '',sort_no INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(parent_material_id,child_material_id,position));CREATE INDEX IF NOT EXISTS idx_material_bom_parent ON material_bom_items(parent_material_id);CREATE INDEX IF NOT EXISTS idx_material_bom_child ON material_bom_items(child_material_id);CREATE TABLE IF NOT EXISTS alternates(id INTEGER PRIMARY KEY,bom_item_id INTEGER NOT NULL,material_id INTEGER NOT NULL,sort_no INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS change_logs(id INTEGER PRIMARY KEY,object_type TEXT,object_id INTEGER,action TEXT,detail TEXT,changed_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS project(id INTEGER PRIMARY KEY CHECK(id=1),project_name TEXT DEFAULT '请输入项目名称',project_code TEXT DEFAULT '',product_name TEXT DEFAULT '',product_model TEXT DEFAULT '');INSERT OR IGNORE INTO project(id) VALUES(1);''')
   if 'grade' not in {r[1] for r in self.conn.execute('PRAGMA table_info(materials)')}:self.conn.execute("ALTER TABLE materials ADD COLUMN grade TEXT NOT NULL DEFAULT ''")
@@ -85,4 +92,7 @@ class Database:
  def close(self):
   try:self.conn.execute('PRAGMA optimize')
   except sqlite3.DatabaseError:pass
-  finally:self.conn.close()
+  finally:
+   try:self.conn.close()
+   finally:
+    if self._project_lock:self._project_lock.close()

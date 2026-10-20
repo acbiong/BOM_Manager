@@ -27,7 +27,12 @@ def relative_config_path(value, base):
 
 class ConfigService:
  def __init__(self, base=None): self.base=Path(base or Path.cwd()).expanduser().resolve(); self.path=self.base/'config.ini'
+ def _mutex(self):
+  from infrastructure.project_lock import FileMutex
+  return FileMutex('config:'+os.path.normcase(str(self.path)))
  def load(self):
+  with self._mutex():return self._load()
+ def _load(self):
   c=ConfigParser(interpolation=None); changed=False
   if self.path.exists(): c.read(self.path,encoding='utf-8')
   if not c.has_section('database'): c['database']={"driver":"sqlite","path":"","host":"127.0.0.1","port":"3306","name":"bom"}; changed=True
@@ -43,6 +48,7 @@ class ConfigService:
   self._normalize_paths(c,strict=False)
   if dict(c['database'])!=before:changed=True
   if changed:self._write(c)
+  c._bom_snapshot={s:dict(c[s]) for s in c.sections()}
   return c
  def relative_path(self,value):
   value=str(value)
@@ -64,7 +70,21 @@ class ConfigService:
     elif strict:raise
  def save(self,c):
   self._normalize_paths(c)
-  self._write(c)
+  proposed={s:dict(c[s]) for s in c.sections()}
+  with self._mutex():
+   before=getattr(c,'_bom_snapshot',None)
+   if before is None:self._write(c)
+   else:
+    current=ConfigParser(interpolation=None)
+    if self.path.exists():current.read(self.path,encoding='utf-8')
+    for section in set(before)|set(proposed):
+     if section not in proposed:current.remove_section(section);continue
+     if not current.has_section(section):current.add_section(section)
+     for key in set(before.get(section,{}))|set(proposed[section]):
+      if key not in proposed[section]:current.remove_option(section,key)
+      elif key not in before.get(section,{}) or proposed[section][key]!=before[section][key]:current[section][key]=proposed[section][key]
+    self._write(current)
+  c._bom_snapshot=proposed
  def _write(self,c):
   self.base.mkdir(parents=True,exist_ok=True)
   import tempfile

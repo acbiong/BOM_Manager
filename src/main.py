@@ -6,7 +6,6 @@ from config.config_service import ConfigService
 from database.database import Database
 from services.services import Services
 from ui.main_window import MainWindow
-from infrastructure.single_instance import SingleInstance
 from version import get_version
 VERSION=get_version()
 IS_WINDOWS=sys.platform=="win32"
@@ -35,7 +34,7 @@ def app_base():
   root.mkdir(parents=True,exist_ok=True)
   return root
  return Path(__file__).resolve().parents[1]
-def open_existing_database(path):
+def open_existing_database(path,exclusive=False):
  path=Path(path).expanduser().resolve()
  if not path.is_file():raise ValueError(f'数据库文件不存在：{path}')
  if path.stat().st_size==0:raise ValueError('数据库文件为空，无法使用')
@@ -56,7 +55,7 @@ def open_existing_database(path):
   tables={row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
   if 'material_bom_items' in tables:connection.execute('SELECT id,parent_material_id,child_material_id,quantity,unit,position,remark,sort_no,created_at,updated_at FROM material_bom_items LIMIT 0')
  finally:connection.close()
- return Database(str(path))
+ return Database(str(path),exclusive=exclusive)
 
 def choose_database_recovery(reason):
  box=QMessageBox(); box.setWindowTitle('数据库不可用'); box.setIcon(QMessageBox.Warning)
@@ -133,11 +132,8 @@ def main():
  app=QApplication(sys.argv)
  from ui.save_shortcut import install_save_shortcuts
  save_shortcuts=install_save_shortcuts(app)
- guard=SingleInstance(); db=None; base=None; geometry_memory=None; w=None
+ db=None; base=None; geometry_memory=None; w=None
  try:
-  if not guard.acquire():
-   if not guard.notify_existing():QMessageBox.information(None,'软件已运行','该目录下的BOM管理系统已在运行或正在启动，请切换到已有窗口。')
-   return 0
   base=app_base()
   config_service=ConfigService(base); cfg=config_service.load()
   from ui.window_geometry import WindowGeometryMemory
@@ -146,7 +142,7 @@ def main():
    QMessageBox.information(None,'使用本地配置目录','软件所在目录为只读或无写入权限（网络共享可能以只读方式挂载）。\n配置保存在：'+str(config_service.path)+'\n新建数据库将默认使用可写目录，您也可以自行选择其他可写位置。')
   db=startup_database(config_service,cfg,project_recovery=True)
   if db is None and cfg['database'].get('path','').strip():return 0
-  w=MainWindow(Services(db,config_service),VERSION); w.show(); guard.set_window(w); w.restore_last_bom(); return app.exec_()
+  w=MainWindow(Services(db,config_service),VERSION); w.show(); w.restore_last_bom(); return app.exec_()
  except Exception as exc:
   log=(base or Path(tempfile.gettempdir()))/'startup_error.log'
   try: log.write_text(traceback.format_exc(),encoding='utf-8')
@@ -160,10 +156,8 @@ def main():
   save_shortcuts.shutdown()
   if geometry_memory is not None:
    app.removeEventFilter(geometry_memory);app.aboutToQuit.disconnect(geometry_memory.save_visible);geometry_memory.deleteLater()
-  try:
-   if w is not None and w.svc.db is not None and w.svc.db is not db:w.svc.db.close()
-   if db is not None:db.close()
-  finally:guard.close()
+  if w is not None and w.svc.db is not None and w.svc.db is not db:w.svc.db.close()
+  if db is not None:db.close()
 if __name__=='__main__':
  if '--smoke-test-report' in sys.argv:
   from infrastructure.smoke_test import run_smoke_test
