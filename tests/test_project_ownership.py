@@ -103,3 +103,14 @@ class ProjectOwnershipTests(unittest.TestCase):
    self.assertEqual([b.text() for b in box.buttons()],['关闭项目','打开其他项目'])
    return 0
   with patch.object(QMessageBox,'exec_',inspect):self.assertEqual(occupied_choice('占用'), 'close')
+
+ def test_closed_mapping_window_does_not_run_deferred_layout(self):
+  from ui.main_window import MaterialHeaderMappingDialog
+  from PyQt5 import sip
+  dialog=MaterialHeaderMappingDialog('missing.xlsx',['物料名称'],[],required=['物料名称'])
+  try:
+   dialog.show();self.app.processEvents();dialog.schedule_mapping_fit();dialog.close()
+   self.assertFalse(dialog._mapping_fit_timer.isActive())
+   with patch.object(dialog,'fit_mapping_columns') as fit:dialog.run_mapping_fit();fit.assert_not_called()
+   sip.delete(dialog.combos['物料名称']);dialog.fit_mapping_columns()
+  finally:dialog.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)

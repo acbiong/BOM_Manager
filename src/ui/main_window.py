@@ -133,7 +133,7 @@ class MaterialHeaderMappingDialog(QDialog):
   for column,header in enumerate(headers):
    if not header.strip():self.preview.setColumnHidden(column,True)
   layout.addWidget(self.preview,1); fit_columns(self.preview)
-  self._mapping_fit_timer=QTimer(self); self._mapping_fit_timer.setSingleShot(True); self._mapping_fit_timer.timeout.connect(self.fit_mapping_columns)
+  self._mapping_fit_timer=QTimer(self); self._mapping_fit_timer.setSingleShot(True); self._mapping_fit_timer.timeout.connect(self.run_mapping_fit)
   self.mapping_table.viewport().installEventFilter(self); self.mapping_table.installEventFilter(self)
   self.fit_mapping_columns()
   self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -179,6 +179,13 @@ class MaterialHeaderMappingDialog(QDialog):
   for name in reversed(group):
    column=self.required.index(name); self.mapping_table.removeColumn(column); self.required.remove(name); self.combos.pop(name)
   self.alternate_groups.remove(group); self.schedule_mapping_fit()
+ def run_mapping_fit(self):
+  from PyQt5 import sip
+  if sip.isdeleted(self) or not self.isVisible():return
+  self.fit_mapping_columns()
+ def hideEvent(self,event):
+  if hasattr(self,'_mapping_fit_timer'):self._mapping_fit_timer.stop()
+  super().hideEvent(event)
  def schedule_mapping_fit(self,*args):
   if hasattr(self,'_mapping_fit_timer'):self._mapping_fit_timer.start(0)
  def eventFilter(self,obj,event):
@@ -187,6 +194,13 @@ class MaterialHeaderMappingDialog(QDialog):
  def showEvent(self,event):
   super().showEvent(event); self.schedule_mapping_fit()
  def fit_mapping_columns(self):
+  from PyQt5 import sip
+  if sip.isdeleted(self.mapping_table) or any(sip.isdeleted(combo) for combo in self.combos.values()):return
+  try:self._fit_mapping_columns()
+  except RuntimeError:
+   if sip.isdeleted(self.mapping_table) or any(sip.isdeleted(combo) for combo in self.combos.values()):return
+   raise
+ def _fit_mapping_columns(self):
   table=self.mapping_table; table.ensurePolished(); widths=[]; heights=[]
   for need in self.required:
    combo=self.combos[need]; combo.ensurePolished(); metrics=combo.fontMetrics()
