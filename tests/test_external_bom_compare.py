@@ -146,5 +146,5 @@ class ExternalBomTests(unittest.TestCase):
    try:
     table=main.table;QTest.mouseClick(table.viewport(),Qt.LeftButton,pos=table.visualItemRect(table.item(1,2)).center())
     self.assertEqual({index.row() for index in table.selectedIndexes()},{1})
-    self.assertEqual({index.column() for index in table.selectedIndexes()},set(range(6)))
+    self.assertEqual({index.column() for index in table.selectedIndexes()},{column for column in range(table.columnCount()) if not table.isColumnHidden(column)})
    finally:main.close();db.close()

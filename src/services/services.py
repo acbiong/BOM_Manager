@@ -91,6 +91,13 @@ class Services:
    if not row['scope_id']:self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,row['material_id']))
    self.for_sku(sid).log('sku',sid,'change_description','变更描述：'+(row['change_description'] or '（空）')+' → '+(text or '（空）'))
   self.publish({'type':'sku_changed','id':sid})
+ def set_sku_locked(self,sid,locked):
+  row=self.db.conn.execute('SELECT id FROM skus WHERE id=?',(sid,)).fetchone()
+  if row is None:raise ValueError('SKU不存在')
+  with self.db.transaction():
+   self.db.conn.execute('UPDATE skus SET locked=? WHERE id=?',(int(bool(locked)),sid))
+   self.for_sku(sid).log('sku',sid,'lock' if locked else 'unlock','锁定SKU' if locked else '取消锁定SKU')
+  self.publish({'type':'sku_lock_changed','id':sid})
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；SKU、有效BOM主料或替代料引用均为非呆滞。
   q=f'%{query}%'; rows=self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id WHERE u.parent_id=m.id AND u.role="main") THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
@@ -121,8 +128,9 @@ class Services:
   if d.get('unit') not in self.UNITS:raise ValueError('单位不合规，允许：'+ '、'.join(self.UNITS))
   before=self.material_snapshot(i)
   if not before:raise ValueError('物料不存在')
-  with self.db.transaction(): self.db.conn.execute('UPDATE materials SET name=?,description=?,unit=?,grade=?,manufacturer=?,mpn=?,mp_flag=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(d['name'],d.get('description',''),d['unit'],d.get('grade',before.get('grade','')),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'),i)); self.log('material',i,'update','修改物料；'+(self.material_detail(before,self.material_snapshot(i)) or '物料属性未发生变化'))
-  self.db.conn.execute('UPDATE skus SET updated_at=CURRENT_TIMESTAMP WHERE material_id=?',(i,));self.db.conn.commit()
+  with self.db.transaction():
+   self.db.conn.execute('UPDATE materials SET name=?,description=?,unit=?,grade=?,manufacturer=?,mpn=?,mp_flag=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(d['name'],d.get('description',''),d['unit'],d.get('grade',before.get('grade','')),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'),i)); self.log('material',i,'update','修改物料；'+(self.material_detail(before,self.material_snapshot(i)) or '物料属性未发生变化'))
+   self.db.conn.execute('UPDATE skus SET updated_at=CURRENT_TIMESTAMP WHERE material_id=?',(i,))
   from infrastructure.events import WindowRefreshBus
   self.publish({'type':'material_changed','id':i})
  def delete_material(self,i):
@@ -133,7 +141,7 @@ class Services:
   if self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=?',(i,)).fetchone():raise ValueError('物料仍被BOM作为替代料引用，请先删除引用')
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
- def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,s.change_description,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+ def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,s.change_description,s.locked,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
  def sku_material_quantities(self,skus=None):
   """每个SKU数量为1；仅累计主BOM，Decimal保留路径连乘精度。"""
   from decimal import Decimal
@@ -219,6 +227,8 @@ class Services:
   walk(root,1,None,None,set()); return result
  def save_bom(self,root,items,preview=False,progress=None):
   """把树中的重复子BOM归并为物料关系，在单个事务中保存。"""
+  from services.sku_lock import assert_sku_unlocked
+  if not preview and getattr(self,'sku_id',None) and not getattr(getattr(self.db,'original',self.db),'_transaction_depth',0):assert_sku_unlocked(self,self.sku_id)
   from services.snapshot_bom import revision_conflicts,ParentRevisionRequired,enabled,record_definitions
   violations=[] if preview or getattr(self,'_catalog_sync',False) else revision_conflicts(self,root,items)
   if violations:raise ParentRevisionRequired(violations)

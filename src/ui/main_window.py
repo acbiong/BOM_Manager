@@ -63,7 +63,7 @@ class CreateMaterialDialog(MaterialDialog):
   try:
    self.service.create_material(self.data())
   except Exception as error:
-   QMessageBox.warning(self,'校验失败',str(error));return
+   show_operation_error(self,'校验失败',error);return
   finally:self._saving=False
   self._saved=True;super().accept()
 
@@ -237,7 +237,7 @@ class MaterialHeaderMappingDialog(QDialog):
   if self.mapping_config:
    try:self.mapping_config.save_import_mapping(self.mapping_kind,values)
    except (OSError,ValueError) as error:
-    QMessageBox.warning(self,'映射保存失败',str(error));return
+    show_operation_error(self,'映射保存失败',error);return
   self.accept()
 class MaterialConflictDialog(QDialog):
  def __init__(self,incoming,existing,parent=None):
@@ -332,13 +332,14 @@ class NewSkuDialog(QDialog):
   if not matches or not matches[0].isEnabled():QMessageBox.warning(self,'无法新建SKU','请选择可用的物料，不能使用任意输入文字或已有BOM结构的物料。'); return
   self.material_id=matches[0].data(Qt.UserRole); super().accept()
 
+from ui.sku_lock import lock_icon,show_operation_error
 from ui.project_management import ProjectManagement
 
 class MainWindow(ProjectManagement,QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build(); WindowRefreshBus.subscribe(self.on_data_change)
  def on_data_change(self,event):
-  if event.get('type') in ('bom_changed','material_changed','sku_changed'):self.refresh()
+  if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed'):self.refresh()
  def closeEvent(self,event):
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
   if self._materials is not None and getattr(self._materials,'_create_material_dialog',None):self._materials._create_material_dialog.reject()
@@ -346,7 +347,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
-  self.table=QTableWidget(); self.table.setColumnCount(7); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID']); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
+  self.table=QTableWidget(); self.table.setColumnCount(8); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID','锁定']); self.table.horizontalHeader().moveSection(7,1); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self._sku_sort=None;self._sku_filters={}
   self._description_hover=VersionDescriptionHover(self.table)
   filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
@@ -408,6 +409,9 @@ class MainWindow(ProjectManagement,QMainWindow):
   rows=self.svc.skus(); self.table.setRowCount(len(rows));
   for i,r in enumerate(rows):
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(sku_timestamp(r['updated_at']))); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
+   lock=QTableWidgetItem();lock.setData(Qt.UserRole,bool(r['locked']));lock.setTextAlignment(Qt.AlignCenter);lock.setToolTip('已锁定，只能浏览BOM' if r['locked'] else '未锁定')
+   if r['locked']:lock.setIcon(lock_icon())
+   self.table.setItem(i,7,lock)
    self.table.item(i,4).setData(DESCRIPTION_ROLE,r['change_description'])
    version_font=self.table.item(i,4).font();version_font.setBold(bool((r['change_description'] or '').strip()));self.table.item(i,4).setFont(version_font)
    self.table.item(i,1).setData(Qt.UserRole,r['material_id'])
@@ -458,14 +462,14 @@ class MainWindow(ProjectManagement,QMainWindow):
   if window and window.dirty:QMessageBox.information(self,'请先保存','当前历史版本有未保存编辑，请先保存再复制BOM。');return
   try:
    new_id=self.svc.copy_sku_bom(sid);self.open_bom_id(new_id)
-  except Exception as error:QMessageBox.warning(self,'复制BOM失败',str(error))
+  except Exception as error:show_operation_error(self,'复制BOM失败',error)
  def change_mirror_version(self,sid):
   row=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(sid,)).fetchone()
   if row is None:return
   value,ok=QInputDialog.getInt(self,'历史版本变更','新历史版本号',row[0],1,2147483647)
   if ok:
    try:self.svc.change_mirror_version(sid,value)
-   except Exception as error:QMessageBox.warning(self,'历史版本变更失败',str(error))
+   except Exception as error:show_operation_error(self,'历史版本变更失败',error)
  def select_database(self):
   current=Path(self.svc.db.path).expanduser() if self.svc.db is not None else self.svc.config_service.base
   # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
@@ -508,7 +512,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if p:
     cfg['database']['last_import_dir']=str(Path(p).parent); config_service.save(cfg)
     try:sheet_name=choose_material_sheet(p,owner)
-    except Exception as error:QMessageBox.warning(owner,'导入失败',str(error)); return
+    except Exception as error:show_operation_error(owner,'导入失败',error); return
     def resolver(d,old):
      dialog=MaterialConflictDialog(d,old,owner); dialog.exec_(); return dialog.choice
     progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,owner); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
@@ -528,7 +532,7 @@ class MainWindow(ProjectManagement,QMainWindow):
      if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
      MaterialImportResultDialog(ok,fail,owner).exec_()
     except Exception as e:
-     progress.close(); QMessageBox.warning(owner,'导入失败',str(e))
+     progress.close(); show_operation_error(owner,'导入失败',e)
  def new_material(self):
   owner=self._materials if self._materials is not None and self._materials.isVisible() else self
   return show_create_material(owner)
@@ -537,7 +541,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if dialog.exec_()==QDialog.Accepted:
    try:
     sid=self.svc.create_sku(dialog.material_id,require_empty_bom=True); self.refresh(); self.open_bom_id(sid)
-   except Exception as error:QMessageBox.warning(self,'新建SKU失败',str(error))
+   except Exception as error:show_operation_error(self,'新建SKU失败',error)
  def change_sku_version(self,sid=None):
   r=self.table.currentRow() if sid is None else -1
   if sid is None and r<0:return
@@ -545,7 +549,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   v,ok=QInputDialog.getText(self,'SKU版本变更','新版本号')
   if ok:
    try:self.svc.change_sku_version(sid,v.strip()); self.refresh()
-   except Exception as e: QMessageBox.warning(self,'版本变更失败',str(e))
+   except Exception as e: show_operation_error(self,'版本变更失败',e)
  def delete_sku(self,sid=None):
   r=self.table.currentRow() if sid is None else -1
   if sid is None:
@@ -557,7 +561,8 @@ class MainWindow(ProjectManagement,QMainWindow):
   if QMessageBox.question(self,'确认',prompt)==QMessageBox.Yes:
    window=self._bom_windows.get(sid)
    if window and not window.close():return
-   self.svc.delete_sku(sid);self.refresh()
+   try:self.svc.delete_sku(sid);self.refresh()
+   except Exception as error:show_operation_error(self,'删除SKU失败',error)
  def focus_sku_description(self,sid,scroll):
   row=next((r for r in range(self.table.rowCount()) if self.table.item(r,6).text()==str(sid)),None)
   if row is None or self.table.isRowHidden(row):return
@@ -576,7 +581,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   try:
    if dialog.exec_()==QDialog.Accepted:
     try:self.svc.update_sku_change_description(sid,dialog.description())
-    except Exception as error:QMessageBox.warning(self,'保存失败',str(error))
+    except Exception as error:show_operation_error(self,'保存失败',error)
   finally:
    self._description_target=None
    self.focus_sku_description(sid,scroll)
@@ -587,17 +592,29 @@ class MainWindow(ProjectManagement,QMainWindow):
    database=self.svc.db
    timer.timeout.connect(lambda:self.focus_sku_description(sid,scroll) if self.isVisible() and self.svc.db is database else None)
    timer.start(0)
+ def toggle_sku_lock(self,sid):
+  row=self.svc.db.conn.execute('SELECT material_id,locked FROM skus WHERE id=?',(sid,)).fetchone()
+  if row is None:return
+  window=self._bom_windows.get(sid) or self._material_bom_windows.get(row['material_id'])
+  if not row['locked'] and window and window.dirty:
+   QMessageBox.warning(self,'请先处理未保存内容','请先保存或放弃此BOM的未保存修改，再锁定SKU。');return
+  try:self.svc.set_sku_locked(sid,not row['locked'])
+  except Exception as error:show_operation_error(self,'锁定操作失败',error)
  def sku_context_menu(self,pos):
   row=self.table.rowAt(pos.y())
   if row<0:return
   self.table.selectRow(row); sid=int(self.table.item(row,6).text())
   menu=QMenu(self)
   description=menu.addAction('编辑变更描述');version=menu.addAction('SKU版本变更');mirror=menu.addAction('历史版本变更')
+  locked=bool(self.svc.db.conn.execute('SELECT locked FROM skus WHERE id=?',(sid,)).fetchone()[0])
+  for edit in (description,version,mirror):edit.setEnabled(not locked)
+  menu.addSeparator();lock=menu.addAction('取消锁定' if locked else '锁定SKU')
   menu.addSeparator();copy=menu.addAction('复制BOM');compare=menu.addAction('BOM对比')
   menu.addSeparator();export_action=menu.addAction('导出BOM');purchase_action=menu.addAction('采购BOM导出')
-  menu.addSeparator();delete=menu.addAction('删除SKU')
+  menu.addSeparator();delete=menu.addAction('删除SKU');delete.setEnabled(not locked)
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
-  if action==description:self.edit_sku_change_description(sid)
+  if action==lock:self.toggle_sku_lock(sid)
+  elif action==description:self.edit_sku_change_description(sid)
   elif action==copy:self.copy_sku_bom(sid)
   elif action==compare:self.compare_sku_bom(sid)
   elif action==mirror:self.change_mirror_version(sid)
@@ -729,10 +746,19 @@ class BomWindow(QMainWindow):
   self.default_panel_width=self.fontMetrics().horizontalAdvance('M')*100
   screen=self.screen().availableGeometry();self.tree.setMinimumWidth(min(420,max(200,screen.width()//2-40)));self.resize(min(self.default_panel_width*2+50,screen.width()),min(850,screen.height()));spl.setSizes([self.default_panel_width,self.default_panel_width])
   self.search_action=tb.addAction('查找物料');self.search_action.setShortcut('Ctrl+F');self.search_action.setShortcutContext(Qt.WindowShortcut);self.search_action.triggered.connect(self.search_materials)
-  self.load();self.update_mirror_title()
+  self.load();self.update_mirror_title();self.apply_lock_state()
  def search_materials(self):
   if not hasattr(self,'_search_dialog'):self._search_dialog=BomSearchDialog(self)
   self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
+ def is_locked(self):
+  sid=getattr(self.svc,'sku_id',None)
+  row=self.svc.db.conn.execute('SELECT locked FROM skus WHERE id=?',(sid,)).fetchone() if sid else self.svc.db.conn.execute('SELECT MAX(locked) FROM skus WHERE material_id=? AND scope_id=0',(self.root,)).fetchone()
+  return bool(row and row[0])
+ def apply_lock_state(self):
+  locked=self.is_locked();self.save_action.setEnabled(self.dirty and not locked)
+  title=self.windowTitle().removesuffix(' — BOM浏览')
+  self.setWindowTitle(title+(' — BOM浏览' if locked else ''))
+  if self.current_item:self.show_item_info(self.current_item)
  def mirror_suffix(self):
   if getattr(self.svc,'sku_id',None):
    row=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(self.svc.sku_id,)).fetchone()
@@ -744,15 +770,17 @@ class BomWindow(QMainWindow):
    material=self.svc.material_snapshot(self.root)
    if sku:self.setWindowTitle(f"{material['base_code']}{material['version']} {material['name']} 历史版本{sku[0]}")
  def mark_dirty(self):
+  if self.is_locked():return False
   self.dirty=True
   self.save_action.setEnabled(True)
   self.export_action.setEnabled(False)
   self.refresh_styles()
   WindowRefreshBus.publish({'type':'bom_draft_changed'})
  def on_external_change(self,event):
+  if event.get('type')=='sku_lock_changed':self.apply_lock_state();return
   if self._saving: return
   if event.get('type')=='sku_changed':
-   self.update_mirror_title();return
+   self.update_mirror_title();self.apply_lock_state();return
   if event.get('type')=='bom_changed' and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
    self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
@@ -770,6 +798,11 @@ class BomWindow(QMainWindow):
   if not it:return
   d=it.data(0,Qt.UserRole) or {}
   menu=QMenu(self)
+  if self.is_locked():
+   reverse=menu.addAction('物料反查');copy=menu.addAction('复制物料');chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
+   if chosen==reverse:self.reverse_tree_material(it)
+   elif chosen==copy:copy_material(self.svc,d.get('material_id',self.root))
+   return
   if d.get('_deleted'):
    restore=menu.addAction('取消删除');menu.addSeparator();reverse=menu.addAction('物料反查')
    act=menu.exec_(self.tree.viewport().mapToGlobal(pos))
@@ -814,6 +847,7 @@ class BomWindow(QMainWindow):
    QMessageBox.warning(self,'物料不存在','目标物料已不存在，请刷新BOM后重试。');return
   MaterialUsageDialog(material,service.material_usage(material_id),self).exec_()
  def edit_tree_material(self,item):
+  if self.is_locked():return False
   data=item.data(0,Qt.UserRole) or {}
   if data.get('_deleted'):return
   material_id=data.get('material_id',self.root if item is self.root_item else None)
@@ -824,7 +858,7 @@ class BomWindow(QMainWindow):
   dialog.setWindowTitle('编辑此物料')
   if dialog.exec_()!=QDialog.Accepted:return
   try:self.svc.update_material(material_id,dialog.data())
-  except Exception as error:QMessageBox.warning(self,'保存失败',str(error))
+  except Exception as error:show_operation_error(self,'保存失败',error)
  def replacement_blocked_materials(self,item,child=False):
   # Reverse reachability computes all cyclic candidates in one graph traversal.
   target=item if child else item.parent();blocked={target.child(i).data(0,Qt.UserRole)['material_id'] for i in range(target.childCount())}
@@ -853,6 +887,7 @@ class BomWindow(QMainWindow):
    nodes.append(dict(data=data,children=self.version_subtree_snapshot(child)))
   return nodes
  def update_material_version(self,item):
+  if self.is_locked():return False
   if item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   rows=self.material_versions(item)
   if not rows:return
@@ -901,6 +936,7 @@ class BomWindow(QMainWindow):
    self.clone_version_children(child,node['children']);self._draft_baselines[temp]=self.capture_item(child)
   parent.setExpanded(True)
  def replace_material(self,item):
+  if self.is_locked():return False
   if item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   alternates=self.alternate_ids(item)
   blocked=self.replacement_blocked_materials(item)|set(alternates)
@@ -931,6 +967,7 @@ class BomWindow(QMainWindow):
   return self.replace_with_subtree_choice(item,matches,material)
  @preserve_bom_view
  def replace_nodes(self,item,matches,material,swap_alternate=False,version_children=None):
+  if self.is_locked():return False
   selected=None
   for old in matches:
    original=dict(old.data(0,Qt.UserRole) or {})
@@ -958,6 +995,7 @@ class BomWindow(QMainWindow):
   return 0<=parent.indexOfChild(item)+direction<parent.childCount()
  @preserve_bom_view
  def move_item(self,item,direction):
+  if self.is_locked():return False
   if not self.can_move_item(item,direction):return
   parent=item.parent(); index=parent.indexOfChild(item); expanded=item.isExpanded()
   parent.takeChild(index); parent.insertChild(index+direction,item); item.setExpanded(expanded)
@@ -1013,6 +1051,7 @@ class BomWindow(QMainWindow):
   return ''
  @preserve_bom_view
  def paste_material(self,item,child):
+  if self.is_locked():return False
   material=clipboard_material(self.svc)
   if material is None:return
   reason=self.paste_block_reason(item,child,material['id'])
@@ -1029,6 +1068,7 @@ class BomWindow(QMainWindow):
   return (parent_data.get('material_id'),data.get('material_id'),item.text(3))
  @preserve_bom_view
  def remove_relation(self,item):
+  if self.is_locked():return False
   """将共享关系的所有显示副本标记为待删除，保存前保留可见。"""
   if item is self.root_item:return
   key=self.relation_key(item); relation_id=(item.data(0,Qt.UserRole) or {}).get('id')
@@ -1057,6 +1097,7 @@ class BomWindow(QMainWindow):
   self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
  @preserve_bom_view
  def restore_relation(self,item):
+  if self.is_locked():return False
   data=item.data(0,Qt.UserRole) or {}
   if not data.get('_deleted'):return
   # An inherited deletion restores its owning branch, including shared copies.
@@ -1182,6 +1223,7 @@ class BomWindow(QMainWindow):
    merged.sort(key=lambda node:rank.get(node['data']['material_id'],len(rank)))
   return merged
  def refresh_external(self):
+  if self.is_locked():self.load();self.notice.clear();self.apply_lock_state();return
   from copy import deepcopy
   fresh=self.database_tree(); conflicts=[]
   root=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone())
@@ -1222,6 +1264,7 @@ class BomWindow(QMainWindow):
   self._rendering_tree=True
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
   self.setWindowTitle(f"{root['base_code']}{root['version']} {root['name']}");self.update_mirror_title()
+  if self.is_locked():self.setWindowTitle(self.windowTitle()+' — BOM浏览')
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
   def append(node,parent,path,level):
    data=dict(node['data']); data.setdefault('_edit_base',{k:data.get(k) for k in ('quantity','position','remark')}); parent_data=parent.data(0,Qt.UserRole) or {}
@@ -1296,7 +1339,7 @@ class BomWindow(QMainWindow):
    r=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone(); d=dict(r) if r else d
   self._loading_fields=True
   editable=not ((item.data(0,Qt.UserRole) or {}).get('root') or (item.data(0,Qt.UserRole) or {}).get('_deleted'))
-  for field in ('quantity','position','remark'):self.fields[field].setEnabled(editable)
+  for field in ('quantity','position','remark'):self.fields[field].setEnabled(editable and not self.is_locked())
   for k in self.fields: self.fields[k].setText(str(d.get(k,'') or ''))
   self._loading_fields=False
   self.alt_table.setRowCount(0)
@@ -1310,11 +1353,13 @@ class BomWindow(QMainWindow):
      cell=QTableWidgetItem(str(r[k] or '')); cell.setData(Qt.UserRole,material_id); self.alt_table.setItem(row,j,cell)
   fit_columns(self.alt_table)
  def update_tree_field(self,key,value):
+  if self.is_locked():return False
   if self._loading_fields or self.current_item is None or self.current_item is getattr(self,'root_item',None): return
   if (self.current_item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   value=format_quantity(value) if key=='quantity' else value
   col={'quantity':1,'position':3,'remark':4}[key]; self.current_item.setText(col,value); d=self.current_item.data(0,Qt.UserRole) or {}; d[key]=float(value) if key=='quantity' and value else value; self.current_item.setData(0,Qt.UserRole,d); self.mark_dirty()
  def add_relative(self,parent,child):
+  if self.is_locked():return False
   target=self.by.get(parent.get('node_id'),self.root_item) if child else (self.by.get(parent.get('parent_node_id'),self.root_item) or self.root_item)
   blocked=self.replacement_blocked_materials(target,True)
   rows=[r for r in self.svc.materials() if r['id'] not in blocked]; items=[f"{r['base_code']}{r['version']} {r['name']}" for r in rows]
@@ -1325,6 +1370,7 @@ class BomWindow(QMainWindow):
   self.insert_material(target,rows[items.index(x)],after=selected)
  @preserve_bom_view
  def insert_material(self,target,r,after=None):
+  if self.is_locked():return False
   from services.current_catalog import enabled as catalog_enabled,selection_tree
   current_catalog=catalog_enabled(self.svc)
   r=self.svc.material_snapshot(r['id'])
@@ -1360,6 +1406,7 @@ class BomWindow(QMainWindow):
   if key in self._alternate_edits:return list(self._alternate_edits[key])
   return [row['material_id'] for row in self.svc.alternates(key)] if isinstance(key,int) and key>0 else []
  def add_alternate(self):
+  if self.is_locked():return False
   item=self.tree.currentItem()
   if item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   existing=self.alternate_ids(item); data=item.data(0,Qt.UserRole) or {}
@@ -1371,6 +1418,7 @@ class BomWindow(QMainWindow):
   self._alternate_edits[self.alternate_key(item)]=existing+[rows[choices.index(choice)]['id']]
   self.mark_dirty(); self.show_item_info(item)
  def alternate_menu(self,pos):
+  if self.is_locked():return False
   row=self.alt_table.rowAt(pos.y()); item=self.current_item
   if row<0 or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   material_id=self.alt_table.item(row,0).data(Qt.UserRole)
@@ -1386,6 +1434,7 @@ class BomWindow(QMainWindow):
   self._alternate_edits[self.alternate_key(item)]=[mid for mid in self.alternate_ids(item) if mid!=material_id]
   self.mark_dirty(); self.show_item_info(item)
  def promote_alternate(self,item,material_id):
+  if self.is_locked():return False
   if item is None or item is self.root_item or material_id not in self.alternate_ids(item):return
   key=self.relation_key(item)
   matches=[node for _,node in self.expansion_nodes() if node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted') and self.relation_key(node)==key]
@@ -1397,6 +1446,7 @@ class BomWindow(QMainWindow):
   if material is None:return
   return self.replace_nodes(item,matches,material,swap_alternate=True)
  def import_bom(self,selected_item=None):
+  if self.is_locked():return False
   if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将替换当前编辑缓存，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
   config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
   p=QFileDialog.getOpenFileName(self,'导入BOM',bom_import_directory(config_service),'Excel (*.xlsx)')[0]
@@ -1417,8 +1467,9 @@ class BomWindow(QMainWindow):
    self.stage_import(nodes) if target_root==self.root else self.stage_import_subtree(selected_item,nodes)
    QMessageBox.information(self,'导入完成','BOM已导入编辑缓存，请检查后点击“保存”写入数据库。')
   except BomImportError as error:BomImportIssuesDialog(error,self).exec_()
-  except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
+  except Exception as error:show_operation_error(self,'导入失败',error)
  def stage_import(self,nodes):
+  if self.is_locked():return False
   from copy import deepcopy
   baseline=self.database_tree()
   self._deleted_relations.clear(); self._alternate_edits.clear(); self._draft_baselines.clear(); self._external_paths.clear()
@@ -1459,6 +1510,7 @@ class BomWindow(QMainWindow):
  def add(self):
   self.add_relative({'id':None,'parent_item_id':None,'level_no':0},False)
  def stage_import_subtree(self,item,nodes):
+  if self.is_locked():return False
   from copy import deepcopy
   while item.childCount():item.takeChild(0)
   data=item.data(0,Qt.UserRole) or {}
@@ -1469,6 +1521,7 @@ class BomWindow(QMainWindow):
   for node in nodes:append(node,item,data.get('node_id',''),(data.get('level_no') or 0)+1)
   item.setExpanded(True);self.mark_dirty();self.tree.setCurrentItem(item);self.show_item_info(item)
  def save(self):
+  if self.is_locked():return False
   if self._saving:return False
   progress=QProgressDialog('正在整理BOM…',None,0,100,self)
   progress.setWindowTitle('保存BOM');progress.setWindowModality(Qt.ApplicationModal);progress.setMinimumDuration(0);progress.setAutoClose(False);progress.show()
@@ -1519,7 +1572,7 @@ class BomWindow(QMainWindow):
    report(100,'BOM保存完成')
   except Exception as error:
    self.mark_dirty()
-   QMessageBox.warning(self,'保存失败',f'BOM未保存，编辑内容已保留。\n{error}')
+   show_operation_error(self,'保存失败',error,'BOM未保存，编辑内容已保留。\n')
    return False
   finally:
    self._saving=False
@@ -1569,7 +1622,7 @@ class MaterialWindow(QMainWindow):
   if dialog.exec_()==QDialog.Accepted:
    selected={choices.item(i).data(Qt.UserRole) for i in range(choices.count()) if choices.item(i).checkState()==Qt.Checked}
    try:self._column_config.save_sku_columns(self.svc.db.path,selected)
-   except (OSError,ValueError) as error:QMessageBox.warning(self,'保存失败',str(error));return
+   except (OSError,ValueError) as error:show_operation_error(self,'保存失败',error);return
    self._selected_skus=selected;self.refresh()
  def search_materials(self):
   if not hasattr(self,'_search_dialog'):self._search_dialog=MaterialSearchDialog(self)
@@ -1614,7 +1667,7 @@ class MaterialWindow(QMainWindow):
   r=rs[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
   if dlg.exec_():
    try:self.svc.update_material(r['id'],dlg.data()); self.refresh()
-   except Exception as e: QMessageBox.warning(self,'保存失败',str(e))
+   except Exception as e: show_operation_error(self,'保存失败',e)
  def menu(self,pos):
   row=self.t.rowAt(pos.y())
   if row<0:return
@@ -1638,10 +1691,12 @@ class MaterialWindow(QMainWindow):
    self.change_version(rid)
   elif a==e:
    r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
-   if dlg.exec_(): self.svc.update_material(rid,dlg.data()); self.refresh()
+   if dlg.exec_():
+    try:self.svc.update_material(rid,dlg.data()); self.refresh()
+    except Exception as error:show_operation_error(self,'保存失败',error)
   elif a==d and d.isEnabled() and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
    try:self.svc.delete_material(rid); self.refresh()
-   except Exception as ex: QMessageBox.warning(self,'无法删除',str(ex))
+   except Exception as ex: show_operation_error(self,'无法删除',ex)
  def open_material_bom(self,material_id):
   main=self.parent()
   while main is not None and not isinstance(main,MainWindow): main=main.parent()
@@ -1670,7 +1725,7 @@ class MaterialWindow(QMainWindow):
    self.svc.change_material_version(material_id,version,selected,{r['parent_id'] for r in references})
    self.refresh()
    if self.parent() is not None and hasattr(self.parent(),'refresh'): self.parent().refresh()
-  except Exception as error: QMessageBox.warning(self,'版本变更失败',str(error))
+  except Exception as error: show_operation_error(self,'版本变更失败',error)
  def new_material(self):
   return show_create_material(self)
  def import_materials(self):
@@ -1685,7 +1740,7 @@ class MaterialWindow(QMainWindow):
      if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消表头映射，未导入任何物料')
      ok,fail=self.svc.import_materials(p,header_mapping=dialog.mapping(),sheet_name=sheet_name)
     self.refresh(); MaterialImportResultDialog(ok,fail,self).exec_()
-   except Exception as error:QMessageBox.warning(self,'导入失败',str(error))
+   except Exception as error:show_operation_error(self,'导入失败',error)
  def export_materials(self):
   p=QFileDialog.getSaveFileName(self,'导出物料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 物料库').strip())),'Excel (*.xlsx)')[0]
   if p:remember_export_path(p); self.svc.export_materials(p)

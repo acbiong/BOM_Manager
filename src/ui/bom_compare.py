@@ -182,7 +182,9 @@ class BomCompareDialog(QDialog):
         dialog.setWindowTitle('编辑此物料')
         if dialog.exec_()!=QDialog.Accepted:return
         try:self.service.update_material(material_id,dialog.data())
-        except Exception as error:QMessageBox.warning(self,'保存失败',str(error));return
+        except Exception as error:
+            from ui.sku_lock import show_operation_error
+            show_operation_error(self,'保存失败',error);return
         self.live_timer.start(0)
     def open_editor(self,side,row):
         main=self.parent()

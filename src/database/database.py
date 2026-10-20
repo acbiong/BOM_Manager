@@ -46,6 +46,7 @@ class Database:
    self.conn.execute('INSERT INTO skus(id,material_id,updated_at) SELECT id,material_id,updated_at FROM skus_legacy')
    self.conn.execute('DROP TABLE skus_legacy')
   if 'change_description' not in {r[1] for r in self.conn.execute('PRAGMA table_info(skus)')}:self.conn.execute("ALTER TABLE skus ADD COLUMN change_description TEXT NOT NULL DEFAULT ''")
+  if 'locked' not in {r[1] for r in self.conn.execute('PRAGMA table_info(skus)')}:self.conn.execute('ALTER TABLE skus ADD COLUMN locked INTEGER NOT NULL DEFAULT 0 CHECK(locked IN (0,1))')
   self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_material_usage(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,parent_id INTEGER NOT NULL,role TEXT NOT NULL,PRIMARY KEY(sku_id,material_id,parent_id,role))')
   self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_captured_materials(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,PRIMARY KEY(sku_id,material_id))')
   self.conn.execute('CREATE INDEX IF NOT EXISTS mirror_usage_material ON mirror_material_usage(material_id)')
@@ -69,7 +70,10 @@ class Database:
   if depth:self.conn.execute('SAVEPOINT '+name)
   elif not self.conn.in_transaction:self.conn.execute('BEGIN')
   try:
+   from services.sku_lock import locked_snapshots,check_locked_changes
+   locked_before=locked_snapshots(self.conn) if not depth else {}
    yield self.conn
+   if not depth:check_locked_changes(self.conn,locked_before)
    if depth:self.conn.execute('RELEASE SAVEPOINT '+name)
    else:self.conn.commit()
   except:
