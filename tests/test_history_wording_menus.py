@@ -55,7 +55,7 @@ class HistoryWordingMenuTests(unittest.TestCase):
    def choose(menu,pos):
     groups=self.menu_groups(menu);labels=[a.text() for a in menu.actions() if not a.isSeparator()]
     self.assertIn('物料反查',labels);self.assertNotIn('删除物料',labels)
-    if deleted:self.assertEqual(groups,[['取消删除'],['物料反查']])
+    if deleted:self.assertEqual(groups,[['取消删除'],['复制物料'],['物料反查']])
     else:self.assertIn('新增子级物料',labels)
     return next(a for a in menu.actions() if a.text()=='物料反查')
    with patch.object(self.window.tree,'itemAt',return_value=node),patch.object(QMenu,'exec_',choose),patch.object(MaterialUsageDialog,'exec_',return_value=QDialog.Rejected) as dialog:self.window.context_menu(QPoint());dialog.assert_called_once()

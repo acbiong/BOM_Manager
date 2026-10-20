@@ -13,7 +13,7 @@ from database.database import Database
 from infrastructure.events import WindowRefreshBus
 from services.services import MaterialHeaderError, BomImportError, MATERIAL_IMPORT_HEADERS, MATERIAL_IMPORT_DEFAULTS
 from ui.theme import apply_theme, theme_icon
-from ui.material_clipboard import copy_material, clipboard_material
+from ui.material_clipboard import copy_material, clipboard_material, clipboard_relation
 from ui.material_search import MaterialSearchDialog, BomSearchDialog
 from ui.table_layout import fit_columns
 from ui.about_dialog import AboutDialog
@@ -332,7 +332,7 @@ class NewSkuDialog(QDialog):
   if not matches or not matches[0].isEnabled():QMessageBox.warning(self,'无法新建SKU','请选择可用的物料，不能使用任意输入文字或已有BOM结构的物料。'); return
   self.material_id=matches[0].data(Qt.UserRole); super().accept()
 
-from ui.sku_lock import lock_icon,show_operation_error
+from ui.sku_lock import lock_icon,show_operation_error,CenteredLockDelegate
 from ui.project_management import ProjectManagement
 
 class MainWindow(ProjectManagement,QMainWindow):
@@ -348,6 +348,7 @@ class MainWindow(ProjectManagement,QMainWindow):
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
   self.table=QTableWidget(); self.table.setColumnCount(8); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID','锁定']); self.table.horizontalHeader().moveSection(7,1); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
+  self.table._fixed_column_widths={7:max(44,self.table.horizontalHeader().minimumSectionSize(),self.table.fontMetrics().horizontalAdvance('锁定')+20)};self.table.setItemDelegateForColumn(7,CenteredLockDelegate(self.table))
   self._sku_sort=None;self._sku_filters={}
   self._description_hover=VersionDescriptionHover(self.table)
   filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
@@ -724,6 +725,7 @@ class BomWindow(QMainWindow):
  def __init__(self,svc,root,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
   self.tree=BomTreeWidget(); self.tree.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
+  self.delete_action=QAction('删除物料',self.tree);self.delete_action.setShortcut('Delete');self.delete_action.setShortcutContext(Qt.WidgetWithChildrenShortcut);self.delete_action.setAutoRepeat(False);self.delete_action.triggered.connect(lambda:self.confirm_delete(self.tree.currentItem()));self.tree.addAction(self.delete_action)
   import hashlib
   database_path=str(Path(self.svc.db.path).resolve())
   self._expansion_settings=QSettings('Biong','BOMManager')
@@ -804,9 +806,10 @@ class BomWindow(QMainWindow):
    elif chosen==copy:copy_material(self.svc,d.get('material_id',self.root))
    return
   if d.get('_deleted'):
-   restore=menu.addAction('取消删除');menu.addSeparator();reverse=menu.addAction('物料反查')
+   restore=menu.addAction('取消删除');menu.addSeparator();copy=menu.addAction('复制物料');menu.addSeparator();reverse=menu.addAction('物料反查')
    act=menu.exec_(self.tree.viewport().mapToGlobal(pos))
    if act==restore:self.restore_relation(it)
+   elif act==copy:copy_material(self.svc,d['material_id'])
    elif act==reverse:self.reverse_tree_material(it)
    return
   root=it is self.root_item
@@ -838,7 +841,10 @@ class BomWindow(QMainWindow):
   if act==alternate:
    self.tree.setCurrentItem(it);self.show_item_info(it);self.add_alternate();return
   if act in (same,child):self.add_relative(d,act==child);return
-  if act==dele and QMessageBox.question(self,'确认','删除当前BOM物料？')==QMessageBox.Yes:self.remove_relation(it)
+  if act==dele:self.confirm_delete(it)
+ def confirm_delete(self,item):
+  if self.is_locked() or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
+  if QMessageBox.question(self,'确认删除','是否删除选定的物料及其子物料？\n'+item.text(0),QMessageBox.Yes|QMessageBox.No,QMessageBox.Yes)==QMessageBox.Yes:self.remove_relation(item)
  def reverse_tree_material(self,item):
   material_id=(item.data(0,Qt.UserRole) or {}).get('material_id',self.root if item is self.root_item else None)
   service=getattr(self.svc,'primary',self.svc)
@@ -1014,6 +1020,7 @@ class BomWindow(QMainWindow):
   self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item); self.tree.scrollToItem(item); self.remember_expansion()
  def clipboard_actions(self,menu,item):
   actions={'copy':menu.addAction('复制物料')}
+  if item is not self.root_item and not self.is_locked() and not (item.data(0,Qt.UserRole) or {}).get('_deleted'):actions['cut']=menu.addAction('剪切物料')
   material=clipboard_material(self.svc)
   if material:
    for key,label,child in [('same','粘贴为同级物料',False),('child','粘贴为子级物料',True)]:
@@ -1024,16 +1031,25 @@ class BomWindow(QMainWindow):
   if action is None:return False
   if action==actions['copy']:
    copy_material(self.svc,(item.data(0,Qt.UserRole) or {})['material_id']); return True
+  if 'cut' in actions and action==actions['cut']:
+   self.cut_material(item);return True
   for key,child in [('same',False),('child',True)]:
    if key in actions and action==actions[key]:
     if actions[key].isEnabled():self.paste_material(item,child)
     return True
   return False
+ def cut_material(self,item):
+  if self.is_locked() or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return False
+  data=item.data(0,Qt.UserRole) or {}
+  relation=dict(quantity=float(item.text(1)),position=item.text(3),remark=data.get('remark',''),alternate_material_ids=self.alternate_ids(item))
+  if copy_material(self.svc,data['material_id'],relation):
+   self.remove_relation(item);return True
+  return False
  def paste_block_reason(self,item,child,material_id):
   target=item if child else item.parent()
   if target is None:return 'SKU根节点不能增加同级物料'
   if (item.data(0,Qt.UserRole) or {}).get('_deleted'):return '待删除物料不能粘贴'
-  if any((target.child(i).data(0,Qt.UserRole) or {}).get('material_id')==material_id for i in range(target.childCount())):return '目标父级下已存在相同物料'
+  if any(not (target.child(i).data(0,Qt.UserRole) or {}).get('_deleted') and (target.child(i).data(0,Qt.UserRole) or {}).get('material_id')==material_id for i in range(target.childCount())):return '目标父级下已存在相同物料'
   # 合并数据库和当前编辑树的关系，检查跨分支、未保存关系导致的循环。
   graph={}
   for row in self.svc.bom_graph_edges():
@@ -1058,6 +1074,12 @@ class BomWindow(QMainWindow):
   if reason:return
   target=item if child else item.parent()
   added=self.insert_material(target,material)
+  relation=clipboard_relation(self.svc)
+  if relation is not None:
+   data=dict(added.data(0,Qt.UserRole) or {})
+   for field,column in [('quantity',1),('position',3),('remark',4)]:
+    data[field]=relation[field];added.setText(column,format_quantity(relation[field]) if field=='quantity' else relation[field])
+   added.setData(0,Qt.UserRole,data);self._alternate_edits[self.alternate_key(added)]=relation['alternate_material_ids'];self._draft_baselines[data['id']]=self.capture_item(added);self.mark_dirty()
   if not child:
    target.takeChild(target.indexOfChild(added)); target.insertChild(target.indexOfChild(item)+1,added)
   self.tree.setCurrentItem(added); self.show_item_info(added); self.tree.scrollToItem(added)
@@ -1104,6 +1126,12 @@ class BomWindow(QMainWindow):
   stack=data.get('_delete_stack',[])
   if not stack:return
   token=stack[-1]
+  for _,node in self.expansion_nodes():
+   current=node.data(0,Qt.UserRole) or {}
+   if current.get('_delete_stack')!=[token] or node.parent() is None:continue
+   parent=node.parent()
+   if any(other is not node and not (other.data(0,Qt.UserRole) or {}).get('_deleted') and (other.data(0,Qt.UserRole) or {}).get('material_id')==current.get('material_id') for other in (parent.child(i) for i in range(parent.childCount()))):
+    QMessageBox.warning(self,'无法取消删除','父级下已存在相同物料，请先删除重复物料。');return False
   for _,node in self.expansion_nodes():
    current=dict(node.data(0,Qt.UserRole) or {})
    deletions=current.get('_delete_stack',[])

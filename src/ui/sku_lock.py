@@ -1,6 +1,6 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon,QPixmap,QPainter,QPen,QColor
-from PyQt5.QtWidgets import QDialog,QVBoxLayout,QLabel,QTableWidget,QTableWidgetItem,QDialogButtonBox,QMessageBox,QAbstractItemView
+from PyQt5.QtWidgets import QDialog,QVBoxLayout,QLabel,QTableWidget,QTableWidgetItem,QDialogButtonBox,QMessageBox,QAbstractItemView,QStyledItemDelegate
 from services.sku_lock import LockedBomError
 
 def lock_icon():
@@ -21,3 +21,16 @@ def show_operation_error(parent,title,error,prefix=''):
  buttons=QDialogButtonBox(QDialogButtonBox.Ok);buttons.accepted.connect(dialog.accept);layout.addWidget(buttons)
  try:dialog.exec_()
  finally:dialog.deleteLater()
+
+
+class CenteredLockDelegate(QStyledItemDelegate):
+ def paint(self,painter,option,index):
+  from PyQt5.QtWidgets import QStyleOptionViewItem,QStyle,QApplication
+  opt=QStyleOptionViewItem(option);self.initStyleOption(opt,index)
+  icon=QIcon(opt.icon);opt.icon=QIcon();opt.text=''
+  style=opt.widget.style() if opt.widget else QApplication.style()
+  style.drawControl(QStyle.CE_ItemViewItem,opt,painter,opt.widget)
+  if not icon.isNull():
+   size=option.decorationSize
+   rect=QStyle.alignedRect(option.direction,Qt.AlignCenter,size,option.rect)
+   icon.paint(painter,rect,Qt.AlignCenter,QIcon.Normal if option.state & QStyle.State_Enabled else QIcon.Disabled)

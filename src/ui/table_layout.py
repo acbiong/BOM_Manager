@@ -54,6 +54,11 @@ def fit_columns(widget):
     for i in range(header.count()):
         if header.isSectionHidden(i):
             continue
+        if i in getattr(widget, "_fixed_column_widths", {}):
+            widths[i] = widget._fixed_column_widths[i]
+            header.setSectionResizeMode(i, QHeaderView.Fixed)
+            header.resizeSection(i, widths[i])
+            continue
         header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
         widths[i] = max(5 * char_width, min(25 * char_width, header.sectionSize(i)))
         header.setSectionResizeMode(i, QHeaderView.Interactive)

@@ -139,3 +139,19 @@ class SkuLockTests(unittest.TestCase):
    with self.assertRaises(LockedBomError):service.save_bom(root,[dict(material_id=child,quantity=8,unit='pcs')])
    self.assertEqual(service.bom(root)[0]['quantity'],1)
   finally:db.close()
+
+ def test_lock_column_fixed_after_resize_refresh_and_centered_icon(self):
+  from PyQt5.QtWidgets import QHeaderView,QStyleOptionViewItem,QStyle
+  from PyQt5.QtGui import QPixmap,QPainter,QPalette
+  from PyQt5.QtCore import QRect,QSize
+  from ui.table_layout import fit_columns
+  self.s.set_sku_locked(self.sid,True);self.main=MainWindow(self.s)
+  table=self.main.table;header=table.horizontalHeader();width=table._fixed_column_widths[7]
+  self.main.show();self.main.resize(1800,900);self.app.processEvents();self.main.refresh();fit_columns(table)
+  self.assertEqual(header.sectionResizeMode(7),QHeaderView.Fixed);self.assertEqual(header.sectionSize(7),width)
+  row=next(i for i in range(table.rowCount()) if table.item(i,7).data(Qt.UserRole))
+  image=QPixmap(100,40);image.fill(Qt.white);p=QPainter(image)
+  opt=QStyleOptionViewItem();opt.state=QStyle.State_Enabled;opt.rect=QRect(0,0,100,40);opt.decorationSize=QSize(20,20);opt.palette=QPalette(Qt.white)
+  table.itemDelegateForColumn(7).paint(p,opt,table.model().index(row,7));p.end()
+  pixels=image.toImage();points=[(x,y) for x in range(100) for y in range(40) if pixels.pixelColor(x,y).red()>100 and pixels.pixelColor(x,y).green()<200 and pixels.pixelColor(x,y).blue()<100]
+  self.assertTrue(points);self.assertLess(abs((min(x for x,y in points)+max(x for x,y in points))/2-50),3)
