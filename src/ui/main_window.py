@@ -38,19 +38,34 @@ class QuantityEdit(QDoubleSpinBox):
   return format_quantity(self.value())
  def textFromValue(self,value):return format_quantity(value)
 
+class MaterialTextEdit(WrappingTextEdit):
+ def __init__(self,value='',lines=2):
+  super().__init__()
+  from PyQt5.QtGui import QTextOption
+  self.setPlainText(str(value or ''));self.setFixedHeight(self.fontMetrics().lineSpacing()*lines+16)
+  self.setTabChangesFocus(True);self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+  self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+  option=self.document().defaultTextOption();option.setAlignment(Qt.AlignLeft);option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere);self.document().setDefaultTextOption(option)
+
 class MaterialDialog(QDialog):
  def __init__(self,parent=None,data=None,readonly_keys=None):
-  super().__init__(parent); self.setWindowTitle('物料'); f=QFormLayout(self); data=data or {}; self.e={}; readonly_keys=readonly_keys or set()
+  super().__init__(parent);self.setWindowTitle('物料');self.resize(640,620)
+  layout=QVBoxLayout(self);scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setFrameShape(QFrame.NoFrame);layout.addWidget(scroll)
+  body=QWidget();f=QFormLayout(body);f.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow);scroll.setWidget(body)
+  data=data or {};self.e={};readonly_keys=readonly_keys or set()
+  def field(key,lines=2):
+   if key in readonly_keys:
+    w=QLabel(str(data.get(key,'') or ''));w.setWordWrap(True);w.setAlignment(Qt.AlignLeft|Qt.AlignTop);w.setTextInteractionFlags(Qt.TextSelectableByMouse|Qt.TextSelectableByKeyboard)
+   else:w=MaterialTextEdit(data.get(key,''),lines)
+   self.e[key]=w;return w
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('manufacturer','物料制造商'),('mpn','物料MPN')]:
-   if k in readonly_keys: w=QLabel(str(data.get(k,'')))
-   else: w=QLineEdit(str(data.get(k,'')))
-   self.e[k]=w; f.addRow(l,w)
-  self.unit=QComboBox(); self.unit.addItems(parent.svc.UNITS if parent is not None and hasattr(parent,'svc') else list(DEFAULT_MATERIAL_UNITS)); self.unit.setCurrentIndex(self.unit.findText(data.get('unit',self.unit.itemText(0)))); self.unit.setEnabled('unit' not in readonly_keys); f.addRow('单位',self.unit)
-  self.e['grade']=QLabel(str(data.get('grade',''))) if 'grade' in readonly_keys else QLineEdit(str(data.get('grade',''))); f.addRow('物料等级',self.e['grade'])
-  self.mp_flag=QComboBox(); self.mp_flag.addItems(['M','P']); self.mp_flag.setCurrentText(data.get('mp_flag','M')); self.mp_flag.setEnabled('mp_flag' not in readonly_keys); f.addRow('M/P',self.mp_flag)
-  b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); f.addRow(b)
+   f.addRow(l,field(k,4 if k=='description' else 3 if k=='name' else 2))
+  self.unit=QComboBox();self.unit.addItems(parent.svc.UNITS if parent is not None and hasattr(parent,'svc') else list(DEFAULT_MATERIAL_UNITS));self.unit.setCurrentIndex(self.unit.findText(data.get('unit',self.unit.itemText(0))));self.unit.setEnabled('unit' not in readonly_keys);f.addRow('单位',self.unit)
+  f.addRow('物料等级',field('grade'))
+  self.mp_flag=QComboBox();self.mp_flag.addItems(['M','P']);self.mp_flag.setCurrentText(data.get('mp_flag','M'));self.mp_flag.setEnabled('mp_flag' not in readonly_keys);f.addRow('M/P',self.mp_flag)
+  b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);b.accepted.connect(self.accept);b.rejected.connect(self.reject);layout.addWidget(b)
  def data(self):
-  d={k:w.text().strip() for k,w in self.e.items()}; d['unit']=self.unit.currentText(); d['mp_flag']=self.mp_flag.currentText(); return d
+  d={k:w.text().strip() for k,w in self.e.items()};d['unit']=self.unit.currentText();d['mp_flag']=self.mp_flag.currentText();return d
 class CreateMaterialDialog(MaterialDialog):
  def __init__(self,owner,data=None):
   super().__init__(owner,data=data);self.setWindowTitle('新建物料');self.setWindowModality(Qt.NonModal)
