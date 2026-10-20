@@ -1,6 +1,7 @@
 """Popup placement must ignore old transient geometry without breaking window memory."""
 import os
-os.environ['QT_QPA_PLATFORM']='offscreen'
+# QMessageBox needs the native Windows platform integration in Qt 5.15.
+os.environ['QT_QPA_PLATFORM']='windows' if os.name=='nt' else 'offscreen'
 import sys
 import tempfile
 import unittest
@@ -46,7 +47,9 @@ class DialogPlacementTests(unittest.TestCase):
   screen=SimpleNamespace(availableGeometry=lambda:QRect(-1600,40,1600,860))
   with patch.object(QApplication,'screenAt',return_value=screen) as screen_at:
    dialog.show()
-   for _ in range(3):self.app.processEvents()
+   # Native window decorations settle asynchronously; include all three
+   # bounded placement passes before checking the final frame position.
+   QTest.qWait(180)
    self.assert_centered(dialog,screen)
    self.assertEqual(screen_at.call_args.args[0],parent.frameGeometry().center())
    self.assertTrue(screen.availableGeometry().contains(dialog.frameGeometry()))

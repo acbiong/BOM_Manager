@@ -1,5 +1,6 @@
 import os,sys,tempfile,unittest
-os.environ['QT_QPA_PLATFORM']='offscreen'
+# Exercise real message boxes with the Windows platform integration.
+os.environ['QT_QPA_PLATFORM']='windows' if os.name=='nt' else 'offscreen'
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))

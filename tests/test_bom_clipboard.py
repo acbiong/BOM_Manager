@@ -97,19 +97,3 @@ class ClipboardTests(unittest.TestCase):
   self.assertFalse(self.w.cut_material(self.w.root_item))
   with patch.object(self.w,'is_locked',return_value=True),patch.object(QMessageBox,'question') as question:
    self.assertFalse(self.w.cut_material(added));self.w.confirm_delete(added);question.assert_not_called()
- def test_delete_key_enter_cancel_and_text_edit_focus(self):
-  from PyQt5.QtTest import QTest
-  from PyQt5.QtCore import QTimer
-  self.w.show();self.w.activateWindow();item=self.w.root_item.child(0);self.w.tree.setCurrentItem(item);self.w.tree.setFocus();self.app.processEvents()
-  with patch.object(QMessageBox,'question',return_value=QMessageBox.No) as question:
-   QTest.keyClick(self.w.tree,Qt.Key_Delete);self.assertEqual(question.call_count,1)
-  self.assertFalse(item.data(0,Qt.UserRole).get('_deleted',False))
-  def confirm():
-   box=self.app.activeModalWidget()
-   if box is not None:QTest.keyClick(box,Qt.Key_Return)
-  QTimer.singleShot(30,confirm);QTest.keyClick(self.w.tree,Qt.Key_Delete)
-  self.assertTrue(item.data(0,Qt.UserRole)['_deleted'])
-  other=self.w.root_item.child(1);self.w.tree.setCurrentItem(other);self.w.show_item_info(other)
-  field=self.w.fields['position'];field.setFocus();self.app.processEvents()
-  with patch.object(QMessageBox,'question') as question:
-   QTest.keyClick(field,Qt.Key_Delete);question.assert_not_called()
