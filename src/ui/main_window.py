@@ -318,7 +318,9 @@ class NewSkuDialog(QDialog):
   if not matches or not matches[0].isEnabled():QMessageBox.warning(self,'无法新建SKU','请选择可用的物料，不能使用任意输入文字或已有BOM结构的物料。'); return
   self.material_id=matches[0].data(Qt.UserRole); super().accept()
 
-class MainWindow(QMainWindow):
+from ui.project_management import ProjectManagement
+
+class MainWindow(ProjectManagement,QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build(); WindowRefreshBus.subscribe(self.on_data_change)
  def on_data_change(self,event):
@@ -329,7 +331,7 @@ class MainWindow(QMainWindow):
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
-  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
+  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
   self.table=QTableWidget(); self.table.setColumnCount(7); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID']); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self._sku_sort=None;self._sku_filters={}
   self._description_hover=VersionDescriptionHover(self.table)
@@ -443,7 +445,6 @@ class MainWindow(QMainWindow):
    try:self.svc.change_mirror_version(sid,value)
    except Exception as error:QMessageBox.warning(self,'历史版本变更失败',str(error))
  def select_database(self):
-  if getattr(self,'_compare_dialog',None):self._compare_dialog.close();self._compare_dialog.deleteLater();self._compare_dialog=None
   current=Path(self.svc.db.path).expanduser()
   # 使用Qt对话框而非原生保存对话框，禁止已有数据库的“是否替换”确认。
   # 这样已有文件会直接作为候选数据库打开，输入新文件名仍可创建数据库。
@@ -459,38 +460,14 @@ class MainWindow(QMainWindow):
   existed=selected.exists()
   if selected.resolve() == current.resolve():
    QMessageBox.information(self,'数据库未切换','当前已经在使用该数据库：\n'+str(selected)); return
-  new_db=None
-  try:
-   config_service=self.svc.config_service or ConfigService()
-   relative_selected=config_service.relative_path(selected.resolve())
-   selected.parent.mkdir(parents=True,exist_ok=True)
-   # sqlite3.connect 对已有数据库是打开，对不存在的数据库才是创建，不会覆盖原文件。
-   new_db=Database(str(selected))
-   valid,missing=new_db.validate_schema()
-   if not valid:
-    new_db.close()
-    raise ValueError('数据库结构不可用，缺少表：'+', '.join(missing))
-   from ui.snapshot_migration import prepare_snapshot_bom
-   if not prepare_snapshot_bom(new_db,self):new_db.close();return
-   for window in set(self._material_bom_windows.values())|set(self._bom_windows.values()):
-    if not window.close(): new_db.close(); return
-   if self._materials is not None: self._materials.close()
-   c=config_service.load(); c['database']['path']=relative_selected; config_service.save(c)
-   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
-   old_db=self.svc.db
-   self.svc.db=new_db
-   old_db.close()
-   self.refresh()
+  if self.switch_project(selected,create=not existed):
    QMessageBox.information(self,'数据库已切换',('已打开已有数据库' if existed else '已创建并打开新数据库')+'：\n'+str(selected))
-  except Exception as exc:
-   if new_db is not None and new_db is not self.svc.db:new_db.close()
-   QMessageBox.critical(self,'数据库错误','目标数据库无法使用，请重新选择数据库。\n\n'+str(exc))
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 资料库').strip())),'Excel (*.xlsx)')[0]
   if p:remember_export_path(p); self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
  def edit_project(self):
   d=ProjectDialog(self,self.svc.project())
-  if d.exec_(): self.svc.update_project(d.data()); self.refresh()
+  if d.exec_(): self.svc.update_project(d.data()); self.remember_current_project(); self.refresh()
  def activate_window(self,window):
   if window.isMinimized(): window.showNormal()
   else: window.show()

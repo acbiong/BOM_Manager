@@ -67,7 +67,14 @@ class ConfigService:
   self._write(c)
  def _write(self,c):
   self.base.mkdir(parents=True,exist_ok=True)
-  with self.path.open('w',encoding='utf-8') as f:c.write(f)
+  import tempfile
+  temporary=None
+  try:
+   with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8',dir=self.base,prefix='.config-',suffix='.tmp',delete=False) as f:
+    temporary=f.name;c.write(f);f.flush();os.fsync(f.fileno())
+   os.replace(temporary,self.path)
+  finally:
+   if temporary and os.path.exists(temporary):os.unlink(temporary)
 
  @staticmethod
  def parse_units(value):

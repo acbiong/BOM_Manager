@@ -129,7 +129,7 @@ def main():
  app=QApplication(sys.argv)
  from ui.save_shortcut import install_save_shortcuts
  save_shortcuts=install_save_shortcuts(app)
- guard=SingleInstance(); db=None; base=None; geometry_memory=None
+ guard=SingleInstance(); db=None; base=None; geometry_memory=None; w=None
  try:
   if not guard.acquire():
    if not guard.notify_existing():QMessageBox.information(None,'软件已运行','该目录下的BOM管理系统已在运行或正在启动，请切换到已有窗口。')
@@ -159,6 +159,7 @@ def main():
   if geometry_memory is not None:
    app.removeEventFilter(geometry_memory);app.aboutToQuit.disconnect(geometry_memory.save_visible);geometry_memory.deleteLater()
   try:
+   if w is not None and w.svc.db is not db:w.svc.db.close()
    if db is not None:db.close()
   finally:guard.close()
 if __name__=='__main__':
