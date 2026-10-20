@@ -341,8 +341,14 @@ class MainWindow(ProjectManagement,QMainWindow):
  def on_data_change(self,event):
   if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed'):self.refresh()
  def closeEvent(self,event):
+  # Resolve every owned BOM draft before hiding the main window or removing
+  # its subscriptions. A rejected close must leave the application usable.
+  windows=set(self._material_bom_windows.values())|set(self._bom_windows.values())
+  if self._materials is not None:windows.update(self._materials._local_bom_windows.values())
+  for window in windows:
+   if not window.close():event.ignore();return
+  if self._materials is not None and not self._materials.close():event.ignore();return
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
-  if self._materials is not None and getattr(self._materials,'_create_material_dialog',None):self._materials._create_material_dialog.reject()
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
