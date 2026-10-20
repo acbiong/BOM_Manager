@@ -1,4 +1,4 @@
-import os,sys,tempfile,unittest
+import os,sys,tempfile,unittest,json
 os.environ['QT_QPA_PLATFORM']='offscreen'
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +11,7 @@ from database.database import Database
 from services.services import Services
 from ui.main_window import MainWindow
 from ui.startup_project import restore_project
+import main
 
 class StartupProjectRestoreTests(unittest.TestCase):
  @classmethod
@@ -29,13 +30,27 @@ class StartupProjectRestoreTests(unittest.TestCase):
   self.tmp.cleanup()
  def missing(self):
   self.s.db.close();self.path.unlink()
- def test_reopen_last_bom_reads_latest_database_data(self):
-  self.windows[0].open_bom_id(self.sid)
+ def assert_startup_only_sku(self,locked):
+  from services.snapshot_bom import migrate
+  from services.current_catalog import initialize
+  migrate(self.s.db);initialize(self.s.db)
+  self.s.set_sku_locked(self.sid,locked)
+  cfg=self.config.load();cfg['project:'+self.key]['last_bom']=json.dumps(dict(id=self.sid,mirror_version=100,base_code='SKU',version='100'));self.config.save(cfg)
   self.s.db.conn.execute("UPDATE materials SET name='最新名称' WHERE id=?",(self.mid,));self.s.db.conn.commit()
-  with patch('ui.startup_project.recovery_choice') as choice:db=restore_project(self.config,self.config.load());choice.assert_not_called()
-  self.dbs.append(db);w=MainWindow(Services(db,self.config));self.windows.append(w);w.restore_last_bom()
-  self.assertIn('最新名称',w.table.item(0,2).text());self.assertIn(self.sid,w._bom_windows)
-  self.assertIn('最新名称',w._bom_windows[self.sid].windowTitle())
+  self.windows[0].close();self.s.db.close()
+  def event_loop():
+   visible=[w for w in self.app.topLevelWidgets() if w.isVisible()]
+   self.assertEqual(len(visible),1);w=visible[0];self.assertIsInstance(w,MainWindow);self.windows.append(w)
+   self.assertEqual(w._bom_windows,{});self.assertEqual(w._material_bom_windows,{})
+   self.assertIn('最新名称',w.table.item(0,2).text());self.assertIn('P1',w.windowTitle())
+   editor=w.open_bom_id(self.sid);self.assertTrue(editor.isVisible());self.assertEqual(editor.is_locked(),locked)
+   w.close();return 0
+  with patch.object(main,'QApplication',return_value=self.app),patch.object(main,'app_base',return_value=self.base),patch.object(self.app,'exec_',side_effect=event_loop),patch.object(main.QMessageBox,'critical') as error:
+   self.assertEqual(main.main(),0);error.assert_not_called()
+  manager=getattr(self.app,'_bom_save_shortcuts',None)
+  if manager is not None:del self.app._bom_save_shortcuts;manager.deleteLater()
+ def test_startup_only_sku_with_legacy_unlocked_bom(self):self.assert_startup_only_sku(False)
+ def test_startup_only_sku_with_legacy_locked_bom(self):self.assert_startup_only_sku(True)
  def test_missing_close_keeps_history_and_subsequent_launch_empty(self):
   self.missing();cfg=self.config.load()
   with patch('ui.startup_project.recovery_choice',return_value='close'):self.assertIsNone(restore_project(self.config,cfg))
@@ -61,7 +76,3 @@ class StartupProjectRestoreTests(unittest.TestCase):
   self.missing()
   with patch('ui.startup_project.recovery_choice',side_effect=['select','close']) as choose,patch.object(QFileDialog,'getOpenFileName',return_value=('','')):
    self.assertIsNone(restore_project(self.config,self.config.load()));self.assertEqual(choose.call_count,2)
- def test_deleted_or_different_bom_identity_does_not_open_wrong_editor(self):
-  w=self.windows[0];w.remember_last_bom(self.sid)
-  self.s.db.conn.execute("UPDATE materials SET base_code='DIFFERENT' WHERE id=?",(self.mid,));self.s.db.conn.commit()
-  with patch.object(w,'open_bom_id') as open_bom:w.restore_last_bom();open_bom.assert_not_called()
