@@ -308,6 +308,26 @@ def remember_export_path(path):
  QSettings('Biong','BOMManager').setValue('export_directory',str(Path(path).resolve().parent))
 
 
+def export_material_structure(parent,service,material_id):
+ material=service.material_snapshot(material_id)
+ if not material:return
+ sid=getattr(service,'sku_id',None)
+ if sid is None:
+  legacy=service.db.conn.execute('SELECT id FROM skus WHERE material_id=? AND scope_id=0',(material_id,)).fetchone()
+  if legacy:sid=legacy['id']
+ sku=service.db.conn.execute('SELECT material_id,mirror_version FROM skus WHERE id=?',(sid,)).fetchone() if sid else None
+ suffix=' 历史版本'+str(sku['mirror_version']) if sku and getattr(service,'scope_id',0) else ''
+ filename=export_filename(material['base_code']+material['version']+' '+material['name']+suffix)
+ path=QFileDialog.getSaveFileName(parent,'导出BOM结构',export_start_path(filename),'Excel (*.xlsx)')[0]
+ if not path:return
+ try:
+  remember_export_path(path)
+  if sku and sku['material_id']==material_id:service.export_sku(sid,path)
+  else:service.export_bom_structure(material_id,path)
+  QMessageBox.information(parent,'完成','BOM结构导出成功')
+ except Exception as error:show_operation_error(parent,'导出BOM结构失败',error)
+
+
 class MaterialSelectionDialog(QInputDialog):
  @staticmethod
  def getItem(parent,title,label,items,current=0,editable=True):
@@ -873,9 +893,10 @@ class BomWindow(QMainWindow):
   d=it.data(0,Qt.UserRole) or {}
   menu=QMenu(self)
   if self.is_locked():
-   reverse=menu.addAction('物料反查');copy=menu.addAction('复制物料');chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
+   reverse=menu.addAction('物料反查');copy=menu.addAction('复制物料');export=self.subtree_export_action(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
    if chosen==reverse:self.reverse_tree_material(it)
    elif chosen==copy:self.copy_bom_material(it)
+   elif export is not None and chosen==export:self.export_subtree(it)
    return
   if d.get('_deleted'):
    restore=menu.addAction('取消删除');menu.addSeparator();copy=menu.addAction('复制物料');menu.addSeparator();reverse=menu.addAction('物料反查')
@@ -895,6 +916,7 @@ class BomWindow(QMainWindow):
   if not root:alternate=menu.addAction('新增替代料')
   imp=menu.addAction('导入BOM');imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id',self.root)))
   imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM')
+  export=self.subtree_export_action(menu,it)
   menu.addSeparator();clipboard_actions=self.clipboard_actions(menu,it)
   if not root:
    menu.addSeparator();up=menu.addAction('物料上移');down=menu.addAction('物料下移')
@@ -902,6 +924,7 @@ class BomWindow(QMainWindow):
    menu.addSeparator();dele=menu.addAction('删除物料')
   act=menu.exec_(self.tree.viewport().mapToGlobal(pos))
   if act is None:return
+  if export is not None and act==export:self.export_subtree(it);return
   if self.handle_clipboard_action(act,clipboard_actions,it):return
   if act==edit:self.edit_tree_material(it);return
   if act==reverse:self.reverse_tree_material(it);return
@@ -914,6 +937,14 @@ class BomWindow(QMainWindow):
    self.tree.setCurrentItem(it);self.show_item_info(it);self.add_alternate();return
   if act in (same,child):self.add_relative(d,act==child);return
   if act==dele:self.confirm_delete(it)
+ def subtree_export_action(self,menu,item):
+  if not item.childCount():return None
+  menu.addSeparator();action=menu.addAction('导出BOM结构')
+  action.setEnabled(self.export_action.isEnabled() and not self.dirty and not (item.data(0,Qt.UserRole) or {}).get('_deleted'))
+  return action
+ def export_subtree(self,item):
+  if not self.export_action.isEnabled() or self.dirty or not item.childCount() or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
+  export_material_structure(self,self.svc,(item.data(0,Qt.UserRole) or {})['material_id'])
  def confirm_delete(self,item):
   if self.is_locked() or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   if QMessageBox.question(self,'确认删除','是否删除选定的物料及其子物料？\n'+item.text(0),QMessageBox.Yes|QMessageBox.No,QMessageBox.Yes)==QMessageBox.Yes:self.remove_relation(item)
@@ -1605,13 +1636,7 @@ class BomWindow(QMainWindow):
    remember_export_path(p);self.svc.export_purchase_bom(self.root,p);QMessageBox.information(self,'完成','采购BOM导出成功')
  def export_bom(self):
   if not self.export_action.isEnabled():return
-  material=self.svc.material_snapshot(self.root)
-  p=QFileDialog.getSaveFileName(self,'导出BOM',export_start_path(export_filename(material['base_code']+material['version']+' '+material['name']+self.mirror_suffix())),'Excel (*.xlsx)')[0]
-  if p:
-   remember_export_path(p)
-   sid=getattr(self.svc,'sku_id',None)
-   r=self.svc.db.conn.execute('SELECT id FROM skus WHERE id=?',(sid,)).fetchone() if sid else self.svc.db.conn.execute('SELECT id FROM skus WHERE material_id=? AND scope_id=0',(self.root,)).fetchone()
-   if r:self.svc.export_sku(r['id'],p); QMessageBox.information(self,'完成','导出成功')
+  export_material_structure(self,self.svc,self.root)
  def add(self):
   self.add_relative({'id':None,'parent_item_id':None,'level_no':0},False)
  def stage_import_subtree(self,item,nodes):
@@ -1799,6 +1824,7 @@ class MaterialWindow(QMainWindow):
   m=QMenu(self);e=m.addAction('编辑物料');v=m.addAction('物料版本变更');v.setEnabled(not any(sku['material_id']==rid for sku in self.svc.skus()))
   if material['has_bom']=='Y' or material['idle']=='N':m.addSeparator()
   edit_bom=m.addAction('编辑物料BOM结构') if material['has_bom']=='Y' else None
+  export=m.addAction('导出BOM结构') if material['has_bom']=='Y' else None
   reverse=m.addAction('物料反查') if material['idle']=='N' else None
   m.addSeparator();similar=m.addAction('类似新增物料');copy=m.addAction('复制物料')
   m.addSeparator();d=m.addAction('删除物料');d.setEnabled(material['idle']=='Y')
@@ -1807,6 +1833,10 @@ class MaterialWindow(QMainWindow):
    show_create_material(self,data=dict(self.svc.material_snapshot(rid)));return
   if a==copy:copy_material(self.svc,rid); return
   if a is None:return
+  if export is not None and a==export:
+   from services.snapshot_bom import enabled,template_service
+   source=template_service(self.svc,rid) if enabled(self.svc.db) else self.svc
+   export_material_structure(self,source,rid);return
   if edit_bom is not None and a==edit_bom:
    self.open_material_bom(rid); return
   if reverse is not None and a==reverse:

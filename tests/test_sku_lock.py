@@ -92,7 +92,7 @@ class SkuLockTests(unittest.TestCase):
   captured=[]
   def choose(menu,pos):captured.append([a.text() for a in menu.actions()]);return None
   with patch.object(window.tree,'itemAt',return_value=item),patch.object(QMenu,'exec_',choose):window.context_menu(QPoint())
-  self.assertEqual(captured[-1],['物料反查','复制物料'])
+  self.assertEqual(captured[-1],['物料反查','复制物料','','导出BOM结构'])
   def sku_menu(menu,pos):
    actions={a.text():a for a in menu.actions()};self.assertFalse(actions['删除SKU'].isEnabled());return actions['取消锁定']
   with patch.object(self.main.table,'rowAt',return_value=row),patch.object(QMenu,'exec_',sku_menu):self.main.sku_context_menu(QPoint())

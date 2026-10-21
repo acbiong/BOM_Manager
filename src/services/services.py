@@ -955,16 +955,19 @@ class Services:
    if scoped is not self:return scoped.export_sku(sid,path)
   sku=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
   if sku is None:raise ValueError('SKU不存在')
+  return self.export_bom_structure(sku['material_id'],path,sku_id=sid)
+ def export_bom_structure(self,root,path,sku_id=None):
+  if self.material_snapshot(root) is None:raise ValueError('物料不存在')
   wb=Workbook(); w=wb.active; w.title='变更记录'
-  material_ids={sku['material_id']}|{row['material_id'] for row in self.bom(sku['material_id'])}
-  linked={row[0] for row in self.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(sku['material_id'],))}
-  records=[row for row in self.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if row['id'] in linked or (row['object_type'] in ('material','bom') and row['object_id'] in material_ids) or (row['object_type']=='sku' and row['object_id']==sid)]
-  reset=self.db.conn.execute('SELECT start_log_id FROM sku_history_reset WHERE root_id=?',(sku['material_id'],)).fetchone()
+  material_ids={root}|{row['material_id'] for row in self.bom(root)}
+  linked={row[0] for row in self.db.conn.execute('SELECT log_id FROM bom_log_roots WHERE root_id=?',(root,))}
+  records=[row for row in self.db.conn.execute('SELECT * FROM change_logs ORDER BY id') if row['id'] in linked or (row['object_type'] in ('material','bom') and row['object_id'] in material_ids) or (row['object_type']=='sku' and row['object_id']==sku_id)]
+  reset=self.db.conn.execute('SELECT start_log_id FROM sku_history_reset WHERE root_id=?',(root,)).fetchone()
   if reset:records=[row for row in records if row['id']>=reset[0]]
   self.write_change_sheet(w,records)
   import re
-  name=self.material_snapshot(sku['material_id'])['name']
+  name=self.material_snapshot(root)['name']
   # Excel工作表名称限制：非法字符替换、31字符上限，重名由openpyxl消歧。
   title=re.sub(r'[\\/*?:\[\]]','_',name).strip().strip("'")[:31] or 'BOM'
-  self.write_bom_sheet(wb.create_sheet(title),sku['material_id'])
+  self.write_bom_sheet(wb.create_sheet(title),root)
   wb.save(path)
