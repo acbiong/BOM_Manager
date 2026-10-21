@@ -881,13 +881,13 @@ class BomWindow(QMainWindow):
   if self.is_locked():
    reverse=menu.addAction('物料反查');copy=menu.addAction('复制物料');chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
    if chosen==reverse:self.reverse_tree_material(it)
-   elif chosen==copy:copy_material(self.svc,d.get('material_id',self.root))
+   elif chosen==copy:self.copy_bom_material(it)
    return
   if d.get('_deleted'):
    restore=menu.addAction('取消删除');menu.addSeparator();copy=menu.addAction('复制物料');menu.addSeparator();reverse=menu.addAction('物料反查')
    act=menu.exec_(self.tree.viewport().mapToGlobal(pos))
    if act==restore:self.restore_relation(it)
-   elif act==copy:copy_material(self.svc,d['material_id'])
+   elif act==copy:self.copy_bom_material(it)
    elif act==reverse:self.reverse_tree_material(it)
    return
   root=it is self.root_item
@@ -1108,7 +1108,7 @@ class BomWindow(QMainWindow):
  def handle_clipboard_action(self,action,actions,item):
   if action is None:return False
   if action==actions['copy']:
-   copy_material(self.svc,(item.data(0,Qt.UserRole) or {})['material_id']); return True
+   self.copy_bom_material(item); return True
   if 'cut' in actions and action==actions['cut']:
    self.cut_material(item);return True
   for key,child in [('same',False),('child',True)]:
@@ -1116,11 +1116,16 @@ class BomWindow(QMainWindow):
     if actions[key].isEnabled():self.paste_material(item,child)
     return True
   return False
+ def copy_bom_material(self,item):
+  if item is None:return False
+  data=item.data(0,Qt.UserRole) or {}
+  if item is self.root_item:return copy_material(self.svc,data.get('material_id',self.root))
+  # Capture the relation's draft values, not catalog defaults or transient UI hints.
+  relation=dict(quantity=float(item.text(1)),position=item.text(3),remark=data.get('remark',''),alternate_material_ids=self.alternate_ids(item))
+  return copy_material(self.svc,data['material_id'],relation)
  def cut_material(self,item):
   if self.is_locked() or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return False
-  data=item.data(0,Qt.UserRole) or {}
-  relation=dict(quantity=float(item.text(1)),position=item.text(3),remark=data.get('remark',''),alternate_material_ids=self.alternate_ids(item))
-  if copy_material(self.svc,data['material_id'],relation):
+  if self.copy_bom_material(item):
    self.remove_relation(item);return True
   return False
  def paste_block_reason(self,item,child,material_id):

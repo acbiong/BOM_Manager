@@ -97,3 +97,31 @@ class ClipboardTests(unittest.TestCase):
   self.assertFalse(self.w.cut_material(self.w.root_item))
   with patch.object(self.w,'is_locked',return_value=True),patch.object(QMessageBox,'question') as question:
    self.assertFalse(self.w.cut_material(added));self.w.confirm_delete(added);question.assert_not_called()
+
+ def test_copy_draft_attributes_cross_window_and_persist(self):
+  source=self.other.root_item.child(0);self.other.show_item_info(source)
+  self.other.fields['quantity'].setText('2.375');self.other.fields['position'].setText('U1\nU2');self.other.fields['remark'].setText('真实备注\n第二行')
+  self.other._alternate_edits[self.other.alternate_key(source)]=[self.ids['A'],self.ids['B']]
+  source.setText(4,'真实备注\n第二行\n有其他BOM更新导入此变更')
+  actions=self.other.clipboard_actions(QMenu(self.other),source);self.other.handle_clipboard_action(actions['copy'],actions,source)
+  self.other.fields['quantity'].setText('9');self.other._alternate_edits[self.other.alternate_key(source)]=[]
+  added=self.w.paste_material(self.w.root_item.child(0),False)
+  self.assertEqual([added.text(i) for i in (1,3,4)],['2.375','U1\nU2','真实备注\n第二行'])
+  self.assertEqual(self.w.alternate_ids(added),[self.ids['A'],self.ids['B']]);self.assertEqual(added.childCount(),1)
+  self.assertEqual(self.w.fields['quantity'].text(),'2.375');self.assertEqual(self.w.alt_table.rowCount(),2)
+  self.assertEqual(self.s.bom(self.ids['S'])[0]['quantity'],1)
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+  self.w.load();restored=next(self.w.root_item.child(i) for i in range(self.w.root_item.childCount()) if self.w.root_item.child(i).data(0,Qt.UserRole)['material_id']==self.ids['C'])
+  self.assertEqual([restored.text(i) for i in (1,3,4)],['2.375','U1\nU2','真实备注\n第二行']);self.assertEqual(self.w.alternate_ids(restored),[self.ids['A'],self.ids['B']])
+ def test_locked_and_deleted_context_copy_carries_relation(self):
+  from ui.material_clipboard import clipboard_relation
+  source=self.other.root_item.child(0);self.other.show_item_info(source)
+  self.other.fields['quantity'].setText('4.25');self.other.fields['remark'].setText('保留备注');self.other._alternate_edits[self.other.alternate_key(source)]=[self.ids['A']]
+  def choose(menu,*args):return next(a for a in menu.actions() if a.text()=='复制物料')
+  for deleted in (False,True):
+   if deleted:self.other.remove_relation(source)
+   with patch.object(self.other,'is_locked',return_value=not deleted),patch.object(self.other.tree,'itemAt',return_value=source),patch.object(QMenu,'exec_',choose):self.other.context_menu(QPoint())
+   relation=clipboard_relation(self.s);self.assertEqual(relation['quantity'],4.25);self.assertEqual(relation['alternate_material_ids'],[self.ids['A']])
+   target=self.w.root_item.child(0 if not deleted else 1);added=self.w.paste_material(target,True)
+   self.assertEqual(added.text(1),'4.25');self.assertEqual(added.text(4),'保留备注');self.assertEqual(self.w.alternate_ids(added),[self.ids['A']])
+  self.other.copy_bom_material(self.other.root_item);self.assertIsNone(clipboard_relation(self.s))

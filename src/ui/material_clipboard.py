@@ -1,4 +1,4 @@
-"""物料剪贴板：跨窗口共享物料身份，不复制未保存的BOM关系。编辑时间：2026-10-10。"""
+"""物料剪贴板：共享物料身份及可选BOM关系属性快照；子BOM沿用最新物料库结构。"""
 import json
 from pathlib import Path
 from PyQt5.QtCore import QMimeData
