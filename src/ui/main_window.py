@@ -726,21 +726,15 @@ class MainWindow(ProjectManagement,QMainWindow):
   if window is not None:self._bom_windows[sid]=window
   return window
  def open_material_bom(self,material_id):
-  from services.snapshot_bom import enabled,material_sources
+  from services.snapshot_bom import enabled,template_service
+  source=self.svc
   if enabled(self.svc.db):
-   sources=material_sources(self.svc,material_id)
-   if sources:
-    labels=[f"{r['base_code']}{r['version']} {r['name']} 历史版本{r['mirror_version']}" for r in sources]
-    chosen=labels[0]
-    if len(sources)>1:
-     chosen,ok=QInputDialog.getItem(self,'选择要编辑的BOM历史版本','子BOM属于独立历史版本，请选择：',labels,0,False)
-     if not ok:return
-    window=self.open_bom_id(sources[labels.index(chosen)]['id'])
-    if window is not None:window.locate_material(material_id)
-    return window
+   skus=list(self.svc.db.conn.execute('SELECT id FROM skus WHERE material_id=? ORDER BY mirror_version DESC,id DESC',(material_id,)))
+   if skus:return self.open_bom_id(skus[0]['id'])
+   source=template_service(self.svc,material_id)
   if self.svc.db.conn.execute('SELECT 1 FROM materials WHERE id=?',(material_id,)).fetchone() is None:return
   if material_id not in self._material_bom_windows:
-   window=BomWindow(self.svc,material_id,self)
+   window=BomWindow(source,material_id,self)
    self._material_bom_windows[material_id]=window
    def unregister():
     self._material_bom_windows.pop(material_id,None)
@@ -1631,6 +1625,24 @@ class BomWindow(QMainWindow):
    for grand in node['children']:append(grand,child,d['node_id'],level+1)
   for node in nodes:append(node,item,data.get('node_id',''),(data.get('level_no') or 0)+1)
   item.setExpanded(True);self.mark_dirty();self.tree.setCurrentItem(item);self.show_item_info(item)
+ def save_context(self,rows):
+  sid=getattr(self.svc,'sku_id',None)
+  sku=self.svc.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone() if sid else None
+  if sku is None or sku['material_id']==self.root:return self.root,rows
+  from services.current_catalog import groups,rows_for,reachable
+  graph=groups(self.svc)
+  if self.root not in reachable(graph,sku['material_id']):raise ValueError('此物料已不在所属BOM中，请关闭并从物料库重新打开。')
+  retained={self.root}|{r['material_id'] for r in rows}
+  parents={self.root}|{r['parent_material_id'] for r in self.svc.bom(self.root) if r['parent_material_id'] in retained}|{r['material_id'] for r in rows if r.get('replace_children')}
+  updates={mid:[] for mid in parents}
+  for original in rows:
+   row=dict(original);parent=row['parent_material_id']
+   if 'alternate_material_ids' not in row:
+    row['alternate_material_ids']=[a['material_id'] for a in self.svc.alternates(row['id'])] if isinstance(row.get('id'),int) and row['id']>0 else []
+   children=updates.setdefault(parent,[])
+   if not any(r['material_id']==row['material_id'] and r.get('position','')==row.get('position','') for r in children):children.append(row)
+  graph.update(updates)
+  return sku['material_id'],rows_for(graph,sku['material_id'])
  def save(self):
   if self.is_locked():return False
   if self._saving:return False
@@ -1651,9 +1663,10 @@ class BomWindow(QMainWindow):
     rows.append(d)
     for j in range(it.childCount()): walk(it.child(j),d['material_id'])
    for j in range(self.root_item.childCount()): walk(self.root_item.child(j),self.root)
+   save_root,rows=self.save_context(rows)
    from services.snapshot_bom import revision_conflicts,save_with_revisions
    from services.current_catalog import synchronization_plan,save_confirmed
-   plan=synchronization_plan(self.svc,self.root,rows);selections={};versions={}
+   plan=synchronization_plan(self.svc,save_root,rows);selections={};versions={}
    if plan:
     progress.hide()
     from ui.bom_sync_confirmation import BomSyncConfirmationDialog
@@ -1664,7 +1677,7 @@ class BomWindow(QMainWindow):
    if any(self.svc.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(p['material_id'],)).fetchone() for p in partial):
     QMessageBox.warning(self,'SKU版本需手动更新','未全部同步的父物料属于SKU，请先通过SKU版本变更手动升版，再保存此变更。编辑缓存已保留。');return False
    approved={p['material_id'] for p in plan if p not in partial}
-   violations={v['material_id']:v for v in revision_conflicts(self.svc,self.root,rows) if v['material_id'] not in approved}
+   violations={v['material_id']:v for v in revision_conflicts(self.svc,save_root,rows) if v['material_id'] not in approved}
    violations.update({p['material_id']:p for p in partial})
    if violations:
     progress.hide()
@@ -1674,9 +1687,9 @@ class BomWindow(QMainWindow):
     versions=chooser.versions()
    progress.show()
    callback=lambda n,text:report(int(n*0.85),text)
-   if plan:revisions=save_confirmed(self.svc,self.root,rows,plan,selections,versions,callback)
-   elif violations:revisions=save_with_revisions(self.svc,self.root,rows,versions,progress=callback)
-   else:self.svc.save_bom(self.root,rows,progress=callback);revisions={}
+   if plan:revisions=save_confirmed(self.svc,save_root,rows,plan,selections,versions,callback)
+   elif violations:revisions=save_with_revisions(self.svc,save_root,rows,versions,progress=callback)
+   else:self.svc.save_bom(save_root,rows,progress=callback);revisions={}
    self.root=revisions.get(self.root,self.root)
    report(90,'正在刷新BOM显示…')
    self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
@@ -1813,7 +1826,9 @@ class MaterialWindow(QMainWindow):
   while main is not None and not isinstance(main,MainWindow): main=main.parent()
   if main is not None:return main.open_material_bom(material_id)
   if material_id not in self._local_bom_windows:
-   window=BomWindow(self.svc,material_id,self); self._local_bom_windows[material_id]=window
+   from services.snapshot_bom import enabled,template_service
+   source=template_service(self.svc,material_id) if enabled(self.svc.db) else self.svc
+   window=BomWindow(source,material_id,self); self._local_bom_windows[material_id]=window
    window.closed.connect(lambda:self._local_bom_windows.pop(material_id,None))
   window=self._local_bom_windows[material_id]
   if window.isMinimized():window.showNormal()

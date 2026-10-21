@@ -229,6 +229,7 @@ class CurrentCatalogTests(unittest.TestCase):
    self.assertEqual(library.t.item(index,9).text(),'Y')
    window=main.open_material_bom(self.p)
    self.assertEqual(window.svc.sku_id,self.sid)
+   self.assertEqual(window.root,self.p);self.assertIs(window.current_item,window.root_item);self.assertEqual(main._bom_windows,{})
    self.assertEqual(window.current_item.data(0,Qt.UserRole)['material_id'],self.p)
   finally:
    for window in list(main._bom_windows.values()):window.dirty=False;window.close()
@@ -262,3 +263,43 @@ class CurrentCatalogTests(unittest.TestCase):
   finally:book.close()
   self.db.close();self.db=Database(str(Path(self.tmp.name)/'db'));self.s=Services(self.db);initialize(self.db)
   self.assertEqual(next(r['has_bom'] for r in self.s.materials() if r['id']==self.p),'Y')
+
+ def test_library_subtree_editor_root_reuse_and_save_preserves_sku(self):
+  from ui.main_window import MainWindow,MaterialWindow
+  from ui.bom_sync_confirmation import BomSyncConfirmationDialog
+  from PyQt5.QtWidgets import QDialog,QMenu
+  from PyQt5.QtCore import QPoint
+  # A sibling outside the selected subtree must survive local edits.
+  rows=self.m.bom(self.r);rows.append(self.row(self.a,quantity=8,parent_material_id=self.r,remark='保留兄弟'))
+  self.m.save_bom(self.r,rows)
+  main=MainWindow(self.s);main.show_materials();library=main._materials
+  try:
+   sku_window=main.open_bom_id(self.sid)
+   row=next(i for i in range(library.t.rowCount()) if library.t.item(i,0).text()=='P' and library.t.item(i,1).text()=='1')
+   def choose(menu,*args):return next(a for a in menu.actions() if a.text()=='编辑物料BOM结构')
+   with patch.object(library.t,'rowAt',return_value=row),patch.object(QMenu,'exec_',choose):library.menu(QPoint())
+   window=main._material_bom_windows[self.p]
+   self.assertIsNot(window,sku_window);self.assertEqual(window.root,self.p);self.assertEqual(window.root_item.childCount(),1)
+   self.assertEqual(window.root_item.data(0,Qt.UserRole)['material_id'],self.p)
+   self.assertIs(library.open_material_bom(self.p),window);self.assertEqual(len(main._bom_windows),1)
+   window.show_item_info(window.root_item.child(0));window.fields['quantity'].setText('5.5');window.fields['remark'].setText('子BOM编辑')
+   with patch.object(BomSyncConfirmationDialog,'exec_',return_value=QDialog.Accepted),patch.object(QMessageBox,'information'):
+    self.assertTrue(window.save())
+   self.assertEqual(window.root,self.p);self.assertEqual(window.root_item.child(0).text(1),'5.5')
+   for sid in (self.sid,self.tid):self.assertEqual(self.s.for_sku(sid).bom(self.p)[0]['quantity'],5.5)
+   full=self.m.bom(self.r);self.assertTrue(any(r['material_id']==self.p and r['parent_material_id']==self.r for r in full))
+   sibling=next(r for r in full if r['material_id']==self.a);self.assertEqual(sibling['quantity'],8);self.assertEqual(sibling['remark'],'保留兄弟')
+   self.assertTrue(sku_window.refresh_action.isEnabled())
+  finally:
+   for window in list(main._material_bom_windows.values())+list(main._bom_windows.values()):window.dirty=False;window.close()
+   main.close()
+ def test_standalone_library_subtree_root_and_locked_owner(self):
+  from ui.main_window import MaterialWindow
+  primary=__import__('services.snapshot_bom',fromlist=['template_service']).template_service(self.s,self.p)
+  self.s.set_sku_locked(primary.sku_id,True)
+  library=MaterialWindow(self.s)
+  try:
+   window=library.open_material_bom(self.p)
+   self.assertEqual(window.root,self.p);self.assertTrue(window.is_locked());self.assertFalse(window.save_action.isEnabled())
+   self.assertIs(library.open_material_bom(self.p),window)
+  finally:library.close()
