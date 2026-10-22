@@ -1495,7 +1495,7 @@ class BomWindow(QMainWindow):
     from services.bom_colors import foreground
     custom=data.get('row_color','')
     dark=self.tree.palette().base().color().lightness()<128
-    shade=(42+(len(path)%4)*12) if dark else (250-(len(path)%4)*14)
+    shade=min(78,30+len(path)*8) if dark else min(250,180+len(path)*10)
     background=QColor(custom) if custom and not (added or deleted or changed or moved or external) else QColor(shade,shade,shade)
     if not (added or deleted or changed or moved or external):item.setForeground(column,QBrush(QColor(foreground(custom))) if custom else QBrush())
     item.setBackground(column,QBrush(QColor('#f8d7e3')) if moved else QBrush(QColor('#4a148c')) if external else QBrush(background))
