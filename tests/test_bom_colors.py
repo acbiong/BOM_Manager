@@ -30,10 +30,21 @@ class BomColorTests(unittest.TestCase):
   self.main.close();self.main.deleteLater();self.app.sendPostedEvents(None,QEvent.DeferredDelete);self.db.close();self.tmp.cleanup()
  def save_window(self):
   with patch.object(QMessageBox,'information'):self.assertTrue(self.w.save())
+ def test_five_subtle_gray_levels_end_in_transparency(self):
+  from PyQt5.QtWidgets import QTreeWidgetItem
+  node=self.w.root_item.child(0).child(0)
+  for depth in range(3,8):
+   item=QTreeWidgetItem(node);item.setData(0,Qt.UserRole,dict(material_id=1000+depth));node=item
+  self.w.refresh_styles();node=self.w.root_item;alphas=[]
+  while node is not None:
+   color=node.background(0).color();alphas.append(color.alpha())
+   self.assertEqual((color.red(),color.green(),color.blue()),(0,0,0))
+   node=node.child(0)
+  self.assertEqual(alphas,[24,18,12,6,0,0,0,0])
  def test_draft_save_reload_excel_root_and_child_colors(self):
   parent=self.w.root_item.child(0);child=parent.child(0)
-  self.assertLess(self.w.root_item.background(0).color().lightness(),parent.background(0).color().lightness())
-  self.assertLess(parent.background(0).color().lightness(),child.background(0).color().lightness())
+  self.assertGreater(self.w.root_item.background(0).color().alpha(),parent.background(0).color().alpha())
+  self.assertGreater(parent.background(0).color().alpha(),child.background(0).color().alpha())
   self.w.set_row_color([parent],'#102030');self.w.set_row_color([self.w.root_item],'#fff3cd')
   self.assertEqual(parent.background(0).color().name(),'#102030');self.assertEqual(parent.foreground(0).color().name(),'#ffffff');self.assertEqual(colors(self.w.svc),{})
   self.save_window();self.w.load();parent=self.w.root_item.child(0)

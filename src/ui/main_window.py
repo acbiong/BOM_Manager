@@ -1494,9 +1494,9 @@ class BomWindow(QMainWindow):
     if moved and not color:item.setForeground(column,QBrush(QColor('#202020')))
     from services.bom_colors import foreground
     custom=data.get('row_color','')
-    dark=self.tree.palette().base().color().lightness()<128
-    shade=min(78,30+len(path)*8) if dark else min(250,180+len(path)*10)
-    background=QColor(custom) if custom and not (added or deleted or changed or moved or external) else QColor(shade,shade,shade)
+    # Five subtle gray overlays: light gray at root, fully transparent from level five.
+    alpha=(24,18,12,6,0)[min(len(path),4)]
+    background=QColor(custom) if custom and not (added or deleted or changed or moved or external) else QColor(0,0,0,alpha)
     if not (added or deleted or changed or moved or external):item.setForeground(column,QBrush(QColor(foreground(custom))) if custom else QBrush())
     item.setBackground(column,QBrush(QColor('#f8d7e3')) if moved else QBrush(QColor('#4a148c')) if external else QBrush(background))
    remark=data.get('remark','') if not root else ''
