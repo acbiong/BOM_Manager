@@ -70,7 +70,7 @@ class ExternalBomTests(unittest.TestCase):
     path=str(Path(__file__).parent/'fixtures/external_bom.xls')
     with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=(path,'')),patch('ui.bom_compare.QInputDialog.getItem',return_value=('BOM',True)),patch.object(MaterialHeaderMappingDialog,'exec_',mapping_exec):
      dialog.right.setCurrentIndex(dialog.right.count()-1);dialog.choose_source(1)
-    self.assertTrue(str(dialog.right.currentData()).startswith('external:'));dialog.compare()
+    self.assertTrue(str(dialog.right.currentData()).startswith('external:'));self.assertTrue(dialog._compared)
     self.assertEqual(db.conn.total_changes,before);self.assertEqual(len(s.materials()),3)
     self.assertEqual(dialog._rows[1].status,'modified') # only imported alternate differs
     self.assertNotIn('base_code',dialog._rows[1].changed)
@@ -79,6 +79,22 @@ class ExternalBomTests(unittest.TestCase):
     main.sort_skus(1);self.assertTrue(str(dialog.right.currentData()).startswith('external:'))
     self.assertTrue(dialog._compared)
    finally:dialog.close();main.close();db.close()
+ def test_external_mapping_auto_compares_once_both_sides_are_ready(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));dialog=BomCompareDialog(Services(db,ConfigService(tmp)))
+   path=str(Path(__file__).parent/'fixtures/external_bom.xls')
+   def accept_mapping(d):
+    for field,combo in d.combos.items():
+     if field in self.fixture()[0]:combo.setCurrentText(field)
+    d.validate_mapping();return d.result()
+   try:
+    with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=(path,'')),patch('ui.bom_compare.QInputDialog.getItem',return_value=('BOM',True)),patch.object(MaterialHeaderMappingDialog,'exec_',accept_mapping):
+     dialog.left.setCurrentIndex(dialog.left.count()-1);dialog.choose_source(0)
+     self.assertFalse(dialog._compared);self.assertEqual(dialog._rows,[])
+     dialog.right.setCurrentIndex(dialog.right.count()-1);dialog.choose_source(1)
+     self.assertTrue(dialog._compared);self.assertTrue(dialog._rows)
+     self.assertTrue(all(row.status=='same' for row in dialog._rows))
+   finally:dialog.close();db.close()
  def test_xlsx_sheet_reader_and_identity_match_with_database(self):
   rows=self.fixture()
   with tempfile.TemporaryDirectory() as tmp:

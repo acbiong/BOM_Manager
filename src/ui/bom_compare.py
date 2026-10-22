@@ -309,6 +309,7 @@ class BomCompareDialog(QDialog):
             self.external_sources[key]={'path':str(path),'sheet':sheet,'mapping':dict(dialog.mapping()),'label':f'外部：{Path(path).name} / {sheet}'}
             self.reload_choices();combo.setCurrentIndex(combo.findData(key));self._chosen[side]=key
             previous=key
+            self.compare()
         except Exception as error:QMessageBox.warning(self,'外部BOM载入失败',str(error))
         finally:
             if combo.currentData()=='load_external':
