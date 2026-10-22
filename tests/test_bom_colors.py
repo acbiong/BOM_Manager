@@ -6,6 +6,7 @@ sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtCore import Qt,QEvent,QPoint
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QApplication,QMenu,QMessageBox,QColorDialog
+from ui.interactive_windows import QColorDialog,QMessageBox
 from openpyxl import load_workbook
 from database.database import Database
 from config.config_service import ConfigService

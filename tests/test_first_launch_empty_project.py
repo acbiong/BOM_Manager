@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch,Mock
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QDialog,QFileDialog,QMessageBox
+from ui.interactive_windows import QFileDialog,QMessageBox
 from PyQt5.QtCore import QCoreApplication,QEvent
 from config.config_service import ConfigService
 from database.database import Database

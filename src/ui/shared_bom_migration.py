@@ -1,5 +1,6 @@
 """Explicit conflict resolution before opening legacy mirror databases."""
 from PyQt5.QtWidgets import QDialog,QVBoxLayout,QLabel,QTableWidget,QTableWidgetItem,QComboBox,QTextBrowser,QDialogButtonBox,QMessageBox
+from ui.interactive_windows import QDialog,QMessageBox
 from services.shared_bom import is_shared,migration_candidates,conflicts,migrate
 
 class SharedBomMigrationDialog(QDialog):

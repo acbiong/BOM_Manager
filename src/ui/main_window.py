@@ -4,6 +4,7 @@ from domain.quantity import format_quantity
 from ui.time_display import sku_timestamp
 """PyQt主窗口、SKU清单、物料库和BOM编辑窗口。输入服务对象，输出桌面交互。编辑时间：2026-09-24。"""
 from PyQt5.QtWidgets import *
+from ui.interactive_windows import QColorDialog,QDialog,QFileDialog,QInputDialog,QMainWindow,QMessageBox,QProgressDialog
 from PyQt5.QtCore import Qt, pyqtSignal, QSettings, QTimer, QEvent, QSize, QSortFilterProxyModel, QItemSelectionModel
 from PyQt5.QtGui import QColor, QBrush, QFont, QStandardItemModel, QStandardItem
 from pathlib import Path
@@ -562,7 +563,7 @@ class MainWindow(ProjectManagement,QMainWindow):
     except Exception as error:show_operation_error(owner,'导入失败',error); return
     def resolver(d,old):
      dialog=MaterialConflictDialog(d,old,owner); dialog.exec_(); return dialog.choice
-    progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,owner); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
+    progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,owner); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.NonModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
     def update_progress(current,total):
      progress.setMaximum(max(total,1)); progress.setValue(min(current,total)); QApplication.processEvents()
     try:
@@ -572,7 +573,7 @@ class MainWindow(ProjectManagement,QMainWindow):
       mapping_dialog=MaterialHeaderMappingDialog(p,header_error.headers,header_error.missing,owner,sheet_name=sheet_name,config_service=config_service)
       if mapping_dialog.exec_()!=QDialog.Accepted:
        progress.close(); QMessageBox.warning(owner,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
-      progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,owner); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.WindowModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
+      progress=QProgressDialog('正在导入物料，请稍候…','取消',0,100,owner); progress.setWindowTitle('导入物料'); progress.setWindowModality(Qt.NonModal); progress.setAutoClose(False); progress.show(); QApplication.processEvents()
       ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping(),update_progress,sheet_name=sheet_name)
      progress.setValue(progress.maximum()); progress.close()
      self.refresh();
@@ -1723,7 +1724,7 @@ class BomWindow(QMainWindow):
   if self.is_locked():return False
   if self._saving:return False
   progress=QProgressDialog('正在整理BOM…',None,0,100,self)
-  progress.setWindowTitle('保存BOM');progress.setWindowModality(Qt.ApplicationModal);progress.setMinimumDuration(0);progress.setAutoClose(False);progress.show()
+  progress.setWindowTitle('保存BOM');progress.setWindowModality(Qt.NonModal);progress.setMinimumDuration(0);progress.setAutoClose(False);progress.show()
   def report(value,message):
    progress.setLabelText(message);progress.setValue(value)
    QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)

@@ -2,6 +2,7 @@
 import sys, os, traceback, sqlite3, tempfile
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication, QMessageBox, QFileDialog
+from ui.interactive_windows import QFileDialog,QMessageBox
 from config.config_service import ConfigService
 from database.database import Database
 from services.services import Services

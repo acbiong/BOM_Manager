@@ -3,6 +3,7 @@ import json
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor,QIcon,QPixmap
 from PyQt5.QtWidgets import QMenu,QColorDialog,QMessageBox
+from ui.interactive_windows import QColorDialog,QMessageBox
 
 DEFAULTS=[['浅红','#f8d7da'],['浅黄','#fff3cd'],['浅蓝','#d6e9ff'],['浅绿','#d4edda']]
 

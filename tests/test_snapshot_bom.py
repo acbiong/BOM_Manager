@@ -98,6 +98,7 @@ class SnapshotTests(unittest.TestCase):
  def test_parent_dialog_cancel_retains_draft_and_sku_save_no_dialog(self):
   self.share_parent()
   from PyQt5.QtWidgets import QApplication,QMessageBox,QDialog
+  from ui.interactive_windows import QMessageBox
   from ui.main_window import BomWindow
   from ui.parent_revision import ParentRevisionDialog
   app=QApplication.instance() or QApplication([])
@@ -184,6 +185,7 @@ class SnapshotTests(unittest.TestCase):
   self.m.save_bom(self.r,rows)
  def test_ui_exclusive_parent_save_does_not_open_revision_dialog(self):
   from PyQt5.QtWidgets import QApplication,QMessageBox
+  from ui.interactive_windows import QMessageBox
   from ui.main_window import BomWindow
   from ui.parent_revision import ParentRevisionDialog
   app=QApplication.instance() or QApplication([]);w=BomWindow(self.m,self.r)

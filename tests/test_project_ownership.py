@@ -89,6 +89,7 @@ class ProjectOwnershipTests(unittest.TestCase):
  def test_busy_startup_can_select_another_project(self):
   from config.project_registry import ProjectRegistry
   from PyQt5.QtWidgets import QInputDialog
+  from ui.interactive_windows import QInputDialog
   config=ConfigService(self.base);registry=ProjectRegistry(config)
   owner=Database(str(self.path),exclusive=True);self.dbs.append(owner);registry.remember(self.path,dict(project_code='ONE',project_name='占用项目'),active=True)
   other=self.base/'two.db';Database(str(other)).close();key=registry.remember(other,dict(project_code='TWO',project_name='其他项目'))
@@ -98,6 +99,7 @@ class ProjectOwnershipTests(unittest.TestCase):
   with self.assertRaises(ProjectInUseError):ProjectLock(self.path).require()
  def test_occupied_prompt_contains_only_other_and_close(self):
   from PyQt5.QtWidgets import QMessageBox
+  from ui.interactive_windows import QMessageBox
   from ui.startup_project import occupied_choice
   def inspect(box):
    self.assertEqual([b.text() for b in box.buttons()],['关闭项目','打开其他项目'])

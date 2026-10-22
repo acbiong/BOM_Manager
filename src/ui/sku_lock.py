@@ -1,6 +1,7 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon,QPixmap,QPainter,QPen,QColor
 from PyQt5.QtWidgets import QDialog,QVBoxLayout,QLabel,QTableWidget,QTableWidgetItem,QDialogButtonBox,QMessageBox,QAbstractItemView,QStyledItemDelegate
+from ui.interactive_windows import QDialog,QMessageBox
 from services.sku_lock import LockedBomError
 
 def lock_icon():

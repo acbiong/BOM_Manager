@@ -3,6 +3,7 @@ from html import escape
 from PyQt5.QtCore import QObject,QEvent,QTimer,Qt,QPersistentModelIndex
 from PyQt5.QtGui import QCursor
 from PyQt5.QtWidgets import QDialog,QVBoxLayout,QPlainTextEdit,QDialogButtonBox,QToolTip
+from ui.interactive_windows import QDialog
 
 DESCRIPTION_ROLE=Qt.UserRole+20
 

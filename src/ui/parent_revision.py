@@ -1,4 +1,5 @@
 from PyQt5.QtWidgets import QDialog,QVBoxLayout,QLabel,QTableWidget,QTableWidgetItem,QComboBox,QDialogButtonBox,QMessageBox,QAbstractItemView
+from ui.interactive_windows import QDialog,QMessageBox
 from PyQt5.QtCore import Qt
 
 class ParentRevisionDialog(QDialog):

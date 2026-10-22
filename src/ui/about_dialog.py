@@ -2,6 +2,7 @@
 from html import escape
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLabel, QScrollArea, QWidget, QDialogButtonBox
+from ui.interactive_windows import QDialog
 from infrastructure.build_info import load_build_info, COPYRIGHT, REPOSITORY_URL
 
 

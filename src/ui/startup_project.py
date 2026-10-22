@@ -1,5 +1,6 @@
 """Validate and restore the last project, without silently creating a database."""
 from PyQt5.QtWidgets import QMessageBox,QFileDialog,QInputDialog
+from ui.interactive_windows import QFileDialog,QInputDialog,QMessageBox
 from config.project_registry import ProjectRegistry
 
 def recovery_choice(reason):

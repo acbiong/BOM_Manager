@@ -7,6 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from openpyxl import load_workbook
 from PyQt5.QtWidgets import QApplication,QFileDialog,QMessageBox,QMenu
+from ui.interactive_windows import QFileDialog,QMessageBox
 from PyQt5.QtCore import QPoint
 from database.database import Database
 from services.services import Services

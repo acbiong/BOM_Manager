@@ -2,6 +2,7 @@
 from pathlib import Path
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMenu,QFileDialog,QDialog,QMessageBox
+from ui.interactive_windows import QDialog,QFileDialog,QMessageBox
 from config.config_service import ConfigService
 from config.project_registry import ProjectRegistry,FIELDS
 from database.database import Database
@@ -145,6 +146,7 @@ class ProjectManagement:
  def handle_occupied_project(self,error):
   from ui.startup_project import occupied_choice
   from PyQt5.QtWidgets import QInputDialog
+  from ui.interactive_windows import QInputDialog
   if occupied_choice(str(error),self)=='close':self.close_project();return False
   records=self.projects.entries()
   if not records:QMessageBox.information(self,'无历史项目','暂无其他历史项目，可关闭项目后新建或导入项目。');return False

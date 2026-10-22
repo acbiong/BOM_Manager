@@ -6,6 +6,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication,QDialog,QListWidget
+from ui.interactive_windows import QDialog
 from database.database import Database
 from services.services import Services
 from ui.main_window import MainWindow

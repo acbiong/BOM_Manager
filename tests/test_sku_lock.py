@@ -4,6 +4,7 @@ from unittest.mock import patch
 os.environ['QT_QPA_PLATFORM']='offscreen'
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QMenu,QMessageBox,QDialog,QTableWidget
+from ui.interactive_windows import QDialog,QMessageBox
 from PyQt5.QtCore import Qt,QPoint,QCoreApplication,QEvent
 from database.database import Database
 from services.services import Services

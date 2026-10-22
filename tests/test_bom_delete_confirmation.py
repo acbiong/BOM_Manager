@@ -9,6 +9,7 @@ sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtCore import Qt,QTimer,QEvent,QCoreApplication
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication,QMessageBox
+from ui.interactive_windows import QMessageBox
 from database.database import Database
 from services.services import Services
 from ui.main_window import BomWindow
@@ -32,7 +33,7 @@ class DeleteConfirmationTests(unittest.TestCase):
    QTest.keyClick(self.w.tree,Qt.Key_Delete);self.assertEqual(question.call_count,1)
   self.assertFalse(item.data(0,Qt.UserRole).get('_deleted',False))
   def confirm():
-   box=self.app.activeModalWidget()
+   box=self.app.activeWindow()
    if box is not None:QTest.keyClick(box,Qt.Key_Return)
   QTimer.singleShot(30,confirm);QTest.keyClick(self.w.tree,Qt.Key_Delete)
   self.assertTrue(item.data(0,Qt.UserRole)['_deleted'])

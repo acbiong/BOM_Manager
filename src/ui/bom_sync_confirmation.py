@@ -1,5 +1,6 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QDialog,QVBoxLayout,QLabel,QTableWidget,QTableWidgetItem,QDialogButtonBox,QAbstractItemView
+from ui.interactive_windows import QDialog
 
 class BomSyncConfirmationDialog(QDialog):
     def __init__(self,plan,parent=None):

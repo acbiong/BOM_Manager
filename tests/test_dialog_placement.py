@@ -12,6 +12,7 @@ sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtCore import QRect,QEvent,QCoreApplication
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication,QDialog,QWidget,QProgressDialog,QMessageBox,QInputDialog,QFileDialog
+from ui.interactive_windows import QFileDialog,QMessageBox,QProgressDialog
 from config.config_service import ConfigService
 from ui.window_geometry import WindowGeometryMemory
 

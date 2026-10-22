@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QAbstractItemView, QLabel,
     QDialogButtonBox, QMessageBox)
+from ui.interactive_windows import QDialog,QMessageBox
 
 
 class MaterialSearchDialog(QDialog):

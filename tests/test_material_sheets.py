@@ -6,6 +6,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from openpyxl import Workbook
 from PyQt5.QtWidgets import QApplication,QInputDialog,QFileDialog,QDialog,QMessageBox
+from ui.interactive_windows import QFileDialog,QInputDialog,QMessageBox
 from database.database import Database
 from services.services import Services,MaterialHeaderError
 from ui.main_window import MainWindow,MaterialHeaderMappingDialog,MaterialImportResultDialog,choose_material_sheet

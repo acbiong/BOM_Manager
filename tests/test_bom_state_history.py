@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QMessageBox
+from ui.interactive_windows import QMessageBox
 from openpyxl import load_workbook
 from database.database import Database
 from services.services import Services

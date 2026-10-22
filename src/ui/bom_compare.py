@@ -5,6 +5,7 @@ from PyQt5.QtCore import Qt, QSize, QTimer, QItemSelection, QItemSelectionModel
 from PyQt5.QtGui import QColor, QTextDocument, QPalette, QKeySequence, QFontMetrics, QFont, QTextOption
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,
     QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QMessageBox,QStyledItemDelegate,QStyleOptionViewItem,QStyle,QApplication,QShortcut,QSizePolicy,QMenu,QCheckBox,QFileDialog,QInputDialog)
+from ui.interactive_windows import QDialog,QFileDialog,QInputDialog,QMessageBox
 from ui.bom_compare_table import BomCompareTable
 from services.bom_compare import FIELDS,compare_boms,value,snapshot,compare_trees
 from infrastructure.events import WindowRefreshBus

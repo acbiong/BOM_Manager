@@ -7,6 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtCore import QCoreApplication,QEvent,QTimer
 from PyQt5.QtWidgets import QApplication,QMessageBox
+from ui.interactive_windows import QMessageBox
 from config.config_service import ConfigService
 from infrastructure.events import WindowRefreshBus
 from services.services import Services

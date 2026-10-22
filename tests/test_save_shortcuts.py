@@ -6,6 +6,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtCore import Qt,QEvent,QCoreApplication
 from PyQt5.QtWidgets import QApplication,QDialog,QDialogButtonBox,QMessageBox,QInputDialog
+from ui.interactive_windows import QMessageBox
 from PyQt5.QtTest import QTest
 from ui.save_shortcut import install_save_shortcuts
 from ui.main_window import MaterialDialog,MaterialHeaderMappingDialog,ProjectDialog,MainWindow

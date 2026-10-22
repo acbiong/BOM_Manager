@@ -50,6 +50,7 @@ class BomImportTests(unittest.TestCase):
  def test_root_mismatch_before_any_write_and_ui_warning(self):
   from unittest.mock import patch
   from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
+  from ui.interactive_windows import QFileDialog,QInputDialog,QMessageBox
   from ui.main_window import BomWindow,BomImportIssuesDialog
   self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=5,unit='pcs')])
   before=[dict(row) for row in self.s.bom(self.ids['R','1'])]
@@ -84,6 +85,7 @@ class BomImportTests(unittest.TestCase):
  def test_ui_import_is_cached_until_save_and_discard_does_not_write(self):
   from unittest.mock import patch
   from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
+  from ui.interactive_windows import QFileDialog,QInputDialog,QMessageBox
   from PyQt5.QtCore import Qt
   from ui.main_window import BomWindow,BomTreeWidget,BomImportConflictDialog
   root=self.ids['R','1'];old=self.ids['C','1'];new=self.ids['P','2']
@@ -135,6 +137,7 @@ class BomImportTests(unittest.TestCase):
  def test_error_dialog_preserves_unsaved_cache_and_scrolls(self):
   from unittest.mock import patch
   from PyQt5.QtWidgets import QFileDialog,QInputDialog,QMessageBox
+  from ui.interactive_windows import QFileDialog,QInputDialog,QMessageBox
   from ui.main_window import BomWindow,BomImportIssuesDialog
   self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=1,unit='pcs')])
   window=BomWindow(self.s,self.ids['R','1']);shown=[]
@@ -162,6 +165,7 @@ class BomImportTests(unittest.TestCase):
  def test_alternate_mapping_groups_cache_save_and_clear(self):
   from ui.main_window import BomWindow
   from PyQt5.QtWidgets import QMessageBox
+  from ui.interactive_windows import QMessageBox
   from unittest.mock import patch
   root=self.ids['R','1'];child=self.ids['P','2'];alt=self.ids['C','1']
   headers=self.s.BOM_HEADERS+['替代编码','替代版本']

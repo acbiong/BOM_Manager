@@ -8,6 +8,7 @@ from services.services import Services
 from ui.main_window import BomWindow,QuantityEdit
 from domain.quantity import format_quantity
 from PyQt5.QtWidgets import QApplication,QMessageBox,QProgressDialog
+from ui.interactive_windows import QMessageBox,QProgressDialog
 from PyQt5.QtCore import Qt
 
 class BomQuantitySaveTests(unittest.TestCase):

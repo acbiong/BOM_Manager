@@ -8,6 +8,7 @@ from datetime import datetime,timezone
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 from PyQt5.QtWidgets import QApplication, QFileDialog
+from ui.interactive_windows import QFileDialog
 from database.database import Database
 from services.services import Services
 from ui.time_display import sku_timestamp

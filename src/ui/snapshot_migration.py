@@ -1,5 +1,6 @@
 """Migrate existing effective graphs without replacing any historical variant."""
 from PyQt5.QtWidgets import QMessageBox
+from ui.interactive_windows import QMessageBox
 from services.snapshot_bom import migrate,enabled
 
 def prepare_snapshot_bom(db,parent=None):

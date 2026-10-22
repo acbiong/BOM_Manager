@@ -5,6 +5,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtCore import Qt,QItemSelectionModel,QPoint,QEvent
 from PyQt5.QtWidgets import QApplication,QMenu,QMessageBox,QAbstractItemView
+from ui.interactive_windows import QMessageBox
 from PyQt5.QtTest import QTest
 from database.database import Database
 from services.services import Services
@@ -65,6 +66,7 @@ class MultiSelectTests(unittest.TestCase):
 
  def test_batch_export_one_folder_real_files_and_collision(self):
   from PyQt5.QtWidgets import QFileDialog
+  from ui.interactive_windows import QFileDialog
   from openpyxl import load_workbook
   folder=Path(self.tmp.name)/'exports';folder.mkdir()
   for purchase in (False,True):
@@ -80,6 +82,7 @@ class MultiSelectTests(unittest.TestCase):
    book=load_workbook(path);self.assertTrue(book.sheetnames);book.close()
  def test_batch_export_cancel_and_failure_continues(self):
   from PyQt5.QtWidgets import QFileDialog
+  from ui.interactive_windows import QFileDialog
   with patch.object(QFileDialog,'getExistingDirectory',return_value=''),patch.object(self.w,'export_sku_id') as export:
    self.w.export_sku_batch(self.ids);export.assert_not_called()
   with patch.object(QFileDialog,'getExistingDirectory',return_value=self.tmp.name),patch.object(self.w,'export_sku_id',side_effect=[OSError('无法写入'),None,None]) as export,patch.object(QMessageBox,'exec_',return_value=QMessageBox.Ok),patch('ui.main_window.remember_export_path'):
