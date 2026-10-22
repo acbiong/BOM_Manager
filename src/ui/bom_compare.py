@@ -250,8 +250,15 @@ class BomCompareDialog(QDialog):
 
     def selected_snapshot(self,key):
         if key in self.external_sources:
-            from copy import deepcopy
-            return deepcopy(self.external_sources[key]['tree'])
+            from services.external_bom import ExcelSource,build_external_bom
+            spec=self.external_sources[key]
+            try:
+                source=ExcelSource(spec['path'])
+                try:rows=source.rows(spec['sheet'])
+                finally:source.close()
+                return build_external_bom(rows,spec['mapping'])
+            except Exception as exc:
+                raise ValueError(f"外部BOM重新载入失败：{spec['label']}\n{exc}\n请检查文件、工作表和列映射，必要时重新选择‘载入其他BOM’。") from exc
         sku=next((dict(row) for row in self.service.skus() if row['id']==key),None)
         if sku is None:raise ValueError('所选SKU不存在，请重新选择')
         return self.live_snapshot(sku)
@@ -298,7 +305,7 @@ class BomCompareDialog(QDialog):
             from pathlib import Path
             import uuid
             key='external:'+uuid.uuid4().hex
-            self.external_sources[key]={'tree':tree,'label':f'外部：{Path(path).name} / {sheet}'}
+            self.external_sources[key]={'path':str(path),'sheet':sheet,'mapping':dict(dialog.mapping()),'label':f'外部：{Path(path).name} / {sheet}'}
             self.reload_choices();combo.setCurrentIndex(combo.findData(key));self._chosen[side]=key
             previous=key
         except Exception as error:QMessageBox.warning(self,'外部BOM载入失败',str(error))

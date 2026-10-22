@@ -93,13 +93,40 @@ class ExternalBomTests(unittest.TestCase):
    db=Database(str(Path(tmp)/'db'));s=Services(db);dialog=BomCompareDialog(s)
    try:
     rows=self.fixture();tree=build_external_bom(rows,{h:h for h in rows[0]});changed=deepcopy(tree);changed['children'][0]['quantity']=2
-    dialog.external_sources={'external:a':{'label':'A','tree':tree},'external:b':{'label':'B','tree':changed}}
+    dialog.external_sources={}
+    for key,label,qty in [('external:a','A',.12345),('external:b','B',2)]:
+     path=Path(tmp)/(label+'.xlsx');book=Workbook();book.active.title='BOM'
+     for row in rows:book.active.append(row)
+     book.active.cell(3,6,qty);book.save(path);book.close()
+     dialog.external_sources[key]={'label':label,'path':str(path),'sheet':'BOM','mapping':{h:h for h in rows[0]}}
     dialog.reload_choices();dialog.left.setCurrentIndex(dialog.left.findData('external:a'));dialog.right.setCurrentIndex(dialog.right.findData('external:b'))
     before=db.conn.total_changes;dialog.compare();self.assertEqual(dialog._rows[1].status,'modified')
     dialog.left.setCurrentIndex(dialog.left.count()-1)
     with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=('','')):dialog.choose_source(0)
     self.assertEqual(dialog.left.currentData(),'external:a');self.assertTrue(dialog._compared)
     self.assertEqual(db.conn.total_changes,before);self.assertEqual(s.materials(),[])
+   finally:dialog.close();db.close()
+ def test_compare_button_rereads_file_and_never_uses_stale_results(self):
+  from openpyxl import load_workbook
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));dialog=BomCompareDialog(Services(db));rows=self.fixture()
+   try:
+    for key in ('a','b'):
+     path=Path(tmp)/(key+'.xlsx');book=Workbook();book.active.title='BOM'
+     for row in rows:book.active.append(row)
+     book.save(path);book.close()
+     dialog.external_sources[key]={'label':key,'path':str(path),'sheet':'BOM','mapping':{h:h for h in rows[0]}}
+    dialog.reload_choices();dialog.left.setCurrentIndex(dialog.left.findData('a'));dialog.right.setCurrentIndex(dialog.right.findData('b'))
+    before=db.conn.total_changes;dialog.button.click();self.assertTrue(all(r.status=='same' for r in dialog._rows))
+    path=Path(tmp)/'b.xlsx';book=load_workbook(path);book['BOM'].cell(3,6,9.5);book.save(path);book.close()
+    dialog.button.click();self.assertEqual(dialog._rows[1].right['quantity'],9.5);self.assertEqual(dialog._rows[1].status,'modified')
+    book=load_workbook(path);book['BOM'].cell(1,6,'Changed header');book.save(path);book.close()
+    with patch('ui.bom_compare.QMessageBox.warning') as warning:
+     dialog.button.click();warning.assert_called_once();self.assertFalse(dialog._compared);self.assertEqual(dialog._rows,[])
+    path.unlink()
+    with patch('ui.bom_compare.QMessageBox.warning') as warning:
+     dialog.button.click();warning.assert_called_once();self.assertEqual(dialog._rows,[])
+    self.assertEqual(db.conn.total_changes,before)
    finally:dialog.close();db.close()
  def test_full_export_roundtrip_and_exchange_by_codes(self):
   with tempfile.TemporaryDirectory() as tmp:
