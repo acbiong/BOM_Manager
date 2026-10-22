@@ -125,3 +125,31 @@ class ClipboardTests(unittest.TestCase):
    target=self.w.root_item.child(0 if not deleted else 1);added=self.w.paste_material(target,True)
    self.assertEqual(added.text(1),'4.25');self.assertEqual(added.text(4),'保留备注');self.assertEqual(self.w.alternate_ids(added),[self.ids['A']])
   self.other.copy_bom_material(self.other.root_item);self.assertIsNone(clipboard_relation(self.s))
+ def test_multi_copy_original_order_attributes_and_batch_rejection(self):
+  from ui.material_clipboard import clipboard_entries
+  a,b=self.w.root_item.child(0),self.w.root_item.child(1)
+  self.w.show_item_info(a);self.w.fields['quantity'].setText('2.5');self.w.fields['remark'].setText('A备注');self.w._alternate_edits[self.w.alternate_key(a)]=[self.ids['D']]
+  self.w.tree.clearSelection();b.setSelected(True);a.setSelected(True)
+  self.assertTrue(self.w.copy_bom_material(b));self.assertEqual([m['id'] for m,r in clipboard_entries(self.s)],[self.ids['A'],self.ids['B']])
+  self.other.paste_material(self.other.root_item.child(0),False)
+  self.assertEqual([self.other.root_item.child(i).data(0,Qt.UserRole)['material_id'] for i in range(3)],[self.ids[c] for c in ('C','A','B')])
+  added=self.other.root_item.child(1);self.assertEqual(added.text(1),'2.5');self.assertEqual(added.text(4),'A备注');self.assertEqual(self.other.alternate_ids(added),[self.ids['D']])
+  self.assertIsNone(self.other.paste_material(self.other.root_item,True));self.assertEqual(self.other.root_item.childCount(),3)
+  with patch.object(QMessageBox,'information'):self.assertTrue(self.other.save())
+  self.assertEqual([r['material_id'] for r in self.s.bom(self.ids['S']) if r['level_no']==1],[self.ids[c] for c in ('C','A','B')])
+ def test_multi_cut_and_locked_copy_only(self):
+  a,b=self.w.root_item.child(0),self.w.root_item.child(1);self.w.tree.clearSelection();a.setSelected(True);b.setSelected(True)
+  with patch.object(self.w,'is_locked',return_value=True):
+   actions=self.w.clipboard_actions(QMenu(self.w),a);self.assertEqual(set(actions),{'copy'});self.assertFalse(self.w.cut_material(a));self.assertTrue(self.w.copy_bom_material(a))
+  self.assertTrue(self.w.cut_material(a));self.assertTrue(a.data(0,Qt.UserRole)['_deleted']);self.assertTrue(b.data(0,Qt.UserRole)['_deleted'])
+  target=self.other.root_item.child(0);self.other.paste_material(target,True)
+  self.assertEqual([target.child(i).data(0,Qt.UserRole)['material_id'] for i in range(3)],[self.ids[c] for c in ('D','A','B')])
+ def test_ctrl_shift_same_parent_and_right_click_preserves_selection(self):
+  from PyQt5.QtTest import QTest
+  self.w.show();self.w.activateWindow();self.app.processEvents();tree=self.w.tree
+  a,b=tree.topLevelItem(0).child(0),tree.topLevelItem(0).child(1)
+  def click(node,mod=Qt.NoModifier):QTest.mouseClick(tree.viewport(),Qt.LeftButton,mod,tree.visualItemRect(node).center())
+  click(a);click(b,Qt.ControlModifier);self.assertEqual(len(tree.selectedItems()),2)
+  QTest.mouseClick(tree.viewport(),Qt.RightButton,Qt.NoModifier,tree.visualItemRect(a).center());self.assertEqual(len(tree.selectedItems()),2)
+  click(a);click(b,Qt.ShiftModifier);self.assertEqual(len(tree.selectedItems()),2)
+  click(self.w.root_item,Qt.ControlModifier);self.assertEqual(tree.selectedItems(),[self.w.root_item])

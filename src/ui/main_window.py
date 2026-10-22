@@ -13,7 +13,7 @@ from database.database import Database
 from infrastructure.events import WindowRefreshBus
 from services.services import MaterialHeaderError, BomImportError, MATERIAL_IMPORT_HEADERS, MATERIAL_IMPORT_DEFAULTS
 from ui.theme import apply_theme, theme_icon
-from ui.material_clipboard import copy_material, clipboard_material, clipboard_relation
+from ui.material_clipboard import copy_material, clipboard_material, clipboard_relation, copy_materials, clipboard_entries
 from ui.material_search import MaterialSearchDialog, BomSearchDialog
 from ui.table_layout import fit_columns
 from ui.about_dialog import AboutDialog
@@ -800,6 +800,16 @@ class BomImportConflictDialog(QDialog):
  def finish(self,choice):self.choice=choice;self.accept() if choice!='stop' else self.reject()
 
 class BomTreeWidget(QTreeWidget):
+ def __init__(self,*args):
+  super().__init__(*args);self.setSelectionMode(QAbstractItemView.ExtendedSelection);self.setSelectionBehavior(QAbstractItemView.SelectRows)
+ def mousePressEvent(self,event):
+  item=self.itemAt(event.pos())
+  if event.button()==Qt.RightButton and item is not None and item.isSelected():event.accept();return
+  super().mousePressEvent(event)
+  if item is not None:
+   for selected in self.selectedItems():
+    if selected.parent() is not item.parent():selected.setSelected(False)
+
  def scrollTo(self,index,hint=QAbstractItemView.EnsureVisible):
   if not getattr(self,'_hold_view',False):super().scrollTo(index,hint)
  def drawRow(self,painter,option,index):
@@ -890,8 +900,11 @@ class BomWindow(QMainWindow):
  def context_menu(self,pos):
   it=self.tree.itemAt(pos)
   if not it:return
+  if not it.isSelected():self.tree.clearSelection();self.tree.setCurrentItem(it)
   d=it.data(0,Qt.UserRole) or {}
   menu=QMenu(self)
+  if len(self.selected_copy_items(it))>1:
+   actions=self.clipboard_actions(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos));self.handle_clipboard_action(chosen,actions,it);return
   if self.is_locked():
    reverse=menu.addAction('物料反查');copy=menu.addAction('复制物料');export=self.subtree_export_action(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
    if chosen==reverse:self.reverse_tree_material(it)
@@ -1123,11 +1136,11 @@ class BomWindow(QMainWindow):
   self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item); self.tree.scrollToItem(item); self.remember_expansion()
  def clipboard_actions(self,menu,item):
   actions={'copy':menu.addAction('复制物料')}
-  if item is not self.root_item and not self.is_locked() and not (item.data(0,Qt.UserRole) or {}).get('_deleted'):actions['cut']=menu.addAction('剪切物料')
-  material=clipboard_material(self.svc)
-  if material:
+  if item is not self.root_item and not self.is_locked() and all(not (node.data(0,Qt.UserRole) or {}).get('_deleted') for node in self.selected_copy_items(item)):actions['cut']=menu.addAction('剪切物料')
+  entries=clipboard_entries(self.svc)
+  if entries and not self.is_locked():
    for key,label,child in [('same','粘贴为同级物料',False),('child','粘贴为子级物料',True)]:
-    action=menu.addAction(label); reason=self.paste_block_reason(item,child,material['id'])
+    action=menu.addAction(label); reason=self.batch_paste_reason(item,child,entries)
     action.setEnabled(not reason); action.setToolTip(reason or label); actions[key]=action
   return actions
  def handle_clipboard_action(self,action,actions,item):
@@ -1141,18 +1154,30 @@ class BomWindow(QMainWindow):
     if actions[key].isEnabled():self.paste_material(item,child)
     return True
   return False
+ def selected_copy_items(self,item):
+  if item is None:return []
+  selected=self.tree.selectedItems() if item.isSelected() else [item]
+  selected=[node for node in selected if node.parent() is item.parent()]
+  return sorted(selected,key=lambda node:node.parent().indexOfChild(node) if node.parent() else 0)
  def copy_bom_material(self,item):
-  if item is None:return False
-  data=item.data(0,Qt.UserRole) or {}
-  if item is self.root_item:return copy_material(self.svc,data.get('material_id',self.root))
-  # Capture the relation's draft values, not catalog defaults or transient UI hints.
-  relation=dict(quantity=float(item.text(1)),position=item.text(3),remark=data.get('remark',''),alternate_material_ids=self.alternate_ids(item))
-  return copy_material(self.svc,data['material_id'],relation)
+  nodes=self.selected_copy_items(item);entries=[]
+  for node in nodes:
+   data=node.data(0,Qt.UserRole) or {}
+   relation=None if node is self.root_item else dict(quantity=float(node.text(1)),position=node.text(3),remark=data.get('remark',''),alternate_material_ids=self.alternate_ids(node))
+   entries.append((data.get('material_id',self.root),relation))
+  if len(entries)==1:return copy_material(self.svc,*entries[0])
+  return copy_materials(self.svc,entries)
  def cut_material(self,item):
-  if self.is_locked() or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return False
+  nodes=self.selected_copy_items(item)
+  if self.is_locked() or not nodes or any(node is self.root_item or (node.data(0,Qt.UserRole) or {}).get('_deleted') for node in nodes):return False
   if self.copy_bom_material(item):
-   self.remove_relation(item);return True
+   for node in nodes:self.remove_relation(node)
+   return True
   return False
+ def batch_paste_reason(self,item,child,entries):
+  ids=[material['id'] for material,relation in entries]
+  if len(ids)!=len(set(ids)):return '剪贴板中包含重复物料'
+  return next((reason for material,relation in entries if (reason:=self.paste_block_reason(item,child,material['id']))),'')
  def paste_block_reason(self,item,child,material_id):
   target=item if child else item.parent()
   if target is None:return 'SKU根节点不能增加同级物料'
@@ -1176,20 +1201,17 @@ class BomWindow(QMainWindow):
  @preserve_bom_view
  def paste_material(self,item,child):
   if self.is_locked():return False
-  material=clipboard_material(self.svc)
-  if material is None:return
-  reason=self.paste_block_reason(item,child,material['id'])
-  if reason:return
-  target=item if child else item.parent()
-  added=self.insert_material(target,material)
-  relation=clipboard_relation(self.svc)
-  if relation is not None:
-   data=dict(added.data(0,Qt.UserRole) or {})
-   for field,column in [('quantity',1),('position',3),('remark',4)]:
-    data[field]=relation[field];added.setText(column,format_quantity(relation[field]) if field=='quantity' else relation[field])
-   added.setData(0,Qt.UserRole,data);self._alternate_edits[self.alternate_key(added)]=relation['alternate_material_ids'];self._draft_baselines[data['id']]=self.capture_item(added);self.mark_dirty()
-  if not child:
-   target.takeChild(target.indexOfChild(added)); target.insertChild(target.indexOfChild(item)+1,added)
+  entries=clipboard_entries(self.svc)
+  if not entries or self.batch_paste_reason(item,child,entries):return
+  target=item if child else item.parent();anchor=item
+  for material,relation in entries:
+   added=self.insert_material(target,material,after=None if child else anchor)
+   if relation is not None:
+    data=dict(added.data(0,Qt.UserRole) or {})
+    for field,column in [('quantity',1),('position',3),('remark',4)]:
+     data[field]=relation[field];added.setText(column,format_quantity(relation[field]) if field=='quantity' else relation[field])
+    added.setData(0,Qt.UserRole,data);self._alternate_edits[self.alternate_key(added)]=relation['alternate_material_ids'];self._draft_baselines[data['id']]=self.capture_item(added);self.mark_dirty()
+   anchor=added
   self.tree.setCurrentItem(added); self.show_item_info(added); self.tree.scrollToItem(added)
   return added
  def relation_key(self,item):
