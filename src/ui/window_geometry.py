@@ -3,6 +3,7 @@ import hashlib
 import logging
 import weakref
 from PyQt5.QtCore import QObject, QEvent, QByteArray, Qt, QTimer
+from PyQt5 import sip
 from PyQt5.QtGui import QCursor
 from PyQt5.QtWidgets import QWidget, QApplication, QDialog, QProgressDialog, QMessageBox, QInputDialog, QLabel
 
@@ -15,6 +16,10 @@ class WindowGeometryMemory(QObject):
         self.last_geometry = weakref.WeakKeyDictionary()
         self.restoring = weakref.WeakSet()
         self.pending = {}
+        self.placements = {}
+        self.placement_timer = QTimer(self)
+        self.placement_timer.setSingleShot(True)
+        self.placement_timer.timeout.connect(self.settle_placements)
         settings = config.load()
         try:
             reset = settings.getboolean('ui', 'reset_window_geometry', fallback=False)
@@ -82,26 +87,20 @@ class WindowGeometryMemory(QObject):
         if window in self.restoring:
             return
         self.center_dialog(window)
-        # Native decorations and progress text sizing can finish after Show/Resize.
-        # Position immediately, then settle with a bounded window-owned timer.
-        timer = getattr(window, '_bom_placement_timer', None)
-        if timer is None:
-            timer = QTimer(window)
-            timer.setSingleShot(True)
-            timer.timeout.connect(lambda: self.settle_transient(window))
-            window._bom_placement_timer = timer
-        window._bom_placement_passes = 3
-        timer.start(0)
+        # One manager-owned timer/slot, never a lambda parented to a temporary
+        # native QMessageBox. Keep wrappers alive only for these bounded passes.
+        self.placements[window] = 3
+        if not self.placement_timer.isActive():self.placement_timer.start(0)
 
-    def settle_transient(self, window):
-        if not window.isVisible():
-            return
-        self.safely(self.center_dialog, window)
-        window._bom_placement_passes -= 1
-        # X11 window managers add native title bars asynchronously. A bounded
-        # pair of follow-ups accounts for them; never track/override user moves.
-        if window._bom_placement_passes > 0:
-            window._bom_placement_timer.start(50)
+    def settle_placements(self):
+        for window, passes in list(self.placements.items()):
+            if sip.isdeleted(window) or not window.isVisible():
+                self.placements.pop(window, None)
+                continue
+            self.safely(self.center_dialog, window)
+            if passes <= 1:self.placements.pop(window, None)
+            elif window in self.placements:self.placements[window] = passes-1
+        if self.placements:self.placement_timer.start(50)
 
     @staticmethod
     def geometry(window):
@@ -182,6 +181,9 @@ class WindowGeometryMemory(QObject):
 
     def eventFilter(self, obj, event):
         kind = event.type()
+        if kind in (QEvent.Hide, QEvent.Close, QEvent.DeferredDelete):
+            self.placements.pop(obj, None)
+            if not self.placements:self.placement_timer.stop()
         if kind in (QEvent.Show, QEvent.Hide, QEvent.Resize, QEvent.Move, QEvent.WindowStateChange) and self.eligible(obj):
             if kind == QEvent.Show:
                 self.safely(self.restore, obj)

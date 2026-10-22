@@ -103,6 +103,6 @@ class DialogPlacementTests(unittest.TestCase):
  def test_settling_stops_and_does_not_override_later_user_move(self):
   dialog=self.track(QProgressDialog('正在导入',None,0,100));dialog.show()
   QTest.qWait(180);self.assert_centered(dialog)
-  self.assertFalse(dialog._bom_placement_timer.isActive())
+  self.assertFalse(self.memory.placement_timer.isActive())
   dialog.move(30,40);expected=dialog.pos();QTest.qWait(100)
   self.assertEqual(dialog.pos(),expected)

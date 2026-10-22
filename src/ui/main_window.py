@@ -1775,12 +1775,16 @@ class BomWindow(QMainWindow):
    self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
    report(100,'BOM保存完成')
   except Exception as error:
+   from PyQt5 import sip
+   if sip.isdeleted(self):return False
    self.mark_dirty()
    show_operation_error(self,'保存失败',error,'BOM未保存，编辑内容已保留。\n')
    return False
   finally:
    self._saving=False
-   progress.close()
+   from PyQt5 import sip
+   if not sip.isdeleted(progress):progress.close();progress.deleteLater()
+  if sip.isdeleted(self):return False
   QMessageBox.information(self,'保存','BOM已保存')
   return True
 

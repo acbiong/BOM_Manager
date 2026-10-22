@@ -21,7 +21,9 @@ def show_operation_error(parent,title,error,prefix=''):
  fit_columns(table);table.resizeRowsToContents()
  buttons=QDialogButtonBox(QDialogButtonBox.Ok);buttons.accepted.connect(dialog.accept);layout.addWidget(buttons)
  try:dialog.exec_()
- finally:dialog.deleteLater()
+ finally:
+  from PyQt5 import sip
+  if not sip.isdeleted(dialog):dialog.deleteLater()
 
 
 class CenteredLockDelegate(QStyledItemDelegate):

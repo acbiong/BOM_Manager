@@ -81,16 +81,22 @@ class QInputDialog(ResultWindow,QtInputDialog):
     @staticmethod
     def getText(parent,title,label,echo=QLineEdit.Normal,text='',flags=Qt.WindowFlags(),inputMethodHints=Qt.ImhNone):
         d=QInputDialog(parent,flags);d.setWindowTitle(title);d.setLabelText(label);d.setTextEchoMode(echo);d.setTextValue(text);d.setInputMethodHints(inputMethodHints)
-        ok=d.exec_()==QtDialog.Accepted;value=d.textValue();d.deleteLater();return value,ok
+        ok=d.exec_()==QtDialog.Accepted
+        if sip.isdeleted(d):return '',False
+        value=d.textValue();d.deleteLater();return value,ok
     @staticmethod
     def getInt(parent,title,label,value=0,min=-2147483647,max=2147483647,step=1,flags=Qt.WindowFlags()):
         d=QInputDialog(parent,flags);d.setWindowTitle(title);d.setLabelText(label);d.setInputMode(d.IntInput);d.setIntRange(min,max);d.setIntStep(step);d.setIntValue(value)
-        ok=d.exec_()==QtDialog.Accepted;value=d.intValue();d.deleteLater();return value,ok
+        ok=d.exec_()==QtDialog.Accepted
+        if sip.isdeleted(d):return value,False
+        value=d.intValue();d.deleteLater();return value,ok
     @staticmethod
     def getItem(parent,title,label,items,current=0,editable=True,flags=Qt.WindowFlags(),inputMethodHints=Qt.ImhNone):
         d=QInputDialog(parent,flags);d.setWindowTitle(title);d.setLabelText(label);d.setComboBoxItems(items);d.setComboBoxEditable(editable);d.setInputMethodHints(inputMethodHints)
         if items:d.setTextValue(items[current])
-        ok=d.exec_()==QtDialog.Accepted;value=d.textValue();d.deleteLater();return value,ok
+        ok=d.exec_()==QtDialog.Accepted
+        if sip.isdeleted(d):return '',False
+        value=d.textValue();d.deleteLater();return value,ok
 
 
 class QFileDialog(ResultWindow,QtFileDialog):
@@ -106,7 +112,7 @@ class QFileDialog(ResultWindow,QtFileDialog):
             self.setOption(self.DontConfirmOverwrite,True)
         try:super().accept()
         finally:
-            if confirm:self.setOption(self.DontConfirmOverwrite,False)
+            if confirm and not sip.isdeleted(self):self.setOption(self.DontConfirmOverwrite,False)
     @staticmethod
     def _file(parent,caption,directory,filter,initialFilter,options,save=False,folder=False):
         d=QFileDialog(parent,caption,directory,filter)
@@ -115,6 +121,7 @@ class QFileDialog(ResultWindow,QtFileDialog):
         d.setAcceptMode(d.AcceptSave if save else d.AcceptOpen)
         if initialFilter:d.selectNameFilter(initialFilter)
         ok=d.exec_()==QtDialog.Accepted
+        if sip.isdeleted(d):return '',''
         paths=d.selectedFiles() if ok else [];selected=d.selectedNameFilter();d.deleteLater()
         return (paths[0] if paths else ''),selected
     @staticmethod
@@ -132,14 +139,18 @@ class QColorDialog(ResultWindow,QtColorDialog):
     @staticmethod
     def getColor(initial=Qt.white,parent=None,title='',options=QtColorDialog.ColorDialogOptions()):
         d=QColorDialog(initial,parent);d.setWindowTitle(title);d.setOptions(options|d.DontUseNativeDialog)
-        value=d.currentColor() if d.exec_()==QtDialog.Accepted else QColor();d.deleteLater();return value
+        ok=d.exec_()==QtDialog.Accepted
+        if sip.isdeleted(d):return QColor()
+        value=d.currentColor() if ok else QColor();d.deleteLater();return value
 
 
 class QMessageBox(ResultWindow,QtMessageBox):
     def clickedButton(self):
-        return super().clickedButton() if getattr(self,'_context_valid',True) else None
+        return super().clickedButton() if not sip.isdeleted(self) and getattr(self,'_context_valid',True) else None
     @staticmethod
     def question(parent,title,text,buttons=QtMessageBox.Yes|QtMessageBox.No,defaultButton=QtMessageBox.NoButton):
         d=QMessageBox(parent);d.setWindowTitle(title);d.setText(text);d.setIcon(d.Question);d.setStandardButtons(buttons)
         if defaultButton!=d.NoButton:d.setDefaultButton(defaultButton)
-        result=d.exec_();d.deleteLater();return result
+        result=d.exec_()
+        if not sip.isdeleted(d):d.deleteLater()
+        return result

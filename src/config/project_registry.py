@@ -3,7 +3,7 @@ from configparser import ConfigParser
 from pathlib import Path
 import json
 import uuid
-from config.config_service import ConfigService
+from config.config_service import ConfigService,read_config_file
 
 FIELDS=('project_code','project_name','product_name','product_model')
 SETTINGS=('materials','import_mappings')
@@ -60,8 +60,7 @@ class ProjectRegistry:
   c=self.config.load();c.remove_section('new_project_draft');self.config.save(c)
  def read_import(self,path):
   # Never call load() on the source: importing must not rewrite the old config.
-  path=Path(path);c=ConfigParser(interpolation=None)
-  with path.open(encoding='utf-8-sig') as stream:c.read_file(stream)
+  path=Path(path);c=read_config_file(path)
   value=c.get('database','path',fallback='').strip()
   if not value:raise ValueError('所选配置没有SQLite数据库路径')
   if c.get('database','driver',fallback='sqlite').lower() not in ('sqlite','sqlite3'):raise ValueError('只支持SQLite项目配置')

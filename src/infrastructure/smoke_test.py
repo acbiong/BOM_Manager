@@ -68,7 +68,9 @@ def run_smoke_test(report_path):
             windows = [BomWindow(mirror,root),MainWindow(svc,get_version()),MaterialWindow(svc),BomWindow(svc,root),AboutDialog(get_version())]
             for window in windows:window.show()
             app.processEvents()
-            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved'])
+            from infrastructure.ui_smoke import exercise_windows
+            ui_checks=exercise_windows(svc,windows[1],windows[2])
+            report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None
     except Exception:

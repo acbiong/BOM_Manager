@@ -25,6 +25,16 @@ def relative_config_path(value, base):
  except ValueError as error:
   raise ValueError('数据库与config.ini位于不同盘符或共享根目录，无法保存相对路径；请将数据库放到配置文件同一盘符（建议同一文件夹）后重新选择') from error
 
+def read_config_file(path):
+ """Read portable legacy INI encodings without modifying the source file."""
+ raw=Path(path).read_bytes()
+ if raw.startswith((b'\xff\xfe',b'\xfe\xff')):text=raw.decode('utf-16')
+ else:
+  try:text=raw.decode('utf-8-sig')
+  except UnicodeDecodeError:text=raw.decode('gb18030')
+ config=ConfigParser(interpolation=None);config.read_string(text,source=str(path))
+ return config
+
 class ConfigService:
  def __init__(self, base=None): self.base=Path(base or Path.cwd()).expanduser().resolve(); self.path=self.base/'config.ini'
  def _mutex(self):
@@ -34,7 +44,7 @@ class ConfigService:
   with self._mutex():return self._load()
  def _load(self):
   c=ConfigParser(interpolation=None); changed=False
-  if self.path.exists(): c.read(self.path,encoding='utf-8')
+  if self.path.exists():c=read_config_file(self.path)
   if not c.has_section('database'): c['database']={"driver":"sqlite","path":"","host":"127.0.0.1","port":"3306","name":"bom"}; changed=True
   if not c.has_section('ui'):c.add_section('ui');changed=True
   if not c.has_option('ui','reset_window_geometry'):c.set('ui','reset_window_geometry','false');changed=True
@@ -76,7 +86,7 @@ class ConfigService:
    if before is None:self._write(c)
    else:
     current=ConfigParser(interpolation=None)
-    if self.path.exists():current.read(self.path,encoding='utf-8')
+    if self.path.exists():current=read_config_file(self.path)
     for section in set(before)|set(proposed):
      if section not in proposed:current.remove_section(section);continue
      if not current.has_section(section):current.add_section(section)
