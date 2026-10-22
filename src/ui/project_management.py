@@ -142,7 +142,8 @@ class ProjectManagement:
   if self._materials is not None:self._materials.close()
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
   config=self.svc.config_service.load();config['database']['path']=''
-  if config.has_section('projects'):config.remove_option('projects','active')
+  if not config.has_section('projects'):config.add_section('projects')
+  config.remove_option('projects','active');config['projects']['closed']='true'
   self.svc.config_service.save(config)
   if self.svc.db is not None:self.svc.db.close()
   self.svc.db=None;self._project_id=None;self.refresh();return True

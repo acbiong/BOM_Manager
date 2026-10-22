@@ -35,7 +35,7 @@ class ProjectRegistry:
   if settings is not None:c[section]['settings']=json.dumps(settings,ensure_ascii=False)
   if active:
    if not c.has_section('projects'):c.add_section('projects')
-   c['projects']['active']=key;c['database']['path']=relative;c.remove_option('projects','excluded_current')
+   c['projects']['active']=key;c['projects']['closed']='false';c['database']['path']=relative;c.remove_option('projects','excluded_current')
   self.config.save(c);return key
  def activate(self,key):
   c=self.config.load();r=c['project:'+key]
@@ -46,7 +46,7 @@ class ProjectRegistry:
    c.remove_option('database',field)
    if settings.get('database',{}).get(field):c['database'][field]=settings['database'][field]
   if not c.has_section('projects'):c.add_section('projects')
-  c['projects']['active']=key;c['database']['path']=r['path'];self.config.save(c)
+  c['projects']['active']=key;c['projects']['closed']='false';c['database']['path']=r['path'];self.config.save(c)
  def delete(self,key):
   c=self.config.load();c.remove_section('project:'+key)
   if c.get('projects','active',fallback='')==key:

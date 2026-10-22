@@ -77,3 +77,34 @@ class StartupProjectRestoreTests(unittest.TestCase):
   self.missing()
   with patch('ui.startup_project.recovery_choice',side_effect=['select','close']) as choose,patch.object(QFileDialog,'getOpenFileName',return_value=('','')):
    self.assertIsNone(restore_project(self.config,self.config.load()));self.assertEqual(choose.call_count,2)
+
+ def test_legacy_blank_current_project_prompts_then_loads_skus_and_remembers(self):
+  cfg=self.config.load();cfg['database']['path']='';cfg.remove_option('projects','active');self.config.save(cfg)
+  self.s.db.close()
+  def choose(*args):return args[3][0],True
+  with patch.object(QInputDialog,'getItem',side_effect=choose) as chooser:
+   db=restore_project(self.config,self.config.load())
+  self.dbs.append(db);chooser.assert_called_once()
+  self.assertEqual(len(Services(db).skus()),1)
+  self.assertEqual(self.config.load()['projects']['active'],self.key)
+  self.assertFalse(self.config.load().getboolean('projects','closed'))
+  db.close()
+  with patch.object(QInputDialog,'getItem') as chooser:
+   db=restore_project(self.config,self.config.load())
+  self.dbs.append(db);chooser.assert_not_called();self.assertEqual(len(Services(db).skus()),1)
+ def test_active_history_recovers_missing_database_path_without_prompt(self):
+  cfg=self.config.load();cfg['database']['path']='';self.config.save(cfg);self.s.db.close()
+  with patch.object(QInputDialog,'getItem') as chooser:db=restore_project(self.config,self.config.load())
+  self.dbs.append(db);chooser.assert_not_called();self.assertEqual(Path(db.path),self.path)
+ def test_cancel_legacy_project_choice_preserves_configuration(self):
+  cfg=self.config.load();cfg['database']['path']='';cfg.remove_option('projects','active');self.config.save(cfg)
+  before=self.config.path.read_bytes()
+  with patch.object(QInputDialog,'getItem',return_value=('',False)):
+   self.assertIsNone(restore_project(self.config,self.config.load()))
+  self.assertEqual(before,self.config.path.read_bytes())
+ def test_explicit_close_does_not_reopen_and_activation_clears_closed_flag(self):
+  self.windows[0].close_project()
+  with patch.object(QInputDialog,'getItem') as chooser:self.assertIsNone(restore_project(self.config,self.config.load()))
+  chooser.assert_not_called();self.assertTrue(self.config.load().getboolean('projects','closed'))
+  self.registry.activate(self.key)
+  self.assertFalse(self.config.load().getboolean('projects','closed'))

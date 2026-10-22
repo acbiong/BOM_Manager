@@ -24,8 +24,21 @@ def restore_project(config,cfg):
  from infrastructure.project_lock import ProjectInUseError
  registry=ProjectRegistry(config);value=cfg['database'].get('path','').strip()
  key=cfg.get('projects','active',fallback='') or None
- if not value:return None
  candidate=None
+ if not value:
+  if cfg.getboolean('projects','closed',fallback=False):return None
+  record=registry.get(key) if key else None
+  records=registry.entries()
+  if record is None and records:
+   labels=[' '.join(r.get(k,'') for k in ('project_code','project_name')).strip()+' — '+r['path'] for r in records]
+   label,ok=QInputDialog.getItem(None,'选择启动项目','已读取配置，但未指定当前项目。请选择要加载的项目：',labels,0,False)
+   if not ok:return None
+   record=records[labels.index(label)]
+  if record is None:return None
+  key=record['id'];value=record['path']
+  # Activation/settings are committed only after database validation succeeds.
+  try:candidate=str(config.resolve_path(value))
+  except ValueError:candidate=value
  while True:
   db=None;occupied=False
   try:
@@ -46,7 +59,8 @@ def restore_project(config,cfg):
    choice=occupied_choice(reason) if occupied else recovery_choice(reason)
    if choice=='close':
     latest=config.load();latest['database']['path']=''
-    if latest.has_section('projects'):latest.remove_option('projects','active')
+    if not latest.has_section('projects'):latest.add_section('projects')
+    latest.remove_option('projects','active');latest['projects']['closed']='true'
     config.save(latest);cfg['database']['path']='';return None
    if choice=='select':
     selected=QFileDialog.getOpenFileName(None,'指定项目数据库',str(config.base),'SQLite (*.db *.sqlite *.sqlite3);;所有文件 (*)')[0]

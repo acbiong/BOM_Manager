@@ -49,6 +49,12 @@ def exercise_windows(service,main,library):
         from PyQt5.QtCore import QPoint
         from PyQt5.QtTest import QTest
         with tempfile.TemporaryDirectory() as directory:
+            from database.database import Database
+            from ui.startup_project import restore_project
+            history_db=Database(str(Path(directory)/'history.db'));history_service=Services(history_db)
+            history_service.update_project(dict(project_code='OLD',project_name='历史项目'))
+            history_service.create_sku(history_service.create_material(dict(base_code='OLD-SKU',version='100',name='恢复SKU',unit='pcs')))
+            history_db.close()
             config=ConfigService(directory);registry=ProjectRegistry(config)
             registry.remember(Path(directory)/'history.db',dict(project_code='OLD',project_name='历史项目'))
             history_window=MainWindow(Services(None,config));opened.append(history_window)
@@ -62,6 +68,21 @@ def exercise_windows(service,main,library):
             history_window.history_menu.close();menu.close();history_window.close()
             history_window.deleteLater();opened.remove(history_window);drain()
             checks.append('ui_closed_project_history_first_hover')
+            def select_startup_project():
+                for window in app.topLevelWidgets():
+                    if isinstance(window,QInputDialog) and window.isVisible() and window.windowTitle()=='选择启动项目':window.accept()
+            selector=QTimer();selector.timeout.connect(select_startup_project);selector.start(30)
+            restored=None;restored_window=None
+            try:
+                restored=restore_project(config,config.load())
+                restored_window=MainWindow(Services(restored,config));restored_window.show();drain()
+                assert restored_window.table.rowCount()==1 and restored_window.table.item(0,1).text()=='OLD-SKU100'
+                assert config.load()['database']['path']=='history.db'
+                checks.append('ui_legacy_config_select_project_load_skus')
+            finally:
+                selector.stop()
+                if restored_window is not None:restored_window.close();restored_window.deleteLater();drain()
+                if restored is not None:restored.close()
         root=service.create_material(dict(base_code='UI-SMOKE',version='1',name='界面保存验证',unit='pcs'))
         child=service.create_material(dict(base_code='UI-CHILD',version='1',name='界面子料',unit='pcs'))
         sid=service.create_sku(root);scoped=service.for_sku(sid)
