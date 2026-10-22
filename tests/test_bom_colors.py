@@ -80,7 +80,14 @@ class BomColorTests(unittest.TestCase):
   with patch.object(menu,'actionAt',return_value=action),patch.object(QMenu,'exec_',lambda m,*a:m.actions()[0]):menu.remove_color(QPoint())
   self.assertNotIn(['#123456','#123456'],palette(self.cfg));self.assertEqual(node.data(0,Qt.UserRole)['row_color'],'#123456')
   with patch.object(QColorDialog,'getColor',return_value=QColor()):menu.more()
-  save_palette(self.cfg,[]);self.assertEqual(palette(self.cfg),[])
+  save_palette(self.cfg,[]);self.assertEqual(palette(self.cfg),DEFAULTS)
+  menu.populate()
+  for _,color in DEFAULTS:
+   action=next(a for a in menu.actions() if a.data()==color)
+   def choose_remove(m,*args):
+    self.assertFalse(m.actions()[0].isEnabled());return m.actions()[0]
+   with patch.object(menu,'actionAt',return_value=action),patch.object(QMenu,'exec_',choose_remove):menu.remove_color(QPoint())
+   self.assertEqual(palette(self.cfg),DEFAULTS)
   self.assertEqual(foreground('#000000'),'#ffffff');self.assertEqual(foreground('#ffffff'),'#000000');menu.deleteLater()
  def test_context_submenu_apply_and_cancel_discards_color(self):
   node=self.w.root_item.child(0);child=node.child(0)

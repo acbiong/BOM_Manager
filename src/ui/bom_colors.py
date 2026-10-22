@@ -10,7 +10,9 @@ def palette(config):
     from services.bom_colors import normalize
     raw=config.load().get('bom_colors','palette',fallback=None)
     if raw is None:return [list(row) for row in DEFAULTS]
-    try:return [[str(name),normalize(color)] for name,color in json.loads(raw) if color]
+    try:
+        custom=[[str(name),normalize(color)] for name,color in json.loads(raw) if color]
+        return [list(row) for row in DEFAULTS]+[row for row in custom if row[1] not in {c for _,c in DEFAULTS}]
     except (ValueError,TypeError,KeyError):return [list(row) for row in DEFAULTS]
 
 def save_palette(config,values):
@@ -41,5 +43,6 @@ class ColorMenu(QMenu):
         action=self.actionAt(pos)
         if action is None or not action.data():return
         menu=QMenu(self);remove=menu.addAction('删除颜色')
-        if menu.exec_(self.mapToGlobal(pos))==remove:
+        remove.setEnabled(action.data() not in {color for _,color in DEFAULTS})
+        if menu.exec_(self.mapToGlobal(pos))==remove and remove.isEnabled():
             save_palette(self.config,[(n,c) for n,c in palette(self.config) if c!=action.data()]);self.populate()
