@@ -33,6 +33,9 @@ def create_namespace(database,sid,source):
     nodes=source.bom(root);relation_ids={row['id'] for row in nodes}
     captured={root}|{row['material_id'] for row in nodes}
     conn.executemany('INSERT INTO mirror_captured_materials VALUES(?,?)',[(sid,mid) for mid in captured])
+    color_keys={(row['parent_material_id'],row['material_id']) for row in nodes}|{(0,mid) for mid in captured}
+    color_rows=[(sid,r['parent_id'],r['material_id'],r['color']) for r in conn.execute('SELECT * FROM bom_row_colors WHERE scope_id=?',(getattr(source,'scope_id',0),)) if (r['parent_id'],r['material_id']) in color_keys]
+    conn.executemany('INSERT INTO bom_row_colors VALUES(?,?,?,?)',color_rows)
     for table in TABLES:
         schema=conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone()[0]
         target=table_name(sid,table)
@@ -51,6 +54,7 @@ def create_namespace(database,sid,source):
     conn.execute(f'CREATE INDEX {table_name(sid,"alternates")}_relation ON {table_name(sid,"alternates")}(bom_item_id,sort_no)')
 
 def drop_namespace(database,sid):
+    database.conn.execute('DELETE FROM bom_row_colors WHERE scope_id=?',(sid,))
     for table in TABLES:database.conn.execute(f'DROP TABLE IF EXISTS {table_name(sid,table)}')
     database.conn.execute('DELETE FROM mirror_material_usage WHERE sku_id=?',(sid,))
     database.conn.execute('DELETE FROM mirror_captured_materials WHERE sku_id=?',(sid,))

@@ -40,11 +40,11 @@ class VersionUpdateTests(unittest.TestCase):
  def test_versions_and_disabled_menu(self):
   old=self.w.root_item.child(0);self.assertEqual([r['id'] for r in self.w.material_versions(old)],[self.ids['new']])
   child=old.child(0);self.assertEqual(self.w.material_versions(child),[])
-  with patch.object(self.w.tree,'itemAt',return_value=child),patch('ui.main_window.QMenu') as menu:
-   actions={}
-   def action(label):actions[label]=MagicMock();return actions[label]
-   menu.return_value.addAction.side_effect=action;menu.return_value.exec_.return_value=None;self.w.context_menu(QPoint())
-   actions['物料版本更新'].setEnabled.assert_called_once_with(False)
+  from PyQt5.QtWidgets import QMenu
+  actions={}
+  def inspect(menu,*args):actions.update({a.text():a.isEnabled() for a in menu.actions()});return None
+  with patch.object(self.w.tree,'itemAt',return_value=child),patch.object(QMenu,'exec_',inspect):self.w.context_menu(QPoint())
+  self.assertFalse(actions['物料版本更新'])
  def test_duplicate_and_cycle_rejected(self):
   self.w.insert_material(self.w.root_item,self.s.material_snapshot(self.ids['new']))
   with patch.object(QMessageBox,'warning') as warning:self.assertIsNone(self.update());warning.assert_called_once()

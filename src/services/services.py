@@ -140,7 +140,7 @@ class Services:
   if r['n']: raise ValueError('物料仍被BOM引用，请先删除引用')
   if self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=?',(i,)).fetchone():raise ValueError('物料仍被BOM作为替代料引用，请先删除引用')
   before=self.material_snapshot(i)
-  with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
+  with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.db.conn.execute('DELETE FROM bom_row_colors WHERE parent_id=? OR material_id=?',(i,i)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
  def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,s.change_description,s.locked,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
  def sku_material_quantities(self,skus=None):
   """每个SKU数量为1；仅累计主BOM，Decimal保留路径连乘精度。"""
@@ -214,6 +214,8 @@ class Services:
  def bom_graph_edges(self):return self.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items').fetchall()
  def bom(self,root):
   """递归展开物料关系表，返回兼容BOM编辑器的扁平树行。"""
+  from services.bom_colors import colors
+  row_colors=colors(self)
   result=[]
   def walk(parent_id,level,parent_item_id,parent_node_id,ancestors):
    if parent_id in ancestors:return
@@ -222,7 +224,7 @@ class Services:
    for r in rows:
     if r['child_material_id'] in ancestors:continue
     node_id=f"{parent_node_id or ''}/{r['id']}"
-    d=dict(r); d.update(material_id=r['child_material_id'],unit=r['material_unit'],level_no=level,parent_item_id=parent_item_id,bom_root_id=root,node_id=node_id,parent_node_id=parent_node_id)
+    d=dict(r); d.update(row_color=row_colors.get((parent_id,r['child_material_id']),''),material_id=r['child_material_id'],unit=r['material_unit'],level_no=level,parent_item_id=parent_item_id,bom_root_id=root,node_id=node_id,parent_node_id=parent_node_id)
     result.append(d); walk(r['child_material_id'],level+1,r['id'],node_id,ancestors)
   walk(root,1,None,None,set()); return result
  def save_bom(self,root,items,preview=False,progress=None):
@@ -363,6 +365,9 @@ class Services:
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(relation,))
     for order,mid in enumerate(alternates):self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',(relation,mid,order))
    if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id) THEN 1 ELSE 0 END')
+   from services.bom_colors import save as save_colors,prune as prune_colors
+   save_colors(self,[(r.get('parent_material_id') or root,r['material_id'],r['row_color']) for r in items if 'row_color' in r])
+   prune_colors(self)
    # 使用保存前后包含的父物料判断影响范围，覆盖新增和删除共享分支。
    # 在同一事务内更新时间，保证界面收到通知时读取的是已提交数据。
    affected_rows=[]
@@ -849,7 +854,7 @@ class Services:
    sheet.append([number,changed[:10],changed[11:],code,name,change_type,detail])
   self.format_export_sheet(sheet,{'序号','变更日期','变更时间'})
   sheet.auto_filter.ref=sheet.dimensions
- def write_bom_sheet(self,sheet,root):
+ def write_bom_sheet(self,sheet,root,root_color=None):
   headers=['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','物料位置','用量','单位','物料等级','M/P','制造商','MPN','备注']
   rows=self.bom(root)
   alternates={row['id']:list(self.alternates(row['id'])) for row in rows}
@@ -877,6 +882,15 @@ class Services:
   centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
   centered.update(f'替代料{number}版本号' for number in range(1,count+1))
   self.format_export_sheet(sheet,centered)
+  from services.bom_colors import colors,foreground
+  from openpyxl.styles import PatternFill
+  from copy import copy
+  row_colors=colors(self)
+  palette=[row_colors.get((0,root),'') if root_color is None else root_color]+[row.get('row_color','') for row in rows]
+  for index,color in enumerate(palette,2):
+   if not color:continue
+   for cell in sheet[index]:
+    cell.fill=PatternFill('solid',fgColor=color[1:]);font=copy(cell.font);font.color=foreground(color)[1:];cell.font=font
  def export_purchase_bom(self,root,path):
   """汇总全部下阶物料：路径用量连乘，同版本物料合并，根物料不采购。"""
   from decimal import Decimal, ROUND_HALF_UP
@@ -956,7 +970,7 @@ class Services:
   sku=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()
   if sku is None:raise ValueError('SKU不存在')
   return self.export_bom_structure(sku['material_id'],path,sku_id=sid)
- def export_bom_structure(self,root,path,sku_id=None):
+ def export_bom_structure(self,root,path,sku_id=None,root_color=None):
   if self.material_snapshot(root) is None:raise ValueError('物料不存在')
   wb=Workbook(); w=wb.active; w.title='变更记录'
   material_ids={root}|{row['material_id'] for row in self.bom(root)}
@@ -969,5 +983,5 @@ class Services:
   name=self.material_snapshot(root)['name']
   # Excel工作表名称限制：非法字符替换、31字符上限，重名由openpyxl消歧。
   title=re.sub(r'[\\/*?:\[\]]','_',name).strip().strip("'")[:31] or 'BOM'
-  self.write_bom_sheet(wb.create_sheet(title),root)
+  self.write_bom_sheet(wb.create_sheet(title),root,root_color=root_color)
   wb.save(path)

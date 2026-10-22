@@ -50,7 +50,7 @@ def clipboard_relation(svc):
         if not isinstance(alternates, list) or any(not isinstance(mid, int) or not svc.material_snapshot(mid) for mid in alternates):
             return None
         return dict(quantity=quantity, position=str(relation.get('position', '')),
-                    remark=str(relation.get('remark', '')), alternate_material_ids=alternates)
+                    remark=str(relation.get('remark', '')), alternate_material_ids=alternates,row_color=__import__('services.bom_colors',fromlist=['normalize']).normalize(relation.get('row_color','')))
     except (ValueError, TypeError, KeyError):
         return None
 
@@ -82,7 +82,7 @@ def clipboard_entries(svc):
             if relation is not None:
                 quantity=float(relation['quantity']);alternates=relation['alternate_material_ids']
                 if not 0<quantity<=1e12 or not isinstance(alternates,list) or any(not isinstance(mid,int) or not svc.material_snapshot(mid) for mid in alternates):return []
-                relation=dict(quantity=quantity,position=str(relation.get('position','')),remark=str(relation.get('remark','')),alternate_material_ids=alternates)
+                relation=dict(quantity=quantity,position=str(relation.get('position','')),remark=str(relation.get('remark','')),alternate_material_ids=alternates,row_color=__import__('services.bom_colors',fromlist=['normalize']).normalize(relation.get('row_color','')))
             result.append((material,relation))
         return result
     except (ValueError,TypeError,KeyError):return []

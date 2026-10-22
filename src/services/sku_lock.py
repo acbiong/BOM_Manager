@@ -27,7 +27,8 @@ def locked_snapshots(conn,ids=None):
     edges.setdefault(key,[]).append((r['quantity'],r['unit'],r['position'],r['remark'],rank,alternates))
     uses.add((child,parent));pending.append(child)
     for alternate,_ in alternates:uses.add((alternate,parent));pending.append(alternate)
-  result[sku['id']]=dict(sku=dict(sku),materials=used,edges={k:sorted(v,key=repr) for k,v in edges.items()},uses=uses)
+  colors={(r['parent_id'],r['material_id']):r['color'] for r in conn.execute('SELECT * FROM bom_row_colors WHERE scope_id=?',(sku['scope_id'],)) if (r['parent_id'],r['material_id']) in edges or (r['parent_id']==0 and r['material_id']==sku['material_id'])}
+  result[sku['id']]=dict(colors=colors,sku=dict(sku),materials=used,edges={k:sorted(v,key=repr) for k,v in edges.items()},uses=uses)
  return result
 
 def label(material):
@@ -45,6 +46,8 @@ def check_locked_changes(conn,before):
     if old['materials'].get(mid)!=new['materials'].get(mid):
      impacts.update((m,p) for m,p in old['uses']|new['uses'] if m==mid)
      if mid==root:impacts.add((mid,None))
+   for key in set(old['colors'])|set(new['colors']):
+    if old['colors'].get(key)!=new['colors'].get(key):impacts.add((key[1],key[0] or None))
    for parent,child in set(old['edges'])|set(new['edges']):
     if old['edges'].get((parent,child))!=new['edges'].get((parent,child)):impacts.add((child,parent))
   for mid,parent in sorted(impacts,key=repr):

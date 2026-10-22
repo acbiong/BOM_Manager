@@ -308,7 +308,7 @@ def remember_export_path(path):
  QSettings('Biong','BOMManager').setValue('export_directory',str(Path(path).resolve().parent))
 
 
-def export_material_structure(parent,service,material_id):
+def export_material_structure(parent,service,material_id,root_color=None):
  material=service.material_snapshot(material_id)
  if not material:return
  sid=getattr(service,'sku_id',None)
@@ -323,7 +323,7 @@ def export_material_structure(parent,service,material_id):
  try:
   remember_export_path(path)
   if sku and sku['material_id']==material_id:service.export_sku(sid,path)
-  else:service.export_bom_structure(material_id,path)
+  else:service.export_bom_structure(material_id,path,root_color=root_color)
   QMessageBox.information(parent,'完成','BOM结构导出成功')
  except Exception as error:show_operation_error(parent,'导出BOM结构失败',error)
 
@@ -904,7 +904,7 @@ class BomWindow(QMainWindow):
   d=it.data(0,Qt.UserRole) or {}
   menu=QMenu(self)
   if len(self.selected_copy_items(it))>1:
-   actions=self.clipboard_actions(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos));self.handle_clipboard_action(chosen,actions,it);return
+   actions=self.clipboard_actions(menu,it);self.add_color_menu(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos));self.handle_clipboard_action(chosen,actions,it);return
   if self.is_locked():
    reverse=menu.addAction('物料反查');copy=menu.addAction('复制物料');export=self.subtree_export_action(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
    if chosen==reverse:self.reverse_tree_material(it)
@@ -930,6 +930,7 @@ class BomWindow(QMainWindow):
   imp=menu.addAction('导入BOM');imp.setEnabled(it.childCount()==0 and not self.svc.bom(d.get('material_id',self.root)))
   imp.setToolTip('当前物料已有下阶物料，不能重复导入' if not imp.isEnabled() else '导入当前物料的下阶BOM')
   export=self.subtree_export_action(menu,it)
+  self.add_color_menu(menu,it)
   menu.addSeparator();clipboard_actions=self.clipboard_actions(menu,it)
   if not root:
    menu.addSeparator();up=menu.addAction('物料上移');down=menu.addAction('物料下移')
@@ -950,6 +951,24 @@ class BomWindow(QMainWindow):
    self.tree.setCurrentItem(it);self.show_item_info(it);self.add_alternate();return
   if act in (same,child):self.add_relative(d,act==child);return
   if act==dele:self.confirm_delete(it)
+ def add_color_menu(self,menu,item):
+  if self.is_locked() or any((node.data(0,Qt.UserRole) or {}).get('_deleted') for node in self.selected_copy_items(item)):return
+  from ui.bom_colors import ColorMenu
+  if self.svc.config_service is None:self.svc.config_service=ConfigService(Path(self.svc.db.path).parent)
+  menu.addSeparator();menu.addMenu(ColorMenu(self,self.selected_copy_items(item),menu))
+ @preserve_bom_view
+ def set_row_color(self,items,color):
+  if self.is_locked():return
+  from services.bom_colors import normalize
+  color=normalize(color)
+  keys={(0 if node is self.root_item else (node.parent().data(0,Qt.UserRole) or {})['material_id'],(node.data(0,Qt.UserRole) or {})['material_id']) for node in items if not (node.data(0,Qt.UserRole) or {}).get('_deleted')}
+  changed=False
+  for _,node in self.expansion_nodes():
+   data=dict(node.data(0,Qt.UserRole) or {});key=(0 if node is self.root_item else (node.parent().data(0,Qt.UserRole) or {})['material_id'],data['material_id'])
+   if key in keys and data.get('row_color','')!=color:
+    data['row_color']=color;node.setData(0,Qt.UserRole,data);changed=True
+    if node is self.root_item:self._root_color_dirty=True
+  if changed:self.mark_dirty()
  def subtree_export_action(self,menu,item):
   if not item.childCount():return None
   menu.addSeparator();action=menu.addAction('导出BOM结构')
@@ -957,7 +976,7 @@ class BomWindow(QMainWindow):
   return action
  def export_subtree(self,item):
   if not self.export_action.isEnabled() or self.dirty or not item.childCount() or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
-  export_material_structure(self,self.svc,(item.data(0,Qt.UserRole) or {})['material_id'])
+  export_material_structure(self,self.svc,(item.data(0,Qt.UserRole) or {})['material_id'],root_color=(item.data(0,Qt.UserRole) or {}).get('row_color',''))
  def confirm_delete(self,item):
   if self.is_locked() or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   if QMessageBox.question(self,'确认删除','是否删除选定的物料及其子物料？\n'+item.text(0),QMessageBox.Yes|QMessageBox.No,QMessageBox.Yes)==QMessageBox.Yes:self.remove_relation(item)
@@ -1163,7 +1182,7 @@ class BomWindow(QMainWindow):
   nodes=self.selected_copy_items(item);entries=[]
   for node in nodes:
    data=node.data(0,Qt.UserRole) or {}
-   relation=None if node is self.root_item else dict(quantity=float(node.text(1)),position=node.text(3),remark=data.get('remark',''),alternate_material_ids=self.alternate_ids(node))
+   relation=None if node is self.root_item else dict(quantity=float(node.text(1)),position=node.text(3),remark=data.get('remark',''),alternate_material_ids=self.alternate_ids(node),row_color=data.get('row_color',''))
    entries.append((data.get('material_id',self.root),relation))
   if len(entries)==1:return copy_material(self.svc,*entries[0])
   return copy_materials(self.svc,entries)
@@ -1210,6 +1229,7 @@ class BomWindow(QMainWindow):
     data=dict(added.data(0,Qt.UserRole) or {})
     for field,column in [('quantity',1),('position',3),('remark',4)]:
      data[field]=relation[field];added.setText(column,format_quantity(relation[field]) if field=='quantity' else relation[field])
+    data['row_color']=relation.get('row_color','')
     added.setData(0,Qt.UserRole,data);self._alternate_edits[self.alternate_key(added)]=relation['alternate_material_ids'];self._draft_baselines[data['id']]=self.capture_item(added);self.mark_dirty()
    anchor=added
   self.tree.setCurrentItem(added); self.show_item_info(added); self.tree.scrollToItem(added)
@@ -1345,7 +1365,7 @@ class BomWindow(QMainWindow):
    data=node['data']; previous=original['data']
    if data.get('_moved') or data.get('_deleted') or (data.get('_added') and not previous.get('_added')):return True
    if data.get('id') in self._alternate_edits and self._alternate_edits[data['id']]!=previous.get('_db_alternates',[]):return True
-   if any(data.get(k)!=previous.get(k) for k in ('quantity','position','remark')):return True
+   if any(data.get(k)!=previous.get(k) for k in ('quantity','position','remark','row_color')):return True
    if [n['data'].get('id') for n in node['children']]!=[n['data'].get('id') for n in original['children']]:return True
    return any(modified(child,old) for child,old in zip(node['children'],original['children']))
   merged=[]
@@ -1361,7 +1381,7 @@ class BomWindow(QMainWindow):
    result=deepcopy(new)
    if edit['data'].get('_added'):result['data']['_added']=True
    if edit['data'].get('_moved'):result['data']['_moved']=True
-   for field in ('quantity','position','remark'):
+   for field in ('quantity','position','remark','row_color'):
     value=edit['data'].get(field)
     if value!=previous['data'].get(field):
      if new['data'].get(field)!=previous['data'].get(field) and value!=new['data'].get(field):conflicts.append('同一字段同时修改')
@@ -1397,10 +1417,13 @@ class BomWindow(QMainWindow):
     if (parent_id,data['material_id'],data.get('position','') or '') in self._deleted_relations:data['_deleted']=True
     node['children']=exclude_deleted(node['children'],data['material_id']); result.append(node)
    return result
-  self.render_tree(exclude_deleted(merged,self.root)); self._baseline_tree=deepcopy(fresh)
+  from services.bom_colors import colors
+  root_color=(self.root_item.data(0,Qt.UserRole) or {}).get('row_color','') if getattr(self,'_root_color_dirty',False) else colors(self.svc).get((0,self.root),'')
+  self.render_tree(exclude_deleted(merged,self.root));root_data=self.root_item.data(0,Qt.UserRole);root_data['row_color']=root_color;self.root_item.setData(0,Qt.UserRole,root_data); self._baseline_tree=deepcopy(fresh)
   self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(True); self.export_action.setEnabled(False); self.refresh_styles()
   if conflicts:self.statusBar().showMessage('已加载外部更新；检测到冲突，已保留本地未保存修改，请核对后保存。')
  def load(self,preserve=None):
+  self._root_color_dirty=False
   self.update_mirror_title()
   from copy import deepcopy
   fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
@@ -1423,7 +1446,7 @@ class BomWindow(QMainWindow):
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
   self.setWindowTitle(f"{root['base_code']}{root['version']} {root['name']}");self.update_mirror_title()
   if self.is_locked():self.setWindowTitle(self.windowTitle()+' — BOM浏览')
-  self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True}); self.root_item.setExpanded(True)
+  self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True,'row_color':__import__('services.bom_colors',fromlist=['colors']).colors(self.svc).get((0,self.root),'')}); self.root_item.setExpanded(True)
   def append(node,parent,path,level):
    data=dict(node['data']); data.setdefault('_edit_base',{k:data.get(k) for k in ('quantity','position','remark')}); parent_data=parent.data(0,Qt.UserRole) or {}
    node_id=f"{path}/{data['id']}"
@@ -1442,8 +1465,8 @@ class BomWindow(QMainWindow):
    result.update(self.snapshot_map(node['children'],key))
   return result
  def remote_signature(self,node):
-  fields=('material_id','quantity','position','remark','base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag','_db_alternates')
-  return [node['data'].get(k) for k in fields]
+  fields=('material_id','quantity','position','remark','base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag','_db_alternates','row_color')
+  return [node['data'].get(k,'') if k=='row_color' else node['data'].get(k) for k in fields]
  def refresh_styles(self):
   if not hasattr(self,'root_item'):return
   baseline=self.snapshot_map(getattr(self,'_baseline_tree',[]))
@@ -1469,7 +1492,13 @@ class BomWindow(QMainWindow):
     item.setForeground(column,QBrush(color) if color else QBrush(QColor('white')) if external else QBrush())
     moved=data.get('_moved',False)
     if moved and not color:item.setForeground(column,QBrush(QColor('#202020')))
-    item.setBackground(column,QBrush(QColor('#f8d7e3')) if moved else QBrush(QColor('#4a148c')) if external else QBrush())
+    from services.bom_colors import foreground
+    custom=data.get('row_color','')
+    dark=self.tree.palette().base().color().lightness()<128
+    shade=(42+(len(path)%4)*12) if dark else (250-(len(path)%4)*14)
+    background=QColor(custom) if custom and not (added or deleted or changed or moved or external) else QColor(shade,shade,shade)
+    if not (added or deleted or changed or moved or external):item.setForeground(column,QBrush(QColor(foreground(custom))) if custom else QBrush())
+    item.setBackground(column,QBrush(QColor('#f8d7e3')) if moved else QBrush(QColor('#4a148c')) if external else QBrush(background))
    remark=data.get('remark','') if not root else ''
    display=remark
    if external:display=(remark+'\n' if remark else '')+'有其他BOM更新导入此变更'
@@ -1734,9 +1763,12 @@ class BomWindow(QMainWindow):
     versions=chooser.versions()
    progress.show()
    callback=lambda n,text:report(int(n*0.85),text)
-   if plan:revisions=save_confirmed(self.svc,save_root,rows,plan,selections,versions,callback)
-   elif violations:revisions=save_with_revisions(self.svc,save_root,rows,versions,progress=callback)
-   else:self.svc.save_bom(save_root,rows,progress=callback);revisions={}
+   with self.svc.db.transaction():
+    if plan:revisions=save_confirmed(self.svc,save_root,rows,plan,selections,versions,callback)
+    elif violations:revisions=save_with_revisions(self.svc,save_root,rows,versions,progress=callback)
+    else:self.svc.save_bom(save_root,rows,progress=callback);revisions={}
+    from services.bom_colors import save as save_colors
+    save_colors(self.svc,[(0,revisions.get(self.root,self.root),(self.root_item.data(0,Qt.UserRole) or {}).get('row_color',''))])
    self.root=revisions.get(self.root,self.root)
    report(90,'正在刷新BOM显示…')
    self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)

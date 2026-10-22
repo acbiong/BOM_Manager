@@ -70,6 +70,8 @@ def migrate(db):
                 if rows:
                     columns=[k for k in rows[0] if table!='alternates' or k!='id']
                     conn.executemany(f'INSERT INTO {name} ('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',[[r[k] for k in columns] for r in rows])
+            if not sku['scope_id']:
+                conn.executemany('INSERT OR IGNORE INTO bom_row_colors VALUES(?,?,?,?)',[(sid,r['parent_id'],r['material_id'],r['color']) for r in conn.execute('SELECT * FROM bom_row_colors WHERE scope_id=0') if r['material_id'] in seen and (not r['parent_id'] or r['parent_id'] in seen)])
             conn.execute('UPDATE skus SET scope_id=? WHERE id=?',(sid,sid))
             conn.execute('DELETE FROM mirror_captured_materials WHERE sku_id=?',(sid,))
             conn.executemany('INSERT INTO mirror_captured_materials VALUES(?,?)',[(sid,mid) for mid in seen])
