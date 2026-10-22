@@ -40,6 +40,28 @@ def exercise_windows(service,main,library):
                 if button is not None:button.click()
     messages=QTimer();messages.timeout.connect(dismiss_messages);messages.start(30)
     try:
+        # Closed-project startup must expose saved config entries on first hover.
+        import tempfile
+        from config.config_service import ConfigService
+        from config.project_registry import ProjectRegistry
+        from services.services import Services
+        from ui.main_window import MainWindow
+        from PyQt5.QtCore import QPoint
+        from PyQt5.QtTest import QTest
+        with tempfile.TemporaryDirectory() as directory:
+            config=ConfigService(directory);registry=ProjectRegistry(config)
+            registry.remember(Path(directory)/'history.db',dict(project_code='OLD',project_name='历史项目'))
+            history_window=MainWindow(Services(None,config));opened.append(history_window)
+            history_window.show();drain()
+            assert history_window.history_menu.actions()[0].text()=='OLD 历史项目'
+            menu=next(a.menu() for a in history_window.menuBar().actions() if a.text()=='项目')
+            menu.popup(QPoint(50,50));drain()
+            QTest.mouseMove(menu,menu.actionGeometry(menu.actions()[0]).center());drain()
+            QTest.mouseMove(menu,menu.actionGeometry(history_window.history_menu.menuAction()).center());drain(550)
+            assert history_window.history_menu.isVisible(),'历史项目子菜单无法首次展开'
+            history_window.history_menu.close();menu.close();history_window.close()
+            history_window.deleteLater();opened.remove(history_window);drain()
+            checks.append('ui_closed_project_history_first_hover')
         root=service.create_material(dict(base_code='UI-SMOKE',version='1',name='界面保存验证',unit='pcs'))
         child=service.create_material(dict(base_code='UI-CHILD',version='1',name='界面子料',unit='pcs'))
         sid=service.create_sku(root);scoped=service.for_sku(sid)

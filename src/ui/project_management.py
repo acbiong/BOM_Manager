@@ -19,6 +19,9 @@ class ProjectManagement:
   project_menu.addAction('新增项目',self.new_project)
   project_menu.addAction('导入项目',self.import_project)
   self.history_menu=project_menu.addMenu('打开历史项目')
+  # Qt will not open an empty submenu, so populate before its first hover.
+  self.refresh_project_menu()
+  project_menu.aboutToShow.connect(self.refresh_project_menu)
   self.history_menu.aboutToShow.connect(self.refresh_project_menu)
   self.history_menu.setContextMenuPolicy(Qt.CustomContextMenu)
   self.history_menu.customContextMenuRequested.connect(self.project_context_menu)

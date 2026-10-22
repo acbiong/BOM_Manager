@@ -65,3 +65,36 @@ class FirstLaunchTests(unittest.TestCase):
    self.assertEqual(main.main(),0);recovery.assert_not_called();error.assert_not_called()
   self.assertEqual(list(self.base.iterdir()),[self.config.path])
   manager=self.app._bom_save_shortcuts;del self.app._bom_save_shortcuts;manager.deleteLater()
+
+ def test_saved_projects_visible_on_first_hover_and_open_correct_database(self):
+  from config.project_registry import ProjectRegistry
+  from PyQt5.QtCore import QPoint
+  from PyQt5.QtTest import QTest
+  registry=ProjectRegistry(self.config)
+  for code in ('OLD1','OLD2'):
+   path=self.base/(code+'.db');db=Database(str(path));svc=Services(db)
+   svc.update_project(dict(project_code=code,project_name='历史项目'+code))
+   svc.create_sku(svc.create_material(dict(base_code=code,version='100',name=code,unit='pcs')))
+   registry.remember(path,dict(svc.project()),active=False);db.close()
+  w=self.empty_window();w.show();self.app.processEvents()
+  self.assertEqual(len(w.history_menu.actions()),2)
+  menu=next(a.menu() for a in w.menuBar().actions() if a.text()=='项目')
+  menu.popup(QPoint(50,50));QTest.qWait(50)
+  QTest.mouseMove(menu,menu.actionGeometry(menu.actions()[0]).center());QTest.qWait(50)
+  QTest.mouseMove(menu,menu.actionGeometry(w.history_menu.menuAction()).center());QTest.qWait(500)
+  self.assertTrue(w.history_menu.isVisible())
+  action=next(a for a in w.history_menu.actions() if a.text().startswith('OLD2 '))
+  w.history_menu.close();menu.close();action.trigger()
+  self.assertEqual(Path(w.svc.db.path),self.base/'OLD2.db')
+  self.assertIn('OLD2 历史项目OLD2',w.windowTitle())
+  self.assertEqual(w.table.item(0,1).text(),'OLD2100')
+ def test_parent_menu_refreshes_history_created_after_startup(self):
+  from PyQt5.QtCore import QPoint
+  w=self.empty_window();w.show();self.app.processEvents()
+  self.assertEqual(w.history_menu.actions()[0].text(),'暂无历史项目')
+  self.assertFalse(w.history_menu.actions()[0].isEnabled())
+  w.projects.remember(self.base/'external.db',dict(project_code='NEW',project_name='新增历史项目'),active=False)
+  menu=next(a.menu() for a in w.menuBar().actions() if a.text()=='项目')
+  menu.popup(QPoint(50,50));self.app.processEvents()
+  self.assertEqual([a.text() for a in w.history_menu.actions()],['NEW 新增历史项目'])
+  menu.close()

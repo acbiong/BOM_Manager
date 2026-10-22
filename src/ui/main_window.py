@@ -443,7 +443,7 @@ class MainWindow(ProjectManagement,QMainWindow):
     elif action.text() in ('选择SQLite数据库','导出资料库','修改项目信息','物料库','新建SKU','筛选','BOM对比'):action.setEnabled(available)
   update_actions(self.menuBar());self.table.setEnabled(available);self.latest_bom_only.setEnabled(available)
   if not available:
-   self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单新建或导入项目');return
+   self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单打开历史项目、新建或导入项目');return
   selected_ids={self.table.item(index.row(),6).text() for index in self.table.selectionModel().selectedRows() if self.table.item(index.row(),6)}
   current=self.table.currentRow(); column=max(1,self.table.currentColumn())
   selected_id=str(self._description_target) if getattr(self,'_description_target',None) is not None else (self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None)
