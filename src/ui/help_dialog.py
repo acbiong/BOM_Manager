@@ -12,6 +12,7 @@ class HelpDialog(QDialog):
         self.setWindowTitle('帮助 - BOM管理系统')
         self.resize(1050, 760)
         self.setMinimumSize(760, 540)
+        self._ensure_screenshot_sources()
         layout = QVBoxLayout(self)
         intro = QLabel('BOM管理系统帮助中心  ·  内容会根据当前打开的页面提供实际截图')
         intro.setStyleSheet('font-size:16px;font-weight:bold;padding:6px 2px;')
@@ -85,12 +86,27 @@ class HelpDialog(QDialog):
         <h3>Q：如何恢复误删的BOM物料？</h3><p>A：保存前右键删除线物料，选择“取消删除”；已经保存的删除需要从物料库重新新增到对应父级。</p>
         <h3>Q：如何获得帮助？</h3><p>A：保留软件版本号、项目名称、操作步骤和弹窗内容；同时查看关于窗口中的Git提交信息，便于定位对应版本。</p>'''
 
+    def _ensure_screenshot_sources(self):
+        """打开真实页面作为截图来源；不创建虚构的静态示意图。"""
+        parent=self.parentWidget()
+        if parent is None:return
+        try:
+            if getattr(parent,'svc',None) is not None and parent.svc.db is not None:
+                if getattr(parent,'_materials',None) is None:
+                    parent.show_materials()
+                if not getattr(parent,'_bom_windows',{}):
+                    row=parent.svc.db.conn.execute('SELECT id FROM skus ORDER BY id LIMIT 1').fetchone()
+                    if row:parent.open_bom_id(row['id'])
+        except Exception:
+            # 无项目或数据库不完整时，仍保留主窗口截图并显示文字说明。
+            pass
+
     def _first_bom(self):
         parent=self.parentWidget()
         return next(iter(getattr(parent,'_bom_windows',{}).values()),None) if parent else None
 
     def _grab(self, widget, title):
-        # 每个教程步骤必须有一张实际截图；目标窗口未打开时回退到当前主窗口。
+        # 每个教程步骤必须有一张实际截图；目标窗口未打开时仅回退到主窗口。
         if widget is None or not widget.isVisible():
             widget=self.parentWidget()
         if widget is None or not widget.isVisible(): return None
