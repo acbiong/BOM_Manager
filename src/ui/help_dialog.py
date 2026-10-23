@@ -1,7 +1,7 @@
 """BOM管理系统帮助中心：快捷键、页面说明、操作指引、技巧和问答。"""
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
+from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
     QWidget, QLabel, QScrollArea, QTextBrowser, QFrame)
 from ui.interactive_windows import QDialog
 
@@ -46,7 +46,7 @@ class HelpDialog(QDialog):
         layout.addWidget(self._section('SKU清单窗口：项目总览与批量入口', '这里显示当前项目全部SKU及其历史版本。点击表头可排序，选择一行后双击打开BOM；Ctrl/Shift可多选，再右键对多个SKU执行浏览、编辑、导出或锁定。锁定列显示小锁，版本号加粗表示存在变更描述；底部同时显示“共计N个SKU，M个BOM”。', self._grab(self.parentWidget(), '实际截图：SKU清单窗口')))
         layout.addWidget(self._section('物料库窗口：公共物料资料', '物料库维护基础编码、版本号、名称、规格、单位、等级、制造商、MPN和M/P，并显示BOM状态、呆滞状态及各SKU用量。菜单按钮可执行导入、导出、查找、筛选；右键可编辑、复制、删除、反查、版本更新、编辑BOM和新增替代料。', self._grab(getattr(self.parentWidget(), '_materials', None), '实际截图：物料库窗口')))
         layout.addWidget(self._section('BOM编辑窗口：树状结构与属性', '左侧是递归BOM树，右侧是当前节点属性和替代料。根节点显示SKU或选中的公共物料；树节点左键切换右侧资料，右键按分组提供新增、复制剪切粘贴、替换、版本更新、替代料、颜色、反查和导出。保存前变更有颜色标识，保存后恢复默认。', self._grab(self._first_bom(), '实际截图：BOM编辑/浏览窗口')))
-        layout.addWidget(self._section('导入、导出、对比和主题', '物料/BOM导入均支持Sheet选择、表头映射、必填项检查、进度条和结果明细；BOM对比支持两个SKU历史版本或外部Excel，并同步标记新增、删除、修改、换料和交换。右上角太阳/月亮按钮切换主题，窗口尺寸和路径自动记忆。', self._grab(self.parentWidget(), '实际截图：菜单、主题和表格区域')))
+        layout.addWidget(self._section('导入、导出、对比和主题', '物料/BOM导入均支持Sheet选择、表头映射、必填项检查、进度条和结果明细；BOM对比支持两个SKU历史版本或外部Excel，并同步标记新增、删除、修改、换料和交换。右上角太阳/月亮按钮切换主题，窗口尺寸和路径自动记忆。', self._grab(self.parentWidget().menuBar() if self.parentWidget() else None, '实际截图：菜单和主题按钮')))
         return self._scroll(page)
 
     def _guide_page(self):
@@ -63,7 +63,7 @@ class HelpDialog(QDialog):
           ('步骤9：锁定与浏览', 'SKU右键锁定后再次打开进入BOM浏览模式，编辑菜单不可用。其他BOM联动触及锁定BOM时系统列出SKU、物料和父项信息；解除锁定后才能继续编辑。', self.parentWidget()),
           ('步骤10：查找和故障处理', '物料库/BOM按Ctrl+F查找编码、名称、规格、制造商和MPN，双击结果定位原表或树节点。遇到数据库损坏、路径失效或导入错误时，保留弹窗和版本信息，按提示重新选择数据库或修正映射。', self._first_bom() or getattr(self.parentWidget(), '_materials', None) or self.parentWidget())]
         for title,body,widget in steps:
-            layout.addWidget(self._section(title,body,self._grab(widget,'本步骤实际截图：'+title)))
+            layout.addWidget(self._section(title,body,self._guide_image(title, widget)))
         return self._scroll(page)
 
     def _tips_page(self):
@@ -75,7 +75,7 @@ class HelpDialog(QDialog):
          ('技巧4：共享物料先看影响范围','编辑公共子BOM前，先查看父级被哪些SKU及历史版本引用；系统提示父级升版时会列出受影响SKU，可逐项勾选同步。',self._first_bom() or self.parentWidget()),
          ('技巧5：导入映射连续复用','首次映射确认后系统记住列关系；下一次导入同类表格会自动恢复，找不到的旧列会回到未选择，确认前仍应检查必填项。',getattr(self.parentWidget(), '_materials', None) or self.parentWidget()),
          ('技巧6：主题和窗口布局','深色模式下根节点灰度对比最强；拖动分隔条调整BOM树和属性区，窗口尺寸、列宽、导入导出路径会被记忆。',self.parentWidget())]
-        for title,body,widget in tips:layout.addWidget(self._section(title,body,self._grab(widget,'实际截图：'+title)))
+        for title,body,widget in tips:layout.addWidget(self._section(title,body,self._tip_image(title, widget)))
         return self._scroll(page)
 
     def _qa(self):
@@ -104,6 +104,54 @@ class HelpDialog(QDialog):
     def _first_bom(self):
         parent=self.parentWidget()
         return next(iter(getattr(parent,'_bom_windows',{}).values()),None) if parent else None
+
+    def _guide_image(self, title, fallback):
+        """为步骤选择对应真实页面；对话框截图使用当前项目真实数据。"""
+        parent=self.parentWidget(); service=getattr(parent,'svc',None)
+        bom=self._first_bom()
+        if bom is not None:
+            if title.startswith('步骤6'):
+                return self._grab(bom.tree,'本步骤实际截图：'+title)
+            if title.startswith('步骤7'):
+                return self._grab(bom.info_scroll,'本步骤实际截图：'+title)
+            if title.startswith('步骤9'):
+                return self._grab(bom.tree,'本步骤实际截图：'+title)
+        try:
+            from ui.main_window import MaterialDialog, NewSkuDialog, MaterialHeaderMappingDialog
+            dialog=None
+            if service is not None and service.db is not None:
+                first=service.db.conn.execute('SELECT * FROM materials ORDER BY id LIMIT 1').fetchone()
+                data=dict(first) if first else {}
+                if title.startswith('步骤2'):
+                    dialog=MaterialDialog(parent,data=data,readonly_keys={'base_code','version'})
+                    dialog.setWindowTitle('实际截图：新建/编辑物料')
+                elif title.startswith('步骤3'):
+                    headers=['物料基础编码','物料版本号','物料名称','物料规格','单位','物料等级','M/P']
+                    rows=[tuple((data.get(k) or '') for k in ('base_code','version','name','description','unit','grade','mp_flag'))]
+                    dialog=MaterialHeaderMappingDialog('帮助中心示例.xlsx',headers,[],parent,preview_rows=rows)
+                    dialog.setWindowTitle('实际截图：物料表头映射')
+                elif title.startswith('步骤4'):
+                    dialog=NewSkuDialog(service,parent);dialog.setWindowTitle('实际截图：新建SKU')
+            if dialog is not None:
+                dialog.resize(min(dialog.width(),1000),min(dialog.height(),650));dialog.show();QApplication.processEvents()
+                image=self._grab(dialog,'本步骤实际截图：'+title);dialog.close();dialog.deleteLater();return image
+            if title.startswith('步骤10') and getattr(parent,'_materials',None) is not None:
+                from ui.material_search import MaterialSearchDialog
+                dialog=MaterialSearchDialog(parent._materials);dialog.show();QApplication.processEvents();image=self._grab(dialog,'本步骤实际截图：'+title);dialog.close();dialog.deleteLater();return image
+        except Exception:
+            pass
+        return self._grab(fallback,'本步骤实际截图：'+title)
+
+    def _tip_image(self, title, fallback):
+        target=self._first_bom()
+        if target is not None:
+            if title.startswith('技巧2') or title.startswith('技巧3'):
+                return self._grab(target.tree,'实际截图：'+title)
+            if title.startswith('技巧4'):
+                return self._grab(target.info_scroll,'实际截图：'+title)
+        if title.startswith('技巧1') and getattr(self.parentWidget(),'table',None) is not None:
+            return self._grab(self.parentWidget().table,'实际截图：'+title)
+        return self._grab(fallback,'实际截图：'+title)
 
     def _grab(self, widget, title):
         # 每个教程步骤必须有一张实际截图；目标窗口未打开时仅回退到主窗口。
