@@ -1,0 +1,782 @@
+{
+  "action_project_menu": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      52,
+      2,
+      46,
+      30
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_project_new": {
+    "window": "",
+    "target": [
+      2,
+      2,
+      172,
+      33
+    ],
+    "size": [
+      176,
+      134
+    ]
+  },
+  "action_project_code": {
+    "window": "请填写新项目信息",
+    "target": [
+      83,
+      48,
+      146,
+      37
+    ],
+    "size": [
+      238,
+      211
+    ]
+  },
+  "action_project_name": {
+    "window": "请填写新项目信息",
+    "target": [
+      83,
+      9,
+      146,
+      37
+    ],
+    "size": [
+      238,
+      211
+    ]
+  },
+  "action_product_name": {
+    "window": "请填写新项目信息",
+    "target": [
+      83,
+      87,
+      146,
+      37
+    ],
+    "size": [
+      238,
+      211
+    ]
+  },
+  "action_product_model": {
+    "window": "请填写新项目信息",
+    "target": [
+      83,
+      126,
+      146,
+      37
+    ],
+    "size": [
+      238,
+      211
+    ]
+  },
+  "action_project_ok": {
+    "window": "请填写新项目信息",
+    "target": [
+      59,
+      165,
+      84,
+      37
+    ],
+    "size": [
+      238,
+      211
+    ]
+  },
+  "action_database_name": {
+    "window": "创建新项目数据库",
+    "target": [
+      115,
+      354,
+      429,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_database_save": {
+    "window": "创建新项目数据库",
+    "target": [
+      546,
+      354,
+      84,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_library_open": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      100,
+      2,
+      63,
+      30
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_material_new": {
+    "window": "Mobius FDA 智能仿生腿 物料库",
+    "target": [
+      4,
+      2,
+      80,
+      30
+    ],
+    "size": [
+      1000,
+      600
+    ]
+  },
+  "action_material_base_code": {
+    "window": "新建物料",
+    "target": [
+      126,
+      18,
+      482,
+      70
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_version": {
+    "window": "新建物料",
+    "target": [
+      126,
+      90,
+      482,
+      70
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_name": {
+    "window": "新建物料",
+    "target": [
+      126,
+      162,
+      482,
+      95
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_description": {
+    "window": "新建物料",
+    "target": [
+      126,
+      259,
+      482,
+      120
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_grade": {
+    "window": "新建物料",
+    "target": [
+      126,
+      489,
+      482,
+      70
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_manufacturer": {
+    "window": "新建物料",
+    "target": [
+      126,
+      306,
+      482,
+      70
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_mpn": {
+    "window": "新建物料",
+    "target": [
+      126,
+      378,
+      482,
+      70
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_unit": {
+    "window": "新建物料",
+    "target": [
+      126,
+      450,
+      482,
+      37
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_mp_flag": {
+    "window": "新建物料",
+    "target": [
+      126,
+      526,
+      482,
+      37
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_material_ok": {
+    "window": "新建物料",
+    "target": [
+      461,
+      574,
+      84,
+      37
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_import_open": {
+    "window": "Mobius FDA 智能仿生腿 物料库",
+    "target": [
+      86,
+      2,
+      80,
+      30
+    ],
+    "size": [
+      1000,
+      600
+    ]
+  },
+  "action_import_file": {
+    "window": "导入物料清单",
+    "target": [
+      115,
+      354,
+      429,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_import_file_ok": {
+    "window": "导入物料清单",
+    "target": [
+      546,
+      354,
+      84,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_import_sheet": {
+    "window": "选择物料工作表",
+    "target": [
+      9,
+      40,
+      288,
+      37
+    ],
+    "size": [
+      306,
+      125
+    ]
+  },
+  "action_import_sheet_ok": {
+    "window": "选择物料工作表",
+    "target": [
+      127,
+      79,
+      84,
+      37
+    ],
+    "size": [
+      306,
+      125
+    ]
+  },
+  "action_mapping_0": {
+    "window": "物料表头映射",
+    "target": [
+      102,
+      86,
+      155,
+      50
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_1": {
+    "window": "物料表头映射",
+    "target": [
+      254,
+      86,
+      136,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_2": {
+    "window": "物料表头映射",
+    "target": [
+      390,
+      86,
+      136,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_3": {
+    "window": "物料表头映射",
+    "target": [
+      468,
+      86,
+      152,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_4": {
+    "window": "物料表头映射",
+    "target": [
+      476,
+      86,
+      136,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_5": {
+    "window": "物料表头映射",
+    "target": [
+      476,
+      86,
+      136,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_6": {
+    "window": "物料表头映射",
+    "target": [
+      578,
+      86,
+      136,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_7": {
+    "window": "物料表头映射",
+    "target": [
+      714,
+      86,
+      136,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_8": {
+    "window": "物料表头映射",
+    "target": [
+      850,
+      86,
+      136,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_preview": {
+    "window": "物料表头映射",
+    "target": [
+      9,
+      189,
+      982,
+      383
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_mapping_ok": {
+    "window": "物料表头映射",
+    "target": [
+      821,
+      574,
+      84,
+      37
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_sku_new": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      165,
+      2,
+      80,
+      30
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_sku_input": {
+    "window": "新建SKU",
+    "target": [
+      9,
+      75,
+      632,
+      37
+    ],
+    "size": [
+      650,
+      160
+    ]
+  },
+  "action_sku_pick": {
+    "window": "",
+    "target": [
+      2,
+      2,
+      613,
+      26
+    ],
+    "size": [
+      628,
+      252
+    ]
+  },
+  "action_sku_ok": {
+    "window": "新建SKU",
+    "target": [
+      471,
+      114,
+      84,
+      37
+    ],
+    "size": [
+      650,
+      160
+    ]
+  },
+  "action_bom_open": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      166,
+      59,
+      145,
+      37
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_bom_select": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      48,
+      102,
+      729,
+      29
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_bom_quantity": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      530,
+      246,
+      227,
+      37
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_bom_position": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      530,
+      347,
+      227,
+      91
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_bom_remark": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      530,
+      479,
+      227,
+      91
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_bom_save": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      11,
+      2,
+      54,
+      36
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_export_bom": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      113,
+      2,
+      92,
+      36
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_export_purchase": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      202,
+      2,
+      126,
+      36
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_export_name": {
+    "window": "导出BOM",
+    "target": [
+      115,
+      354,
+      429,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_export_save": {
+    "window": "导出BOM",
+    "target": [
+      546,
+      354,
+      84,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_search_open": {
+    "window": "Mobius FDA 智能仿生腿 物料库",
+    "target": [
+      349,
+      2,
+      80,
+      30
+    ],
+    "size": [
+      1000,
+      600
+    ]
+  },
+  "action_search_code": {
+    "window": "查找物料",
+    "target": [
+      83,
+      40,
+      808,
+      37
+    ],
+    "size": [
+      900,
+      600
+    ]
+  },
+  "action_search_name": {
+    "window": "查找物料",
+    "target": [
+      83,
+      79,
+      808,
+      37
+    ],
+    "size": [
+      900,
+      600
+    ]
+  },
+  "action_search_run": {
+    "window": "查找物料",
+    "target": [
+      9,
+      235,
+      882,
+      37
+    ],
+    "size": [
+      900,
+      600
+    ]
+  },
+  "action_search_result": {
+    "window": "查找物料",
+    "target": [
+      114,
+      304,
+      142,
+      32
+    ],
+    "size": [
+      900,
+      600
+    ]
+  },
+  "action_sku_context": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      166,
+      59,
+      145,
+      37
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_sku_copy": {
+    "window": "",
+    "target": [
+      2,
+      169,
+      171,
+      37
+    ],
+    "size": [
+      175,
+      340
+    ]
+  },
+  "action_sku_lock": {
+    "window": "",
+    "target": [
+      2,
+      134,
+      171,
+      37
+    ],
+    "size": [
+      175,
+      340
+    ]
+  },
+  "action_sku_unlock": {
+    "window": "",
+    "target": [
+      2,
+      134,
+      171,
+      37
+    ],
+    "size": [
+      175,
+      340
+    ]
+  }
+}

@@ -23,9 +23,11 @@ def main():
     if not CONFIG.is_file():
         if 'BOM_HELP_CONFIG' in os.environ:raise SystemExit('指定的帮助截图配置不存在：'+str(CONFIG))
         shipped=ROOT/'resources/help_screenshots'
-        if len(list(shipped.glob('*.png')))!=20:raise SystemExit('缺少随源码提供的20张静态帮助截图')
+        from ui.help_guides import GUIDE_KEYS
+        if any(not (shipped/(key+'.png')).is_file() for key in GUIDE_KEYS):raise SystemExit('缺少随源码提供的教程标注截图')
         OUT.mkdir(parents=True,exist_ok=True)
-        for image in shipped.glob('*.png'):shutil.copy2(image,OUT/image.name)
+        for image in shipped.iterdir():
+            if image.suffix in ('.png','.json'):shutil.copy2(image,OUT/image.name)
         print('使用随源码提供的静态帮助截图');return
     from config.config_service import read_config_file
     source_config=ConfigService(CONFIG.parent); raw=read_config_file(CONFIG)
@@ -68,9 +70,13 @@ def main():
         capture(main,OUT/'step01_project.png');capture(main,OUT/'step08_export.png')
         search=MaterialSearchDialog(materials);capture(search,OUT/'step10_search.png');search.close();search.deleteLater()
         capture(materials.t,OUT/'tip01_filter.png');capture(bom.tree if bom else main,OUT/'tip02_clipboard.png');capture(bom.tree if bom else main,OUT/'tip03_colors.png');capture(bom.info_scroll if bom else main,OUT/'tip04_shared.png');capture(materials,OUT/'tip05_mapping.png');capture(main,OUT/'tip06_theme.png')
+        from help_action_screenshots import generate
+        generate(OUT,main,materials,bom,svc)
         if bom: bom.dirty=False;bom.close()
         materials.close();main.close();db.close()
     expected=['sku_overview','material_library','bom_window','menu_theme']+[f'step{i:02d}_{x}' for i,x in [(1,'project'),(2,'material'),(3,'mapping'),(4,'sku'),(5,'bom_tree'),(6,'bom_edit'),(7,'bom_info'),(8,'export'),(9,'bom_lock'),(10,'search')]]+['tip%02d_%s'%v for v in [(1,'filter'),(2,'clipboard'),(3,'colors'),(4,'shared'),(5,'mapping'),(6,'theme')]]
+    from ui.help_guides import GUIDE_KEYS
+    expected+=GUIDE_KEYS
     missing=[x for x in expected if not (OUT/(x+'.png')).is_file()]
     if missing:raise SystemExit('缺少帮助截图：'+','.join(missing))
     print(f'帮助静态截图已生成：{len(expected)}张，数据源：{dbpath}')

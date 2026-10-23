@@ -38,16 +38,29 @@ class HelpDialogTests(unittest.TestCase):
    dialog=HelpDialog(empty);dialog.show();self.app.processEvents()
    self.assertEqual({w for w in self.app.topLevelWidgets() if w.isVisible()}-before,{dialog})
    images=[label for label in dialog.findChildren(QLabel) if label.pixmap() is not None and not label.pixmap().isNull()]
-   self.assertEqual(len(images),20)
+   from ui.help_guides import GUIDE_KEYS
+   self.assertEqual(len(images),len(GUIDE_KEYS)+10)
    self.assertIsNone(empty.svc.db);self.assertIsNone(empty._materials);self.assertEqual(empty._bom_windows,{})
    dialog.close();dialog.show();self.app.processEvents()
    self.assertEqual({w for w in self.app.topLevelWidgets() if w.isVisible()}-before,{dialog})
    dialog.close();dialog.deleteLater()
   empty.close();empty.deleteLater()
- def test_step_ten_uses_search_image(self):
-  from unittest.mock import patch
+ def test_guides_have_action_images_and_switch_independently(self):
+  import json
+  from PIL import Image
+  from ui.help_guides import GUIDES,GUIDE_KEYS
   dialog=HelpDialog(self.w)
-  with patch.object(dialog,'_image_widget') as render:
-   dialog._guide_image('步骤10：查找和故障处理')
-   self.assertEqual(render.call_args.args[0],'step10_search')
+  manifest=json.loads((Path(__file__).parents[1]/'resources/help_screenshots/actions.json').read_text())
+  self.assertEqual(set(GUIDE_KEYS),set(manifest));self.assertEqual(len(GUIDE_KEYS),len(set(GUIDE_KEYS)))
+  self.assertEqual(dialog.guide_selector.count(),len(GUIDES))
+  for index,guide in enumerate(GUIDES):
+   dialog.guide_selector.setCurrentIndex(index);self.app.processEvents()
+   self.assertEqual(dialog.guide_stack.currentIndex(),index)
+   for step in guide['steps']:
+    self.assertTrue(step['detail']);info=manifest[step['key']];x,y,w,h=info['target']
+    self.assertGreater(w,0);self.assertGreater(h,0)
+    with Image.open(Path(__file__).parents[1]/'resources/help_screenshots'/(step['key']+'.png')) as im:
+     pixels=im.convert('RGB')
+     red=sum(1 for r,g,b in pixels.getdata() if r>180 and g<70 and b<90)
+     self.assertGreater(red,80,step['key'])
   dialog.close();dialog.deleteLater()

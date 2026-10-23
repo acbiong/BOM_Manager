@@ -3,7 +3,7 @@ from pathlib import Path
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QWidget, QLabel, QScrollArea, QTextBrowser, QFrame)
+    QWidget, QLabel, QScrollArea, QTextBrowser, QFrame, QComboBox, QStackedWidget, QPushButton)
 from ui.interactive_windows import QDialog
 
 class HelpDialog(QDialog):
@@ -50,21 +50,21 @@ class HelpDialog(QDialog):
         return self._scroll(page)
 
     def _guide_page(self):
-        page = QWidget(); layout = QVBoxLayout(page)
-        steps = [
-          ('步骤1：选择或恢复项目', '启动时若配置未指定项目，选择“项目代码 项目名称”；系统先检查文件存在、SQLite完整性、表结构和项目元数据，成功后才写入当前项目。数据库不存在时可指定新位置、切换历史项目或关闭项目。', None),
-          ('步骤2：新建物料', '打开物料库，按Ctrl+N或点击新建物料；填写必填的基础编码、版本号、名称、单位，规格、等级、制造商、MPN和M/P按实际情况填写。单位/M/P从下拉菜单选取，点击保存后窗口关闭且列表自动刷新。', None),
-          ('步骤3：导入物料', '点击导入物料，依次选择文件、Sheet和表头映射。需求表头分必填与可选，必填项带星号；每个需求字段只能映射一次。确认后查看进度，结果窗口分开显示成功、重复跳过和失败，并列出编码、名称、版本和详细原因。', None),
-          ('步骤4：新建SKU', '回到SKU清单按Ctrl+N；在可输入下拉框输入编码或名称，候选列表实时筛选。已有BOM结构或已经是SKU的候选会标记为不可用。回车可确认首个候选项，确认后SKU立即出现在清单。', None),
-          ('步骤5：打开并检查BOM', '双击SKU行或右键打开BOM。左侧树的根节点是SKU，逐层展开子BOM；点击任意节点，右侧显示最新物料资料。数量、位置、备注可编辑，编码、版本、名称等只读字段可复制。', None),
-          ('步骤6：新增、复制、替换和排序', '在目标节点右键选择新增同级/子级，物料选择框支持输入筛选和回车确认。复制/剪切会保留数量、位置、备注、替代料和颜色；粘贴前检查循环和重复。新增同级插入当前节点下方，同级物料可上移/下移。', None),
-          ('步骤7：保存和联动刷新', '保存前新增物料为绿色、删除物料为红色删除线、属性修改为黄棕色、其他BOM导入变更为深紫色；点击保存才写入数据库。共享子BOM变化会通知其他打开窗口，刷新会保留本窗口未保存缓存，确认后再保存。', None),
-          ('步骤8：导出和历史版本', 'BOM未保存时导出按钮禁用。保存后选择导出BOM或采购BOM；采购BOM按层级汇总用量。SKU右键复制BOM会生成新的历史版本，SKU编码不变但整棵BOM独立保存。', None),
-          ('步骤9：锁定与浏览', 'SKU右键锁定后再次打开进入BOM浏览模式，编辑菜单不可用。其他BOM联动触及锁定BOM时系统列出SKU、物料和父项信息；解除锁定后才能继续编辑。', None),
-          ('步骤10：查找和故障处理', '物料库/BOM按Ctrl+F查找编码、名称、规格、制造商和MPN，双击结果定位原表或树节点。遇到数据库损坏、路径失效或导入错误时，保留弹窗和版本信息，按提示重新选择数据库或修正映射。', None)]
-        for title,body,widget in steps:
-            layout.addWidget(self._section(title,body,self._guide_image(title, widget)))
-        return self._scroll(page)
+        from ui.help_guides import GUIDES
+        page=QWidget();layout=QVBoxLayout(page)
+        layout.addWidget(QLabel('先选择功能教程，再按步骤操作。红框为操作区域，红色箭头指向需填写或点击的位置；图片在编译时生成。'))
+        self.guide_selector=QComboBox();self.guide_selector.setObjectName('helpGuideSelector')
+        self.guide_stack=QStackedWidget()
+        for guide in GUIDES:
+            self.guide_selector.addItem(guide['title']+'（'+str(len(guide['steps']))+'步）')
+            body=QWidget();cards=QVBoxLayout(body)
+            intro=QLabel('开始前：'+guide['before']);intro.setWordWrap(True);cards.addWidget(intro)
+            for number,step in enumerate(guide['steps'],1):
+                cards.addWidget(self._section('步骤'+str(number)+'：'+step['title'],step['detail'],self._image_widget(step['key'],'操作位置：'+step['title'])))
+            cards.addStretch();self.guide_stack.addWidget(self._scroll(body))
+        self.guide_selector.currentIndexChanged.connect(self.guide_stack.setCurrentIndex)
+        layout.addWidget(self.guide_selector);layout.addWidget(self.guide_stack)
+        return page
 
     def _tips_page(self):
         page=QWidget();layout=QVBoxLayout(page)
@@ -78,11 +78,6 @@ class HelpDialog(QDialog):
         for title,body,widget in tips:layout.addWidget(self._section(title,body,self._tip_image(title, widget)))
         return self._scroll(page)
 
-    def _guide_image(self,title,widget=None):
-        mapping={'步骤1':'step01_project','步骤2':'step02_material','步骤3':'step03_mapping','步骤4':'step04_sku','步骤5':'step05_bom_tree','步骤6':'step06_bom_edit','步骤7':'step07_bom_info','步骤8':'step08_export','步骤9':'step09_bom_lock','步骤10':'step10_search'}
-        key=next((value for label,value in mapping.items() if title.split('：',1)[0]==label),'sku_overview')
-        return self._image_widget(key,'本步骤静态截图：'+title)
-
     def _tip_image(self,title,widget=None):
         mapping={'技巧1':'tip01_filter','技巧2':'tip02_clipboard','技巧3':'tip03_colors','技巧4':'tip04_shared','技巧5':'tip05_mapping','技巧6':'tip06_theme'}
         key=next((value for label,value in mapping.items() if title.split('：',1)[0]==label),'sku_overview')
@@ -94,11 +89,19 @@ class HelpDialog(QDialog):
         path=root/(key+'.png')
         if not path.is_file():path=Path(__file__).resolve().parents[2]/'resources/help_screenshots'/(key+'.png')
         heading=QLabel(title);heading.setAlignment(Qt.AlignCenter);heading.setStyleSheet('font-weight:bold;padding:4px;')
-        image=QLabel();image.setAlignment(Qt.AlignCenter);image.setMinimumHeight(260)
+        image=QLabel();image.setObjectName('help_image_'+key);image.setAlignment(Qt.AlignCenter);image.setMinimumHeight(260)
         pix=QPixmap(str(path)) if path.is_file() else QPixmap()
         if not pix.isNull():image.setPixmap(pix.scaled(1080,560,Qt.KeepAspectRatio,Qt.SmoothTransformation))
         else:image.setText('编译阶段静态截图缺失：'+key+'.png')
-        box=QFrame();layout=QVBoxLayout(box);layout.addWidget(heading);layout.addWidget(image);box.setFrameStyle(QFrame.StyledPanel|QFrame.Sunken);return box
+        box=QFrame();layout=QVBoxLayout(box);layout.addWidget(heading);layout.addWidget(image)
+        if not pix.isNull():
+            zoom=QPushButton('查看原图（可滚动）');zoom.clicked.connect(lambda checked=False,p=path,t=title:self._zoom_image(p,t));layout.addWidget(zoom)
+        box.setFrameStyle(QFrame.StyledPanel|QFrame.Sunken);return box
+
+    def _zoom_image(self,path,title):
+        window=QDialog(self);window.setAttribute(Qt.WA_DeleteOnClose);window.setWindowTitle(title);window.resize(1100,780)
+        layout=QVBoxLayout(window);area=QScrollArea();image=QLabel();image.setPixmap(QPixmap(str(path)));area.setWidget(image);layout.addWidget(area)
+        window.show();window.raise_()
 
     def _section(self,title,text,image):
         box=QFrame();layout=QVBoxLayout(box);heading=QLabel(title);heading.setStyleSheet('font-size:16px;font-weight:bold;');layout.addWidget(heading)

@@ -403,3 +403,5 @@ Windows测试入口按`tests/test_*.py`逐文件启用独立Python/Qt进程，�
 ### 静态帮助截图
 
 帮助窗口仅加载随包PNG，不在用户机器创建示例窗口或读取截图数据库。Linux/Windows构建自动运行 `tools/generate_help_screenshots.py`。本机默认来源为 `/home/biong/Documents/BOM/config.ini`；可设置 `BOM_HELP_CONFIG` 指定另一个config。生成器只读解析配置，使用SQLite备份复制数据库后在副本上生成截图。无默认配置的其他电脑使用 `resources/help_screenshots` 随源码静态资源；显式指定的配置失效时构建失败。截图资源包含项目示例信息，生成后应审核显示内容。临时输出在 `.tmp/help_screenshots`，发布包内为 `help_screenshots`。
+
+操作指引的步骤定义在 `src/ui/help_guides.py`，编译时 `tools/help_action_screenshots.py` 为对应真实控件绘制红色箭头和红框，生成 `action_*.png` 与 `actions.json`。修改步骤后须同步截图目标；生成器会校验两者一一对应。当前包含8个教程60个动作，总静态资源80张。
