@@ -19,13 +19,14 @@ class HelpDialogTests(unittest.TestCase):
  def tearDown(self):
   if getattr(self.w,'_help_dialog',None):self.w._help_dialog.close()
   self.w.close();self.db.close();self.tmp.cleanup()
- def test_help_menu_is_before_about_and_opens_five_sections(self):
+ def test_help_menu_is_before_about_and_opens_six_sections(self):
   labels=[a.text() for a in self.w.menuBar().actions()];self.assertLess(labels.index('帮助'),labels.index('关于'))
   self.w.show_help();self.app.processEvents();dialog=self.w._help_dialog
   self.assertTrue(dialog.isVisible())
   from PyQt5.QtWidgets import QTabWidget
   tabs=dialog.findChildren(QTabWidget)[0]
   self.assertEqual(dialog.windowModality(),0)
+  self.assertEqual([tabs.tabText(i) for i in range(tabs.count())],['快捷键','页面与功能','操作指引','操作技巧','规则与条件','Q&A'])
   # 页面说明、10步操作指引和6项技巧均应包含截图框。
   self.assertGreaterEqual(len(dialog.findChildren(__import__('PyQt5.QtWidgets',fromlist=['QLabel']).QLabel)),20)
 
@@ -38,8 +39,8 @@ class HelpDialogTests(unittest.TestCase):
    dialog=HelpDialog(empty);dialog.show();self.app.processEvents()
    self.assertEqual({w for w in self.app.topLevelWidgets() if w.isVisible()}-before,{dialog})
    images=[label for label in dialog.findChildren(QLabel) if label.pixmap() is not None and not label.pixmap().isNull()]
-   from ui.help_guides import GUIDE_KEYS
-   self.assertEqual(len(images),len(GUIDE_KEYS)+10)
+   from ui.help_guides import GUIDES,GUIDE_KEYS
+   self.assertEqual(len(images),len(GUIDES[0]['steps'])+10)
    self.assertIsNone(empty.svc.db);self.assertIsNone(empty._materials);self.assertEqual(empty._bom_windows,{})
    dialog.close();dialog.show();self.app.processEvents()
    self.assertEqual({w for w in self.app.topLevelWidgets() if w.isVisible()}-before,{dialog})
@@ -49,13 +50,17 @@ class HelpDialogTests(unittest.TestCase):
   import json
   from PIL import Image
   from ui.help_guides import GUIDES,GUIDE_KEYS
-  dialog=HelpDialog(self.w)
+  dialog=HelpDialog(self.w);dialog.show();dialog.findChild(__import__('PyQt5.QtWidgets',fromlist=['QTabWidget']).QTabWidget).setCurrentIndex(2);self.app.processEvents()
   manifest=json.loads((Path(__file__).parents[1]/'resources/help_screenshots/actions.json').read_text())
   self.assertEqual(set(GUIDE_KEYS),set(manifest));self.assertEqual(len(GUIDE_KEYS),len(set(GUIDE_KEYS)))
   self.assertEqual(dialog.guide_selector.count(),len(GUIDES))
   for index,guide in enumerate(GUIDES):
-   dialog.guide_selector.setCurrentIndex(index);self.app.processEvents()
-   self.assertEqual(dialog.guide_stack.currentIndex(),index)
+   dialog.guide_selector.setCurrentRow(index);self.app.processEvents()
+   self.assertEqual(dialog._guide_index,index)
+   self.assertGreater(dialog.guide_view.verticalScrollBar().maximum(),0)
+   from PyQt5.QtWidgets import QLabel
+   labels=dialog.guide_view.widget().findChildren(QLabel)
+   self.assertEqual({x.objectName() for x in labels if x.objectName().startswith('help_image_')},{'help_image_'+step['key'] for step in guide['steps']})
    for step in guide['steps']:
     self.assertTrue(step['detail']);info=manifest[step['key']];x,y,w,h=info['target']
     self.assertGreater(w,0);self.assertGreater(h,0)

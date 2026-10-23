@@ -3,11 +3,11 @@ from pathlib import Path
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QWidget, QLabel, QScrollArea, QTextBrowser, QFrame, QComboBox, QStackedWidget, QPushButton)
+    QWidget, QLabel, QScrollArea, QTextBrowser, QFrame, QPushButton, QListWidget, QSplitter)
 from ui.interactive_windows import QDialog
 
 class HelpDialog(QDialog):
-    """独立帮助窗口；截图来自当前运行中的实际页面。"""
+    """独立帮助窗口；截图来自编译阶段的实际页面。"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('帮助 - BOM管理系统')
@@ -22,6 +22,8 @@ class HelpDialog(QDialog):
         tabs.addTab(self._feature_page(), '页面与功能')
         tabs.addTab(self._guide_page(), '操作指引')
         tabs.addTab(self._tips_page(), '操作技巧')
+        from ui.help_rules import RULES_HTML
+        tabs.addTab(self._text_page(RULES_HTML), '规则与条件')
         tabs.addTab(self._text_page(self._qa()), 'Q&A')
 
     def _text_page(self, html):
@@ -53,18 +55,25 @@ class HelpDialog(QDialog):
         from ui.help_guides import GUIDES
         page=QWidget();layout=QVBoxLayout(page)
         layout.addWidget(QLabel('先选择功能教程，再按步骤操作。红框为操作区域，红色箭头指向需填写或点击的位置；图片在编译时生成。'))
-        self.guide_selector=QComboBox();self.guide_selector.setObjectName('helpGuideSelector')
-        self.guide_stack=QStackedWidget()
-        for guide in GUIDES:
-            self.guide_selector.addItem(guide['title']+'（'+str(len(guide['steps']))+'步）')
-            body=QWidget();cards=QVBoxLayout(body)
-            intro=QLabel('开始前：'+guide['before']);intro.setWordWrap(True);cards.addWidget(intro)
-            for number,step in enumerate(guide['steps'],1):
-                cards.addWidget(self._section('步骤'+str(number)+'：'+step['title'],step['detail'],self._image_widget(step['key'],'操作位置：'+step['title'])))
-            cards.addStretch();self.guide_stack.addWidget(self._scroll(body))
-        self.guide_selector.currentIndexChanged.connect(self.guide_stack.setCurrentIndex)
-        layout.addWidget(self.guide_selector);layout.addWidget(self.guide_stack)
+        self.guide_selector=QListWidget();self.guide_selector.setObjectName('helpGuideSelector');self.guide_selector.setMinimumWidth(230);self.guide_selector.setWordWrap(True);self.guide_selector.setTextElideMode(Qt.ElideNone)
+        splitter=QSplitter(Qt.Horizontal)
+        self.guide_view=QScrollArea();self.guide_view.setWidgetResizable(True)
+        self._guide_positions={};self._guide_index=None
+        for guide in GUIDES:self.guide_selector.addItem(guide['title']+'（'+str(len(guide['steps']))+'步）')
+        self.guide_selector.currentRowChanged.connect(self._show_guide);self.guide_selector.setCurrentRow(0)
+        splitter.addWidget(self.guide_selector);splitter.addWidget(self.guide_view);splitter.setStretchFactor(0,0);splitter.setStretchFactor(1,1);splitter.setSizes([270,760]);layout.addWidget(splitter,1)
         return page
+
+    def _show_guide(self,index):
+        from ui.help_guides import GUIDES
+        if index<0:return
+        if self._guide_index is not None:self._guide_positions[self._guide_index]=self.guide_view.verticalScrollBar().value()
+        guide=GUIDES[index];body=QWidget();cards=QVBoxLayout(body)
+        intro=QLabel('开始前：'+guide['before']);intro.setWordWrap(True);cards.addWidget(intro)
+        for number,step in enumerate(guide['steps'],1):
+            cards.addWidget(self._section('步骤'+str(number)+'：'+step['title'],step['detail'],self._image_widget(step['key'],'操作位置：'+step['title'])))
+        cards.addStretch();self.guide_view.setWidget(body);self._guide_index=index
+        self.guide_view.verticalScrollBar().setValue(self._guide_positions.get(index,0))
 
     def _tips_page(self):
         page=QWidget();layout=QVBoxLayout(page)
@@ -91,7 +100,7 @@ class HelpDialog(QDialog):
         heading=QLabel(title);heading.setAlignment(Qt.AlignCenter);heading.setStyleSheet('font-weight:bold;padding:4px;')
         image=QLabel();image.setObjectName('help_image_'+key);image.setAlignment(Qt.AlignCenter);image.setMinimumHeight(260)
         pix=QPixmap(str(path)) if path.is_file() else QPixmap()
-        if not pix.isNull():image.setPixmap(pix.scaled(1080,560,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        if not pix.isNull():image.setPixmap(pix.scaled(min(pix.width(),1080),min(pix.height(),560),Qt.KeepAspectRatio,Qt.SmoothTransformation))
         else:image.setText('编译阶段静态截图缺失：'+key+'.png')
         box=QFrame();layout=QVBoxLayout(box);layout.addWidget(heading);layout.addWidget(image)
         if not pix.isNull():

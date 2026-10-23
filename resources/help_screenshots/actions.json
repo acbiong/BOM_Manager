@@ -778,5 +778,902 @@
       175,
       340
     ]
+  },
+  "action_db_import_menu": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      4,
+      2,
+      46,
+      30
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_db_import_action": {
+    "window": "",
+    "target": [
+      2,
+      64,
+      196,
+      33
+    ],
+    "size": [
+      200,
+      99
+    ]
+  },
+  "action_db_import_file": {
+    "window": "导入项目数据库",
+    "target": [
+      115,
+      354,
+      429,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_db_import_ok": {
+    "window": "导入项目数据库",
+    "target": [
+      546,
+      354,
+      84,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_db_import_history": {
+    "window": "",
+    "target": [
+      2,
+      2,
+      262,
+      29
+    ],
+    "size": [
+      266,
+      33
+    ]
+  },
+  "action_similar_menu": {
+    "window": "",
+    "target": [
+      2,
+      68,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      138
+    ]
+  },
+  "action_revision_menu": {
+    "window": "",
+    "target": [
+      2,
+      20,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      138
+    ]
+  },
+  "action_reverse_menu": {
+    "window": "",
+    "target": [
+      2,
+      44,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      138
+    ]
+  },
+  "action_similar_code": {
+    "window": "新建物料",
+    "target": [
+      126,
+      18,
+      482,
+      70
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_similar_version": {
+    "window": "新建物料",
+    "target": [
+      126,
+      90,
+      482,
+      70
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_similar_name": {
+    "window": "新建物料",
+    "target": [
+      126,
+      162,
+      482,
+      95
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_similar_ok": {
+    "window": "新建物料",
+    "target": [
+      461,
+      574,
+      84,
+      37
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
+  "action_revision_value": {
+    "window": "物料版本变更",
+    "target": [
+      83,
+      40,
+      628,
+      37
+    ],
+    "size": [
+      720,
+      430
+    ]
+  },
+  "action_revision_refs": {
+    "window": "物料版本变更",
+    "target": [
+      9,
+      110,
+      702,
+      224
+    ],
+    "size": [
+      720,
+      430
+    ]
+  },
+  "action_revision_ok": {
+    "window": "物料版本变更",
+    "target": [
+      541,
+      384,
+      84,
+      37
+    ],
+    "size": [
+      720,
+      430
+    ]
+  },
+  "action_reverse_rows": {
+    "window": "物料反查",
+    "target": [
+      9,
+      40,
+      702,
+      342
+    ],
+    "size": [
+      720,
+      430
+    ]
+  },
+  "action_reverse_open": {
+    "window": "物料反查",
+    "target": [
+      35,
+      70,
+      660,
+      54
+    ],
+    "size": [
+      720,
+      430
+    ]
+  },
+  "action_delete_sku_menu": {
+    "window": "",
+    "target": [
+      2,
+      206,
+      121,
+      22
+    ],
+    "size": [
+      125,
+      230
+    ]
+  },
+  "action_delete_sku_confirm": {
+    "window": "确认",
+    "target": [
+      37,
+      46,
+      84,
+      37
+    ],
+    "size": [
+      216,
+      92
+    ]
+  },
+  "action_material_delete_menu": {
+    "window": "",
+    "target": [
+      2,
+      90,
+      121,
+      22
+    ],
+    "size": [
+      125,
+      114
+    ]
+  },
+  "action_material_delete_confirm": {
+    "window": "确认",
+    "target": [
+      9,
+      46,
+      84,
+      37
+    ],
+    "size": [
+      188,
+      92
+    ]
+  },
+  "action_delete_node_menu": {
+    "window": "",
+    "target": [
+      2,
+      320,
+      121,
+      22
+    ],
+    "size": [
+      125,
+      344
+    ]
+  },
+  "action_replace_menu": {
+    "window": "",
+    "target": [
+      2,
+      44,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      344
+    ]
+  },
+  "action_clipboard_copy": {
+    "window": "",
+    "target": [
+      2,
+      228,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      344
+    ]
+  },
+  "action_clipboard_cut": {
+    "window": "",
+    "target": [
+      2,
+      250,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      344
+    ]
+  },
+  "action_alternate_menu": {
+    "window": "",
+    "target": [
+      2,
+      134,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      344
+    ]
+  },
+  "action_delete_node_confirm": {
+    "window": "确认删除",
+    "target": [
+      221,
+      96,
+      84,
+      37
+    ],
+    "size": [
+      400,
+      142
+    ]
+  },
+  "action_delete_node_restore": {
+    "window": "",
+    "target": [
+      2,
+      2,
+      121,
+      22
+    ],
+    "size": [
+      125,
+      70
+    ]
+  },
+  "action_replace_input": {
+    "window": "替换物料",
+    "target": [
+      9,
+      40,
+      632,
+      37
+    ],
+    "size": [
+      650,
+      125
+    ]
+  },
+  "action_replace_ok": {
+    "window": "替换物料",
+    "target": [
+      471,
+      79,
+      84,
+      37
+    ],
+    "size": [
+      650,
+      125
+    ]
+  },
+  "action_replace_matches": {
+    "window": "选择同步替换的物料",
+    "target": [
+      9,
+      65,
+      1032,
+      467
+    ],
+    "size": [
+      1050,
+      580
+    ]
+  },
+  "action_replace_matches_ok": {
+    "window": "选择同步替换的物料",
+    "target": [
+      871,
+      534,
+      84,
+      37
+    ],
+    "size": [
+      1050,
+      580
+    ]
+  },
+  "action_replace_subtree": {
+    "window": "复制原子BOM",
+    "target": [
+      135,
+      121,
+      84,
+      37
+    ],
+    "size": [
+      400,
+      167
+    ]
+  },
+  "action_bom_revision_menu": {
+    "window": "",
+    "target": [
+      2,
+      66,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      344
+    ]
+  },
+  "action_bom_revision_choice": {
+    "window": "物料版本更新",
+    "target": [
+      9,
+      40,
+      632,
+      37
+    ],
+    "size": [
+      650,
+      125
+    ]
+  },
+  "action_bom_revision_ok": {
+    "window": "物料版本更新",
+    "target": [
+      471,
+      79,
+      84,
+      37
+    ],
+    "size": [
+      650,
+      125
+    ]
+  },
+  "action_alternate_choice": {
+    "window": "新增替代料",
+    "target": [
+      9,
+      40,
+      632,
+      37
+    ],
+    "size": [
+      650,
+      125
+    ]
+  },
+  "action_alternate_ok": {
+    "window": "新增替代料",
+    "target": [
+      471,
+      79,
+      84,
+      37
+    ],
+    "size": [
+      650,
+      125
+    ]
+  },
+  "action_alternate_select": {
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
+    "target": [
+      438,
+      375,
+      114,
+      32
+    ],
+    "size": [
+      800,
+      600
+    ]
+  },
+  "action_alternate_promote": {
+    "window": "",
+    "target": [
+      2,
+      2,
+      121,
+      22
+    ],
+    "size": [
+      125,
+      46
+    ]
+  },
+  "action_clipboard_peer": {
+    "window": "",
+    "target": [
+      2,
+      272,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      388
+    ]
+  },
+  "action_clipboard_child": {
+    "window": "",
+    "target": [
+      2,
+      294,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      388
+    ]
+  },
+  "action_move_up": {
+    "window": "",
+    "target": [
+      2,
+      318,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      388
+    ]
+  },
+  "action_move_down": {
+    "window": "",
+    "target": [
+      2,
+      340,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      388
+    ]
+  },
+  "action_color_menu": {
+    "window": "",
+    "target": [
+      2,
+      204,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      388
+    ]
+  },
+  "action_color_default": {
+    "window": "",
+    "target": [
+      2,
+      64,
+      196,
+      37
+    ],
+    "size": [
+      200,
+      200
+    ]
+  },
+  "action_color_more": {
+    "window": "",
+    "target": [
+      2,
+      165,
+      196,
+      33
+    ],
+    "size": [
+      200,
+      200
+    ]
+  },
+  "action_color_pick": {
+    "window": "Select Color",
+    "target": [
+      8,
+      8,
+      547,
+      400
+    ],
+    "size": [
+      563,
+      461
+    ]
+  },
+  "action_color_ok": {
+    "window": "Select Color",
+    "target": [
+      384,
+      415,
+      84,
+      37
+    ],
+    "size": [
+      563,
+      461
+    ]
+  },
+  "action_color_remember": {
+    "window": "保存颜色",
+    "target": [
+      170,
+      46,
+      84,
+      37
+    ],
+    "size": [
+      349,
+      92
+    ]
+  },
+  "action_compare_menu": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      295,
+      2,
+      84,
+      30
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_compare_left": {
+    "window": "BOM对比",
+    "target": [
+      121,
+      65,
+      578,
+      37
+    ],
+    "size": [
+      1400,
+      800
+    ]
+  },
+  "action_compare_right": {
+    "window": "BOM对比",
+    "target": [
+      813,
+      65,
+      578,
+      37
+    ],
+    "size": [
+      1400,
+      800
+    ]
+  },
+  "action_compare_run": {
+    "window": "BOM对比",
+    "target": [
+      9,
+      754,
+      1382,
+      37
+    ],
+    "size": [
+      1400,
+      800
+    ]
+  },
+  "action_compare_diff": {
+    "window": "BOM对比",
+    "target": [
+      1243,
+      717,
+      148,
+      35
+    ],
+    "size": [
+      1400,
+      800
+    ]
+  },
+  "action_compare_edit": {
+    "window": "",
+    "target": [
+      2,
+      2,
+      121,
+      22
+    ],
+    "size": [
+      125,
+      46
+    ]
+  },
+  "action_bom_import_menu": {
+    "window": "",
+    "target": [
+      2,
+      156,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      364
+    ]
+  },
+  "action_bom_import_file": {
+    "window": "导入BOM",
+    "target": [
+      115,
+      354,
+      429,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_bom_import_open": {
+    "window": "导入BOM",
+    "target": [
+      546,
+      354,
+      84,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_bom_import_sheet": {
+    "window": "选择BOM工作表",
+    "target": [
+      9,
+      40,
+      291,
+      37
+    ],
+    "size": [
+      309,
+      125
+    ]
+  },
+  "action_bom_import_sheet_ok": {
+    "window": "选择BOM工作表",
+    "target": [
+      130,
+      79,
+      84,
+      37
+    ],
+    "size": [
+      309,
+      125
+    ]
+  },
+  "action_bom_mapping_0": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      102,
+      125,
+      152,
+      47
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_bom_mapping_1": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      260,
+      125,
+      145,
+      50
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_bom_mapping_2": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      402,
+      125,
+      161,
+      50
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_bom_mapping_3": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      560,
+      125,
+      145,
+      50
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_bom_mapping_4": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      702,
+      125,
+      145,
+      50
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_bom_mapping_5": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      844,
+      125,
+      145,
+      50
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_bom_mapping_alt": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      9,
+      40,
+      982,
+      37
+    ],
+    "size": [
+      1000,
+      620
+    ]
+  },
+  "action_bom_mapping_ok": {
+    "window": "BOM表头映射 — BOM",
+    "target": [
+      821,
+      574,
+      84,
+      37
+    ],
+    "size": [
+      1000,
+      620
+    ]
   }
 }

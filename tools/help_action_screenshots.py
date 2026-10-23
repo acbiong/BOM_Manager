@@ -109,6 +109,8 @@ def generate(out,main,materials,bom,svc):
     with patch.object(QMenu,'exec_',menu_capture):main.sku_context_menu(pos)
     svc.set_sku_locked(sid,True)
     with patch.object(QMenu,'exec_',menu_capture):main.sku_context_menu(pos)
+    from help_more_screenshots import generate as generate_more
+    generate_more(locals())
     for w in dialogs:w.close();w.deleteLater()
     (out/'物料清单.xlsx').unlink(missing_ok=True)
     if set(manifest)!=set(GUIDE_KEYS):raise RuntimeError('教程标注资源不匹配：'+str(set(GUIDE_KEYS)^set(manifest)))

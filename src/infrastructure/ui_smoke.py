@@ -132,11 +132,14 @@ def exercise_windows(service,main,library):
         help_window=HelpDialog(main);opened.append(help_window);help_window.show();drain()
         assert {window for window in app.topLevelWidgets() if window.isVisible()}-visible=={help_window}
         images=[label for label in help_window.findChildren(QLabel) if label.pixmap() is not None and not label.pixmap().isNull()]
-        from ui.help_guides import GUIDE_KEYS
-        assert len(images)==len(GUIDE_KEYS)+10,'帮助静态截图未完整打包'
+        from ui.help_guides import GUIDES
+        assert len(images)==len(GUIDES[0]['steps'])+10,'帮助静态截图未完整打包'
         for index in range(help_window.guide_selector.count()):
-            help_window.guide_selector.setCurrentIndex(index);drain(10)
-            assert help_window.guide_stack.currentIndex()==index
+            help_window.guide_selector.setCurrentRow(index);drain(10)
+            assert help_window._guide_index==index
+            labels=help_window.guide_view.widget().findChildren(QLabel)
+            images=[label for label in labels if label.pixmap() is not None and not label.pixmap().isNull()]
+            assert len(images)==len(GUIDES[index]['steps']),'教程截图未完整加载'
         checks.extend(['ui_help_annotated_action_resources','ui_help_no_extra_windows'])
         help_window.close();help_window.deleteLater();opened.remove(help_window);drain()
         return checks
