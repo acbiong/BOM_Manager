@@ -17,7 +17,7 @@ class SkuFooterTests(unittest.TestCase):
    try:
     self.assertEqual(w.count_label.text(),'共计1个SKU，1个BOM');self.assertEqual(w.version_label.text(),'版本 '+w.version)
     footer=w.count_label.parentWidget();self.assertIs(footer,w.version_label.parentWidget());self.assertEqual(footer.layout().count(),3);self.assertIs(footer,w.latest_bom_only.parentWidget());self.assertIs(footer.layout().itemAtPosition(0,2).widget(),w.latest_bom_only)
-    self.assertEqual([a.text() for a in w.menuBar().actions()],['文件','项目','物料库','新建SKU','筛选','BOM对比','关于'])
+    self.assertEqual([a.text() for a in w.menuBar().actions()],['文件','项目','物料库','新建SKU','筛选','BOM对比','帮助','关于'])
     self.assertFalse(hasattr(w,'power_label'))
     w.show()
     for width in (800,1100,1600):

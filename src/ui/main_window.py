@@ -395,6 +395,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   self._description_hover=VersionDescriptionHover(self.table)
   filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
   compare_action=bar.addAction('BOM对比');compare_action.triggered.connect(self.compare_boms)
+  help_action=bar.addAction('帮助'); help_action.triggered.connect(self.show_help)
   a=bar.addAction('关于'); a.triggered.connect(self.show_about)
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.table.horizontalHeader().setSectionsClickable(True);self.table.horizontalHeader().sectionClicked.connect(self.sort_skus)
@@ -419,6 +420,10 @@ class MainWindow(ProjectManagement,QMainWindow):
   dialog=self._compare_dialog;index=dialog.left.findData(sid)
   if index<0:return
   dialog.left.setCurrentIndex(index)
+ def show_help(self):
+  from ui.help_dialog import HelpDialog
+  if not getattr(self,'_help_dialog',None):self._help_dialog=HelpDialog(self)
+  self._help_dialog.show();self._help_dialog.raise_();self._help_dialog.activateWindow()
  def show_about(self):
   AboutDialog(self.version,self).exec_()
  def set_theme(self,dark):
