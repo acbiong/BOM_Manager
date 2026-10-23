@@ -34,7 +34,7 @@ def main():
     signing=signing_config(env)
     def run(args):subprocess.run(args,check=True,env=env)
     run([sys.executable,'tools/run_tests.py'])
-    run([sys.executable,'tools/write_build_info.py'])
+    run([sys.executable,'tools/write_build_info.py']);run([sys.executable,'tools/generate_help_screenshots.py'])
     from PIL import Image,ImageDraw
     tmp=root/'.tmp'/'windows';tmp.mkdir(parents=True,exist_ok=True)
     icon=tmp/'bom.ico';image=Image.new('RGB',(256,256),'#2368b4');draw=ImageDraw.Draw(image)
@@ -47,7 +47,7 @@ def main():
     run([sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onefile','--windowed','--noupx',
          '--workpath',str(tmp/'build'),'--distpath',str(package),'--specpath',str(tmp/'spec'),
          '--icon',str(icon),'--version-file',str(version_resource),'--add-data',str(root/'VERSION')+os.pathsep+'.',
-         '--add-data',str(root/'.tmp'/'build_info.json')+os.pathsep+'.','--name',name,'src/main.py'])
+         '--add-data',str(root/'.tmp'/'build_info.json')+os.pathsep+'.','--add-data',str(root/'.tmp'/'help_screenshots')+os.pathsep+'help_screenshots','--name',name,'src/main.py'])
     exe=package/(name+'.exe');report=root/'test_reports'/(name+'_smoke.json')
     finalize_artifact(exe,report,signing,env)
     print('EXE:',exe)

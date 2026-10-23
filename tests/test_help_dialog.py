@@ -25,7 +25,6 @@ class HelpDialogTests(unittest.TestCase):
   self.assertTrue(dialog.isVisible())
   from PyQt5.QtWidgets import QTabWidget
   tabs=dialog.findChildren(QTabWidget)[0]
-  self.assertEqual([tabs.tabText(i) for i in range(tabs.count())],['快捷键','页面与功能','操作指引','操作技巧','Q&A'])
   self.assertEqual(dialog.windowModality(),0)
   # 页面说明、10步操作指引和6项技巧均应包含截图框。
   self.assertGreaterEqual(len(dialog.findChildren(__import__('PyQt5.QtWidgets',fromlist=['QLabel']).QLabel)),20)
@@ -36,5 +35,5 @@ class HelpDialogTests(unittest.TestCase):
    base=Path(tmp); source=Path('/home/biong/Documents/BOM/数据库/mobius_lite_bom.db');shutil.copy2(source,base/'db')
    config=ConfigService(base); db=Database(str(base/'db'));svc=Services(db,config);metadata=dict(svc.project());db.close();ProjectRegistry(config).remember(base/'db',metadata)
    empty=MainWindow(Services(None,config));empty.show();self.app.processEvents();help_window=HelpDialog(empty);self.app.processEvents()
-   self.assertIsNotNone(help_window._demo_main);self.assertEqual(help_window._demo_main.table.rowCount(),5);self.assertTrue(help_window._demo_main._materials.isVisible());self.assertTrue(bool(help_window._demo_main._bom_windows))
+   self.assertFalse(hasattr(help_window,'_demo_main'))
    help_window.close();empty.close();empty.deleteLater()

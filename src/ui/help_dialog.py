@@ -13,7 +13,6 @@ class HelpDialog(QDialog):
         self.setWindowTitle('帮助 - BOM管理系统')
         self.resize(1050, 760)
         self.setMinimumSize(760, 540)
-        self._ensure_screenshot_sources()
         layout = QVBoxLayout(self)
         intro = QLabel('BOM管理系统帮助中心  ·  内容会根据当前打开的页面提供实际截图')
         intro.setStyleSheet('font-size:16px;font-weight:bold;padding:6px 2px;')
@@ -24,19 +23,6 @@ class HelpDialog(QDialog):
         tabs.addTab(self._guide_page(), '操作指引')
         tabs.addTab(self._tips_page(), '操作技巧')
         tabs.addTab(self._text_page(self._qa()), 'Q&A')
-
-    def closeEvent(self,event):
-        demo=self._demo_main
-        if demo is not None and demo is not self.parentWidget():
-            try:
-                for window in set(demo._bom_windows.values())|set(demo._material_bom_windows.values()):
-                    window.dirty=False;window.close()
-                if demo._materials is not None:demo._materials.close()
-                demo.close();demo.deleteLater()
-                if self._demo_db is not None:self._demo_db.close()
-                if self._demo_tmp is not None:self._demo_tmp.cleanup()
-            except Exception:pass
-        super().closeEvent(event)
 
     def _text_page(self, html):
         area = QScrollArea(); area.setWidgetResizable(True)
@@ -57,10 +43,10 @@ class HelpDialog(QDialog):
 
     def _feature_page(self):
         page = QWidget(); layout = QVBoxLayout(page)
-        layout.addWidget(self._section('SKU清单窗口：项目总览与批量入口', '这里显示当前项目全部SKU及其历史版本。点击表头可排序，选择一行后双击打开BOM；Ctrl/Shift可多选，再右键对多个SKU执行浏览、编辑、导出或锁定。锁定列显示小锁，版本号加粗表示存在变更描述；底部同时显示“共计N个SKU，M个BOM”。', self._grab(self._source_window(), '实际截图：SKU清单窗口')))
-        layout.addWidget(self._section('物料库窗口：公共物料资料', '物料库维护基础编码、版本号、名称、规格、单位、等级、制造商、MPN和M/P，并显示BOM状态、呆滞状态及各SKU用量。菜单按钮可执行导入、导出、查找、筛选；右键可编辑、复制、删除、反查、版本更新、编辑BOM和新增替代料。', self._grab(getattr(self._source_window(), '_materials', None), '实际截图：物料库窗口')))
-        layout.addWidget(self._section('BOM编辑窗口：树状结构与属性', '左侧是递归BOM树，右侧是当前节点属性和替代料。根节点显示SKU或选中的公共物料；树节点左键切换右侧资料，右键按分组提供新增、复制剪切粘贴、替换、版本更新、替代料、颜色、反查和导出。保存前变更有颜色标识，保存后恢复默认。', self._grab(self._first_bom(), '实际截图：BOM编辑/浏览窗口')))
-        layout.addWidget(self._section('导入、导出、对比和主题', '物料/BOM导入均支持Sheet选择、表头映射、必填项检查、进度条和结果明细；BOM对比支持两个SKU历史版本或外部Excel，并同步标记新增、删除、修改、换料和交换。右上角太阳/月亮按钮切换主题，窗口尺寸和路径自动记忆。', self._grab(self._source_window().menuBar() if self._source_window() else None, '实际截图：菜单和主题按钮')))
+        layout.addWidget(self._section('SKU清单窗口：项目总览与批量入口', '这里显示当前项目全部SKU及其历史版本。点击表头可排序，选择一行后双击打开BOM；Ctrl/Shift可多选，再右键对多个SKU执行浏览、编辑、导出或锁定。锁定列显示小锁，版本号加粗表示存在变更描述；底部同时显示“共计N个SKU，M个BOM”。', self._image_widget('sku_overview', '实际截图：SKU清单窗口')))
+        layout.addWidget(self._section('物料库窗口：公共物料资料', '物料库维护基础编码、版本号、名称、规格、单位、等级、制造商、MPN和M/P，并显示BOM状态、呆滞状态及各SKU用量。菜单按钮可执行导入、导出、查找、筛选；右键可编辑、复制、删除、反查、版本更新、编辑BOM和新增替代料。', self._image_widget('material_library', '实际截图：物料库窗口')))
+        layout.addWidget(self._section('BOM编辑窗口：树状结构与属性', '左侧是递归BOM树，右侧是当前节点属性和替代料。根节点显示SKU或选中的公共物料；树节点左键切换右侧资料，右键按分组提供新增、复制剪切粘贴、替换、版本更新、替代料、颜色、反查和导出。保存前变更有颜色标识，保存后恢复默认。', self._image_widget('bom_window', '实际截图：BOM编辑/浏览窗口')))
+        layout.addWidget(self._section('导入、导出、对比和主题', '物料/BOM导入均支持Sheet选择、表头映射、必填项检查、进度条和结果明细；BOM对比支持两个SKU历史版本或外部Excel，并同步标记新增、删除、修改、换料和交换。右上角太阳/月亮按钮切换主题，窗口尺寸和路径自动记忆。', self._image_widget('menu_theme', '实际截图：菜单和主题按钮')))
         return self._scroll(page)
 
     def _guide_page(self):
@@ -92,6 +78,43 @@ class HelpDialog(QDialog):
         for title,body,widget in tips:layout.addWidget(self._section(title,body,self._tip_image(title, widget)))
         return self._scroll(page)
 
+    def _source_window(self):
+        return self.parentWidget()
+
+    def _first_bom(self):
+        return None
+
+    def _guide_image(self,title,widget=None):
+        mapping={'步骤1':'step01_project','步骤2':'step02_material','步骤3':'step03_mapping','步骤4':'step04_sku','步骤5':'step05_bom_tree','步骤6':'step06_bom_edit','步骤7':'step07_bom_info','步骤8':'step08_export','步骤9':'step09_bom_lock','步骤10':'step10_search'}
+        key=next((value for label,value in mapping.items() if title.startswith(label)),'sku_overview')
+        return self._image_widget(key,'本步骤静态截图：'+title)
+
+    def _tip_image(self,title,widget=None):
+        mapping={'技巧1':'tip01_filter','技巧2':'tip02_clipboard','技巧3':'tip03_colors','技巧4':'tip04_shared','技巧5':'tip05_mapping','技巧6':'tip06_theme'}
+        key=next((value for label,value in mapping.items() if title.startswith(label)),'sku_overview')
+        return self._image_widget(key,'实际静态截图：'+title)
+
+    def _image_widget(self,key,title):
+        import sys
+        root=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[2]))/'help_screenshots'
+        path=root/(key+'.png')
+        if not path.is_file():path=Path(__file__).resolve().parents[2]/'.tmp/help_screenshots'/(key+'.png')
+        heading=QLabel(title);heading.setAlignment(Qt.AlignCenter);heading.setStyleSheet('font-weight:bold;padding:4px;')
+        image=QLabel();image.setAlignment(Qt.AlignCenter);image.setMinimumHeight(260)
+        pix=QPixmap(str(path)) if path.is_file() else QPixmap()
+        if not pix.isNull():image.setPixmap(pix.scaled(1080,560,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        else:image.setText('编译阶段静态截图缺失：'+key+'.png')
+        box=QFrame();layout=QVBoxLayout(box);layout.addWidget(heading);layout.addWidget(image);box.setFrameStyle(QFrame.StyledPanel|QFrame.Sunken);return box
+
+    def _section(self,title,text,image):
+        box=QFrame();layout=QVBoxLayout(box);heading=QLabel(title);heading.setStyleSheet('font-size:16px;font-weight:bold;');layout.addWidget(heading)
+        body=QLabel(text);body.setWordWrap(True);body.setTextInteractionFlags(Qt.TextSelectableByMouse);layout.addWidget(body)
+        if image:layout.addWidget(image)
+        box.setFrameStyle(QFrame.StyledPanel|QFrame.Sunken);return box
+
+    def _scroll(self,widget):
+        area=QScrollArea();area.setWidgetResizable(True);area.setWidget(widget);return area
+
     def _qa(self):
         return '''<h2>常见问题</h2><h3>Q：启动后SKU清单为空怎么办？</h3><p>A：检查项目菜单中的当前项目；没有当前项目时选择历史项目。若数据库路径失效，选择“指定数据库”重新关联，系统会先做完整性和结构校验。</p>
         <h3>Q：为什么BOM保存按钮不可用？</h3><p>A：没有未保存修改时保存按钮会禁用；受到其他BOM联动更新时先点击刷新，确认缓存内容后再保存。</p>
@@ -100,116 +123,4 @@ class HelpDialog(QDialog):
         <h3>Q：如何恢复误删的BOM物料？</h3><p>A：保存前右键删除线物料，选择“取消删除”；已经保存的删除需要从物料库重新新增到对应父级。</p>
         <h3>Q：如何获得帮助？</h3><p>A：保留软件版本号、项目名称、操作步骤和弹窗内容；同时查看关于窗口中的Git提交信息，便于定位对应版本。</p>'''
 
-    def _source_window(self):
-        return getattr(self,'_demo_main',None) or self.parentWidget()
 
-    def _ensure_screenshot_sources(self):
-        """使用配置中的真实项目数据库创建隔离的截图页面。"""
-        parent=self.parentWidget()
-        self._demo_main=None; self._demo_db=None; self._demo_tmp=None
-        if parent is None:return
-        try:
-            service=getattr(parent,'svc',None)
-            if service is not None and service.db is not None:
-                self._demo_main=parent
-            else:
-                config=getattr(service,'config_service',None)
-                if config is None:return
-                from config.project_registry import ProjectRegistry
-                records=ProjectRegistry(config).entries()
-                database_path=None
-                for record in records:
-                    try:
-                        candidate=config.resolve_path(record.get('path',''))
-                        if candidate.is_file() and candidate.stat().st_size>0:
-                            database_path=candidate;break
-                    except (OSError,ValueError):continue
-                if database_path is None:return
-                import tempfile,shutil
-                from database.database import Database
-                from config.config_service import ConfigService
-                from services.services import Services
-                tmp=tempfile.TemporaryDirectory(prefix='bom-help-demo-');self._demo_tmp=tmp
-                demo_path=Path(tmp.name)/'help_demo.db';shutil.copy2(database_path,demo_path)
-                self._demo_db=Database(str(demo_path));demo_service=Services(self._demo_db,ConfigService(tmp.name))
-                from ui.main_window import MainWindow
-                self._demo_main=MainWindow(demo_service);self._demo_main.show();QApplication.processEvents()
-            if getattr(self._demo_main,'_materials',None) is None:self._demo_main.show_materials()
-            if not getattr(self._demo_main,'_bom_windows',{}):
-                row=self._demo_main.svc.db.conn.execute('SELECT id FROM skus ORDER BY id LIMIT 1').fetchone()
-                if row:self._demo_main.open_bom_id(row['id'])
-            QApplication.processEvents()
-        except Exception:
-            self._demo_main=None
-
-    def _first_bom(self):
-        parent=self._source_window()
-        return next(iter(getattr(parent,'_bom_windows',{}).values()),None) if parent else None
-
-    def _guide_image(self, title, fallback):
-        """为步骤选择对应真实页面；对话框截图使用当前项目真实数据。"""
-        owner=self.parentWidget(); parent=self._source_window(); service=getattr(parent,'svc',None)
-        bom=self._first_bom()
-        if bom is not None:
-            if title.startswith('步骤6'):
-                return self._grab(bom.tree,'本步骤实际截图：'+title)
-            if title.startswith('步骤7'):
-                return self._grab(bom.info_scroll,'本步骤实际截图：'+title)
-            if title.startswith('步骤9'):
-                return self._grab(bom.tree,'本步骤实际截图：'+title)
-        try:
-            from ui.main_window import MaterialDialog, NewSkuDialog, MaterialHeaderMappingDialog
-            dialog=None
-            if service is not None and service.db is not None:
-                first=service.db.conn.execute('SELECT * FROM materials ORDER BY id LIMIT 1').fetchone()
-                data=dict(first) if first else {}
-                if title.startswith('步骤2'):
-                    dialog=MaterialDialog(owner,data=data,readonly_keys={'base_code','version'})
-                    dialog.setWindowTitle('实际截图：新建/编辑物料')
-                elif title.startswith('步骤3'):
-                    headers=['物料基础编码','物料版本号','物料名称','物料规格','单位','物料等级','M/P']
-                    rows=[tuple((data.get(k) or '') for k in ('base_code','version','name','description','unit','grade','mp_flag'))]
-                    dialog=MaterialHeaderMappingDialog('帮助中心示例.xlsx',headers,[],owner,preview_rows=rows)
-                    dialog.setWindowTitle('实际截图：物料表头映射')
-                elif title.startswith('步骤4'):
-                    dialog=NewSkuDialog(service,owner);dialog.setWindowTitle('实际截图：新建SKU')
-            if dialog is not None:
-                dialog.resize(min(dialog.width(),1000),min(dialog.height(),650));dialog.show();QApplication.processEvents()
-                image=self._grab(dialog,'本步骤实际截图：'+title);dialog.close();dialog.deleteLater();return image
-            if title.startswith('步骤10') and getattr(parent,'_materials',None) is not None:
-                from ui.material_search import MaterialSearchDialog
-                dialog=MaterialSearchDialog(parent._materials);dialog.show();QApplication.processEvents();image=self._grab(dialog,'本步骤实际截图：'+title);dialog.close();dialog.deleteLater();return image
-        except Exception:
-            pass
-        return self._grab(fallback,'本步骤实际截图：'+title)
-
-    def _tip_image(self, title, fallback):
-        target=self._first_bom()
-        if target is not None:
-            if title.startswith('技巧2') or title.startswith('技巧3'):
-                return self._grab(target.tree,'实际截图：'+title)
-            if title.startswith('技巧4'):
-                return self._grab(target.info_scroll,'实际截图：'+title)
-        if title.startswith('技巧1') and getattr(self._source_window(),'table',None) is not None:
-            return self._grab(self._source_window().table,'实际截图：'+title)
-        return self._grab(fallback,'实际截图：'+title)
-
-    def _grab(self, widget, title):
-        # 每个教程步骤必须有一张实际截图；目标窗口未打开时仅回退到主窗口。
-        if widget is None or not widget.isVisible():
-            widget=self._source_window()
-        if widget is None or not widget.isVisible(): return None
-        pix=widget.grab()
-        if pix.isNull(): return None
-        label=QLabel(title);label.setAlignment(Qt.AlignCenter);label.setStyleSheet('font-weight:bold;padding:4px;')
-        image=QLabel();image.setPixmap(pix.scaled(920,420,Qt.KeepAspectRatio,Qt.SmoothTransformation));image.setAlignment(Qt.AlignCenter)
-        box=QFrame();l=QVBoxLayout(box);l.addWidget(label);l.addWidget(image);box.setFrameStyle(QFrame.StyledPanel|QFrame.Sunken);return box
-
-    def _section(self,title,text,image):
-        box=QFrame();l=QVBoxLayout(box);h=QLabel(title);h.setStyleSheet('font-size:16px;font-weight:bold;');l.addWidget(h)
-        body=QLabel(text);body.setWordWrap(True);body.setTextInteractionFlags(Qt.TextSelectableByMouse);l.addWidget(body)
-        if image:l.addWidget(image)
-        box.setFrameStyle(QFrame.StyledPanel|QFrame.Sunken);return box
-
-    def _scroll(self, widget):
-        area=QScrollArea();area.setWidgetResizable(True);area.setWidget(widget);return area

@@ -15,9 +15,10 @@ ver=$(cat VERSION); stamp=$(date +%Y%m%d_%H%M%S); name="BOM_Manager_${ver}_${sta
 rm -rf "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR"
 python3 tools/write_build_info.py
+python3 tools/generate_help_screenshots.py
 python3 -m PyInstaller --noconfirm --clean --onedir --windowed --noupx \
  --workpath "$BUILD_DIR" --distpath "$DIST_DIR" --specpath "$SPEC_DIR" \
- --add-data "$ROOT/VERSION:." --add-data "$TMP_DIR/build_info.json:." --name "$name" src/main.py
+ --add-data "$ROOT/VERSION:." --add-data "$TMP_DIR/build_info.json:." --add-data "$TMP_DIR/help_screenshots:help_screenshots" --name "$name" src/main.py
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp -a "$DIST_DIR/$name/." "$APPDIR/usr/bin/"
 mv "$APPDIR/usr/bin/$name" "$APPDIR/usr/bin/BOM管理系统"
