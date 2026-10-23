@@ -962,3 +962,12 @@ Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出�
 - 新增tools/generate_help_screenshots.py，仅在编译阶段执行：读取BOM_HELP_CONFIG（默认/home/biong/Documents/BOM/config.ini）关联的历史项目数据库，复制到临时目录后创建真实页面并生成20张PNG。
 - AppImage和Windows构建脚本自动调用截图生成器，并将help_screenshots目录作为静态资源打包；运行时从PyInstaller资源目录读取。
 - 静态资源包括SKU、物料库、BOM、菜单主题、10步操作指引和6项操作技巧，每项对应独立截图。数据库只读副本不会修改原项目。
+
+
+### 静态帮助发布验收补充
+
+- 删除全部运行时截图/数据库/示例窗口生成逻辑；帮助无项目首次打开及重开均只增加帮助本身。
+- 构建脚本只读解析指定config，使用SQLite backup生成一致性副本（包含WAL中的已提交数据），不调用源config.load进行默认值写入。
+- resources/help_screenshots随源码提供20张静态资源；另一台电脑没有默认本机配置时直接使用这些资源，可通过BOM_HELP_CONFIG指定新的截图来源。Windows和AppImage均内置同一资源集合。
+- 精确匹配步骤编号，修复步骤10错误匹配步骤1；发布冒烟新增20张PNG加载和不额外弹窗检查。移除测试对本机真实数据库的依赖，改为模拟禁止数据库/业务窗口打开并验证可见窗口集合。
+- 已查看test_reports/help_static_window.png的实际Qt窗口截图：未打开项目时显示真实SKU截图而不是空白表格；全量测试/资源完整性/打包验证按收尾执行。

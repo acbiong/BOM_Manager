@@ -29,11 +29,25 @@ class HelpDialogTests(unittest.TestCase):
   # 页面说明、10步操作指引和6项技巧均应包含截图框。
   self.assertGreaterEqual(len(dialog.findChildren(__import__('PyQt5.QtWidgets',fromlist=['QLabel']).QLabel)),20)
 
- def test_empty_current_project_uses_config_database_for_real_screenshots(self):
-  self.w.close();self.db.close()
-  with tempfile.TemporaryDirectory() as tmp:
-   base=Path(tmp); source=Path('/home/biong/Documents/BOM/数据库/mobius_lite_bom.db');shutil.copy2(source,base/'db')
-   config=ConfigService(base); db=Database(str(base/'db'));svc=Services(db,config);metadata=dict(svc.project());db.close();ProjectRegistry(config).remember(base/'db',metadata)
-   empty=MainWindow(Services(None,config));empty.show();self.app.processEvents();help_window=HelpDialog(empty);self.app.processEvents()
-   self.assertFalse(hasattr(help_window,'_demo_main'))
-   help_window.close();empty.close();empty.deleteLater()
+ def test_static_help_without_project_opens_no_other_windows(self):
+  from unittest.mock import patch
+  from PyQt5.QtWidgets import QLabel
+  empty=MainWindow(Services(None,ConfigService(self.tmp.name)));empty.show();self.app.processEvents()
+  before={w for w in self.app.topLevelWidgets() if w.isVisible()}
+  with patch.object(Database,'__init__',side_effect=AssertionError('运行时帮助不能打开数据库')),patch.object(MainWindow,'show_materials',side_effect=AssertionError('不能打开物料库')),patch.object(MainWindow,'open_bom_id',side_effect=AssertionError('不能打开BOM')):
+   dialog=HelpDialog(empty);dialog.show();self.app.processEvents()
+   self.assertEqual({w for w in self.app.topLevelWidgets() if w.isVisible()}-before,{dialog})
+   images=[label for label in dialog.findChildren(QLabel) if label.pixmap() is not None and not label.pixmap().isNull()]
+   self.assertEqual(len(images),20)
+   self.assertIsNone(empty.svc.db);self.assertIsNone(empty._materials);self.assertEqual(empty._bom_windows,{})
+   dialog.close();dialog.show();self.app.processEvents()
+   self.assertEqual({w for w in self.app.topLevelWidgets() if w.isVisible()}-before,{dialog})
+   dialog.close();dialog.deleteLater()
+  empty.close();empty.deleteLater()
+ def test_step_ten_uses_search_image(self):
+  from unittest.mock import patch
+  dialog=HelpDialog(self.w)
+  with patch.object(dialog,'_image_widget') as render:
+   dialog._guide_image('步骤10：查找和故障处理')
+   self.assertEqual(render.call_args.args[0],'step10_search')
+  dialog.close();dialog.deleteLater()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build-time help screenshots from a real project database; never run by the app."""
-import os, shutil, sys, tempfile
+import os, shutil, sys, tempfile, sqlite3
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication
@@ -20,8 +20,17 @@ def main():
     from config.project_registry import ProjectRegistry
     from database.database import Database
     from services.services import Services
-    if not CONFIG.is_file(): raise SystemExit('帮助截图配置不存在：'+str(CONFIG))
-    source_config=ConfigService(CONFIG.parent); records=ProjectRegistry(source_config).entries()
+    if not CONFIG.is_file():
+        if 'BOM_HELP_CONFIG' in os.environ:raise SystemExit('指定的帮助截图配置不存在：'+str(CONFIG))
+        shipped=ROOT/'resources/help_screenshots'
+        if len(list(shipped.glob('*.png')))!=20:raise SystemExit('缺少随源码提供的20张静态帮助截图')
+        OUT.mkdir(parents=True,exist_ok=True)
+        for image in shipped.glob('*.png'):shutil.copy2(image,OUT/image.name)
+        print('使用随源码提供的静态帮助截图');return
+    from config.config_service import read_config_file
+    source_config=ConfigService(CONFIG.parent); raw=read_config_file(CONFIG)
+    records=[dict(raw[section]) for section in raw.sections() if section.startswith('project:')]
+    if raw.get('database','path',fallback=''):records.insert(0,{'path':raw['database']['path']})
     dbpath=None
     for record in records:
         try:
@@ -32,7 +41,10 @@ def main():
     OUT.mkdir(parents=True,exist_ok=True)
     for old in OUT.glob('*.png'):old.unlink()
     with tempfile.TemporaryDirectory(prefix='bom-help-build-') as tmp:
-        demo_db_path=Path(tmp)/'demo.db';shutil.copy2(dbpath,demo_db_path)
+        demo_db_path=Path(tmp)/'demo.db'
+        source=sqlite3.connect(dbpath.resolve().as_uri()+'?mode=ro',uri=True);target=sqlite3.connect(demo_db_path)
+        try:source.backup(target)
+        finally:target.close();source.close()
         cfg=ConfigService(tmp); db=Database(str(demo_db_path)); svc=Services(db,cfg)
         from ui.main_window import MainWindow,MaterialDialog,NewSkuDialog,MaterialHeaderMappingDialog
         from ui.material_search import MaterialSearchDialog

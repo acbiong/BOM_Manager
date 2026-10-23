@@ -126,6 +126,15 @@ def exercise_windows(service,main,library):
         reopened=main.open_bom_id(sid);opened.append(reopened);drain()
         assert reopened.root_item.child(0).text(1)=='4.25'
         reopened.close();drain();opened.remove(reopened);checks.append('ui_close_reopen_saved_bom')
+        from ui.help_dialog import HelpDialog
+        from PyQt5.QtWidgets import QLabel
+        visible={window for window in app.topLevelWidgets() if window.isVisible()}
+        help_window=HelpDialog(main);opened.append(help_window);help_window.show();drain()
+        assert {window for window in app.topLevelWidgets() if window.isVisible()}-visible=={help_window}
+        images=[label for label in help_window.findChildren(QLabel) if label.pixmap() is not None and not label.pixmap().isNull()]
+        assert len(images)==20,'帮助静态截图未完整打包'
+        checks.extend(['ui_help_static_resources_20','ui_help_no_extra_windows'])
+        help_window.close();help_window.deleteLater();opened.remove(help_window);drain()
         return checks
     finally:
         messages.stop()

@@ -398,3 +398,8 @@ Windows测试入口按`tests/test_*.py`逐文件启用独立Python/Qt进程，�
 ### SKU锁定
 
 在SKU右键菜单选择“锁定SKU”或“取消锁定”。打开按钮右侧的锁头表示该SKU历史版本已锁定，打开后进入BOM浏览模式，可以查找和导出，不能编辑。锁定前请处理未保存内容。共享BOM或物料修改若影响锁定BOM，会整体拒绝该次修改，并列出对应SKU、物料和父项物料；解锁后才能继续。复制锁定BOM会创建未锁定的新历史版本。
+
+
+### 静态帮助截图
+
+帮助窗口仅加载随包PNG，不在用户机器创建示例窗口或读取截图数据库。Linux/Windows构建自动运行 `tools/generate_help_screenshots.py`。本机默认来源为 `/home/biong/Documents/BOM/config.ini`；可设置 `BOM_HELP_CONFIG` 指定另一个config。生成器只读解析配置，使用SQLite备份复制数据库后在副本上生成截图。无默认配置的其他电脑使用 `resources/help_screenshots` 随源码静态资源；显式指定的配置失效时构建失败。截图资源包含项目示例信息，生成后应审核显示内容。临时输出在 `.tmp/help_screenshots`，发布包内为 `help_screenshots`。
