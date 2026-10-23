@@ -42,31 +42,40 @@ class HelpDialog(QDialog):
 
     def _feature_page(self):
         page = QWidget(); layout = QVBoxLayout(page)
-        layout.addWidget(self._section('SKU清单窗口', '管理项目下全部SKU及其历史版本。可按编码、名称、版本号和修改时间排序；右键可打开/浏览BOM、导出BOM、导出采购BOM、锁定、复制历史版本和编辑变更描述。底部显示SKU与BOM数量，勾选“只显示最新BOM”可隐藏旧历史版本。', self._grab(self.parentWidget(), 'SKU清单实际界面')))
-        layout.addWidget(self._section('物料库窗口', '维护物料基础信息、版本、单位、等级、制造商、MPN和M/P。支持导入、导出、筛选、查找、版本更新、物料反查、复制物料、编辑公共BOM结构以及按SKU显示用量。呆滞料和BOM状态会在表格中直接标识。', self._grab(getattr(self.parentWidget(), '_materials', None), '物料库实际界面')))
-        layout.addWidget(self._section('BOM编辑/浏览窗口', '左侧树显示从根物料递归展开的BOM，右侧显示当前物料属性。数量、位置和备注可编辑；右键提供新增同级/子级、复制、剪切、粘贴、替换、版本更新、替代料、颜色和导出等操作。锁定的SKU以浏览模式打开。', self._grab(self._first_bom(), 'BOM窗口实际界面')))
+        layout.addWidget(self._section('SKU清单窗口：项目总览与批量入口', '这里显示当前项目全部SKU及其历史版本。点击表头可排序，选择一行后双击打开BOM；Ctrl/Shift可多选，再右键对多个SKU执行浏览、编辑、导出或锁定。锁定列显示小锁，版本号加粗表示存在变更描述；底部同时显示“共计N个SKU，M个BOM”。', self._grab(self.parentWidget(), '实际截图：SKU清单窗口')))
+        layout.addWidget(self._section('物料库窗口：公共物料资料', '物料库维护基础编码、版本号、名称、规格、单位、等级、制造商、MPN和M/P，并显示BOM状态、呆滞状态及各SKU用量。菜单按钮可执行导入、导出、查找、筛选；右键可编辑、复制、删除、反查、版本更新、编辑BOM和新增替代料。', self._grab(getattr(self.parentWidget(), '_materials', None), '实际截图：物料库窗口')))
+        layout.addWidget(self._section('BOM编辑窗口：树状结构与属性', '左侧是递归BOM树，右侧是当前节点属性和替代料。根节点显示SKU或选中的公共物料；树节点左键切换右侧资料，右键按分组提供新增、复制剪切粘贴、替换、版本更新、替代料、颜色、反查和导出。保存前变更有颜色标识，保存后恢复默认。', self._grab(self._first_bom(), '实际截图：BOM编辑/浏览窗口')))
+        layout.addWidget(self._section('导入、导出、对比和主题', '物料/BOM导入均支持Sheet选择、表头映射、必填项检查、进度条和结果明细；BOM对比支持两个SKU历史版本或外部Excel，并同步标记新增、删除、修改、换料和交换。右上角太阳/月亮按钮切换主题，窗口尺寸和路径自动记忆。', self._grab(self.parentWidget(), '实际截图：菜单、主题和表格区域')))
         return self._scroll(page)
 
     def _guide_page(self):
         page = QWidget(); layout = QVBoxLayout(page)
-        sections = [
-          ('1. 打开项目', '首次打开或配置缺少当前项目时，在项目选择窗口选择项目；系统会校验SQLite数据库并加载SKU。项目菜单可新增项目、导入项目、切换历史项目或关闭当前项目。'),
-          ('2. 新建物料和SKU', '在物料库按Ctrl+N新建物料，单位和M/P从下拉菜单选择；保存后列表自动刷新。回到SKU窗口按Ctrl+N，输入编码、版本号或名称筛选可用物料；已有BOM结构或已经是SKU的物料不能重复建立SKU。'),
-          ('3. 编辑BOM', '双击SKU或右键选择编辑BOM。左键树节点查看属性，修改数量/位置/备注后点击保存。新增物料只能从树的右键菜单进入；系统检查重复、循环引用和父级共享影响。保存前新增为绿色、删除为红色删除线、属性修改为黄棕色；刷新导入其他BOM变更时显示深紫色。'),
-          ('4. 导入与导出', '导入物料或BOM时先选择文件和Sheet，再将目标表头映射到需求表头；必填项带星号。映射成功后按进度条导入，结果窗口分别列出跳过和失败条目及原因。导出BOM、采购BOM、物料库和资料库会记住上次路径，并按要求格式化Excel。'),
-          ('5. 历史版本与锁定', 'SKU历史版本用于保存同一SKU的独立BOM历史。复制BOM会增加历史版本号；锁定后只能浏览，其他BOM的联动修改会提示先解除锁定。')]
-        for title,body in sections:
-            layout.addWidget(self._section(title,body,None))
-        layout.addWidget(self._section('操作流程截图', '下图为当前运行中的主窗口截图，实际操作时菜单和表格会根据项目数据变化。', self._grab(self.parentWidget(), '操作流程实际界面')))
+        steps = [
+          ('步骤1：选择或恢复项目', '启动时若配置未指定项目，选择“项目代码 项目名称”；系统先检查文件存在、SQLite完整性、表结构和项目元数据，成功后才写入当前项目。数据库不存在时可指定新位置、切换历史项目或关闭项目。', self.parentWidget()),
+          ('步骤2：新建物料', '打开物料库，按Ctrl+N或点击新建物料；填写必填的基础编码、版本号、名称、单位，规格、等级、制造商、MPN和M/P按实际情况填写。单位/M/P从下拉菜单选取，点击保存后窗口关闭且列表自动刷新。', getattr(self.parentWidget(), '_materials', None)),
+          ('步骤3：导入物料', '点击导入物料，依次选择文件、Sheet和表头映射。需求表头分必填与可选，必填项带星号；每个需求字段只能映射一次。确认后查看进度，结果窗口分开显示成功、重复跳过和失败，并列出编码、名称、版本和详细原因。', getattr(self.parentWidget(), '_materials', None)),
+          ('步骤4：新建SKU', '回到SKU清单按Ctrl+N；在可输入下拉框输入编码或名称，候选列表实时筛选。已有BOM结构或已经是SKU的候选会标记为不可用。回车可确认首个候选项，确认后SKU立即出现在清单。', self.parentWidget()),
+          ('步骤5：打开并检查BOM', '双击SKU行或右键打开BOM。左侧树的根节点是SKU，逐层展开子BOM；点击任意节点，右侧显示最新物料资料。数量、位置、备注可编辑，编码、版本、名称等只读字段可复制。', self._first_bom() or self.parentWidget()),
+          ('步骤6：新增、复制、替换和排序', '在目标节点右键选择新增同级/子级，物料选择框支持输入筛选和回车确认。复制/剪切会保留数量、位置、备注、替代料和颜色；粘贴前检查循环和重复。新增同级插入当前节点下方，同级物料可上移/下移。', self._first_bom() or self.parentWidget()),
+          ('步骤7：保存和联动刷新', '保存前新增物料为绿色、删除物料为红色删除线、属性修改为黄棕色、其他BOM导入变更为深紫色；点击保存才写入数据库。共享子BOM变化会通知其他打开窗口，刷新会保留本窗口未保存缓存，确认后再保存。', self._first_bom() or self.parentWidget()),
+          ('步骤8：导出和历史版本', 'BOM未保存时导出按钮禁用。保存后选择导出BOM或采购BOM；采购BOM按层级汇总用量。SKU右键复制BOM会生成新的历史版本，SKU编码不变但整棵BOM独立保存。', self.parentWidget()),
+          ('步骤9：锁定与浏览', 'SKU右键锁定后再次打开进入BOM浏览模式，编辑菜单不可用。其他BOM联动触及锁定BOM时系统列出SKU、物料和父项信息；解除锁定后才能继续编辑。', self.parentWidget()),
+          ('步骤10：查找和故障处理', '物料库/BOM按Ctrl+F查找编码、名称、规格、制造商和MPN，双击结果定位原表或树节点。遇到数据库损坏、路径失效或导入错误时，保留弹窗和版本信息，按提示重新选择数据库或修正映射。', self._first_bom() or getattr(self.parentWidget(), '_materials', None) or self.parentWidget())]
+        for title,body,widget in steps:
+            layout.addWidget(self._section(title,body,self._grab(widget,'本步骤实际截图：'+title)))
         return self._scroll(page)
 
     def _tips_page(self):
-        return self._text_page('''<h2>操作技巧</h2>
-        <h3>快速定位</h3><p>在物料库或BOM窗口按<b>Ctrl+F</b>，输入编码、名称、规格、制造商或MPN；输入回车会选中首个候选项。物料反查结果双击后会定位到对应SKU及树节点。</p>
-        <h3>批量处理</h3><p>SKU清单可用Ctrl/Shift多选，再右键批量打开、浏览、导出或锁定。BOM树可多选同级物料复制/剪切，粘贴时保留数量、位置、备注和替代料，并按原顺序插入。</p>
-        <h3>安全编辑</h3><p>编辑过程中所有内容先进入缓存；刷新不会丢失未保存修改。保存前可通过颜色和删除线检查变化，关闭窗口时可取消退出继续编辑。父级共享物料发生子BOM变化时，系统会列出受影响SKU供确认。</p>
-        <h3>主题与显示</h3><p>右上角太阳/月亮按钮切换主题。BOM树层级背景会自动适配浅色和深色模式，越靠近根节点对比度越高。窗口尺寸、导入导出路径和列显示选择会自动记忆。</p>
-        <h3>故障排查</h3><p>如果数据库不存在或损坏，选择项目数据库重新定位；不要直接复制正在使用的数据库。AppImage在网络共享目录不可写时会把配置回退到用户目录，SQLite数据库建议放在支持文件锁的本地磁盘。</p>''')
+        page=QWidget();layout=QVBoxLayout(page)
+        tips=[
+         ('技巧1：先筛选再操作','在物料库先使用筛选和Ctrl+F缩小范围，再执行批量操作；SKU清单勾选“只显示最新BOM”可避免误操作旧历史版本。',self.parentWidget()),
+         ('技巧2：用复制/剪切保持属性','BOM多选同级物料后复制或剪切，粘贴会保留数量、位置、备注、替代料和颜色；粘贴前看菜单项是否可用，可用性检查已经排除了重复和循环。',self._first_bom() or self.parentWidget()),
+         ('技巧3：用颜色检查未保存差异','保存前先观察绿色新增、红色删除线、黄棕色修改和深紫色联动变更；右键设置颜色用于业务标记，但不会覆盖变更颜色。',self._first_bom() or self.parentWidget()),
+         ('技巧4：共享物料先看影响范围','编辑公共子BOM前，先查看父级被哪些SKU及历史版本引用；系统提示父级升版时会列出受影响SKU，可逐项勾选同步。',self._first_bom() or self.parentWidget()),
+         ('技巧5：导入映射连续复用','首次映射确认后系统记住列关系；下一次导入同类表格会自动恢复，找不到的旧列会回到未选择，确认前仍应检查必填项。',getattr(self.parentWidget(), '_materials', None) or self.parentWidget()),
+         ('技巧6：主题和窗口布局','深色模式下根节点灰度对比最强；拖动分隔条调整BOM树和属性区，窗口尺寸、列宽、导入导出路径会被记忆。',self.parentWidget())]
+        for title,body,widget in tips:layout.addWidget(self._section(title,body,self._grab(widget,'实际截图：'+title)))
+        return self._scroll(page)
 
     def _qa(self):
         return '''<h2>常见问题</h2><h3>Q：启动后SKU清单为空怎么办？</h3><p>A：检查项目菜单中的当前项目；没有当前项目时选择历史项目。若数据库路径失效，选择“指定数据库”重新关联，系统会先做完整性和结构校验。</p>
@@ -81,6 +90,9 @@ class HelpDialog(QDialog):
         return next(iter(getattr(parent,'_bom_windows',{}).values()),None) if parent else None
 
     def _grab(self, widget, title):
+        # 每个教程步骤必须有一张实际截图；目标窗口未打开时回退到当前主窗口。
+        if widget is None or not widget.isVisible():
+            widget=self.parentWidget()
         if widget is None or not widget.isVisible(): return None
         pix=widget.grab()
         if pix.isNull(): return None

@@ -25,3 +25,5 @@ class HelpDialogTests(unittest.TestCase):
   tabs=dialog.findChildren(QTabWidget)[0]
   self.assertEqual([tabs.tabText(i) for i in range(tabs.count())],['快捷键','页面与功能','操作指引','操作技巧','Q&A'])
   self.assertEqual(dialog.windowModality(),0)
+  # 页面说明、10步操作指引和6项技巧均应包含截图框。
+  self.assertGreaterEqual(len(dialog.findChildren(__import__('PyQt5.QtWidgets',fromlist=['QLabel']).QLabel)),20)
