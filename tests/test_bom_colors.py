@@ -42,6 +42,20 @@ class BomColorTests(unittest.TestCase):
    self.assertEqual((color.red(),color.green(),color.blue()),(0,0,0))
    node=node.child(0)
   self.assertEqual(alphas,[24,18,12,6,0,0,0,0])
+ def test_dark_theme_gray_levels_have_light_mode_like_contrast(self):
+  try:
+   self.main.set_theme(True);self.w.refresh_styles()
+   node=self.w.root_item;colors=[]
+   while node is not None:
+    color=node.background(0).color();colors.append((color.red(),color.green(),color.blue(),color.alpha()))
+    node=node.child(0)
+   self.assertEqual([c[3] for c in colors],[24,18,12])
+   self.assertEqual([c[:3] for c in colors],[(255,255,255)]*3)
+   self.assertGreater(colors[0][3]-colors[1][3],0)
+   self.assertGreater(colors[1][3]-colors[2][3],0)
+  finally:
+   self.main.set_theme(False);self.w.refresh_styles()
+
  def test_draft_save_reload_excel_root_and_child_colors(self):
   parent=self.w.root_item.child(0);child=parent.child(0)
   self.assertGreater(self.w.root_item.background(0).color().alpha(),parent.background(0).color().alpha())
