@@ -56,6 +56,14 @@ class BomColorTests(unittest.TestCase):
   finally:
    self.main.set_theme(False);self.w.refresh_styles()
 
+ def test_level_tint_covers_every_tree_column(self):
+  for dark in (False,True):
+   self.main.set_theme(dark);self.w.refresh_styles()
+   for item in (self.w.root_item,self.w.root_item.child(0)):
+    brushes=[item.background(column).color() for column in range(self.w.tree.columnCount())]
+    self.assertTrue(all(color==brushes[0] for color in brushes))
+  self.main.set_theme(False);self.w.refresh_styles()
+
  def test_draft_save_reload_excel_root_and_child_colors(self):
   parent=self.w.root_item.child(0);child=parent.child(0)
   self.assertGreater(self.w.root_item.background(0).color().alpha(),parent.background(0).color().alpha())

@@ -1485,25 +1485,28 @@ class BomWindow(QMainWindow):
    changed={column for field,column in [('quantity',1),('position',3),('remark',4)] if not root and data.get(field,'')!=original.get(field,'')}
    alternate_changed=self.alternate_key(item) in self._alternate_edits and self.alternate_ids(item)!=original.get('_db_alternates',[])
    if alternate_changed:changed.add(0)
+   moved=data.get('_moved',False)
+   from services.bom_colors import foreground
+   custom=data.get('row_color','')
+   # Five subtle gray overlays. In light mode black overlays darken the
+   # white base; in dark mode white overlays lighten the dark base by the
+   # same amounts, so perceived level separation remains consistent.
+   alpha=(24,18,12,6,0)[min(len(path),4)]
+   dark_theme=bool(QApplication.instance().property('bom_dark_theme'))
+   level_tint=QColor(255,255,255,alpha) if dark_theme else QColor(0,0,0,alpha)
+   row_background=QColor(custom) if custom and not (added or deleted or changed or moved or external) else level_tint
+   row_background=QColor('#f8d7e3') if moved else QColor('#4a148c') if external else row_background
+   row_foreground=QColor('red') if deleted else QColor('green') if added else QColor('#9a6700') if changed else None
+   # Apply one brush to every column for a continuous full-row tint,
+   # including columns whose text is empty.
    for column in range(self.tree.columnCount()):
     if column==2:item.setTextAlignment(column,Qt.AlignCenter)
     font=QFont(self.tree.font()); font.setStrikeOut(bool(deleted)); font.setBold(column in changed and not deleted)
     item.setFont(column,font)
-    color=QColor('red') if deleted else QColor('green') if added else QColor('#9a6700') if changed else None
-    item.setForeground(column,QBrush(color) if color else QBrush(QColor('white')) if external else QBrush())
-    moved=data.get('_moved',False)
-    if moved and not color:item.setForeground(column,QBrush(QColor('#202020')))
-    from services.bom_colors import foreground
-    custom=data.get('row_color','')
-    # Five subtle gray overlays.  In light mode black overlays darken the
-    # white base; in dark mode white overlays lighten the dark base by the
-    # same amounts, so the perceived level separation remains consistent.
-    alpha=(24,18,12,6,0)[min(len(path),4)]
-    dark_theme=bool(QApplication.instance().property('bom_dark_theme'))
-    level_tint=QColor(255,255,255,alpha) if dark_theme else QColor(0,0,0,alpha)
-    background=QColor(custom) if custom and not (added or deleted or changed or moved or external) else level_tint
+    item.setForeground(column,QBrush(row_foreground) if row_foreground else QBrush(QColor('white')) if external else QBrush())
+    if moved and not row_foreground:item.setForeground(column,QBrush(QColor('#202020')))
     if not (added or deleted or changed or moved or external):item.setForeground(column,QBrush(QColor(foreground(custom))) if custom else QBrush())
-    item.setBackground(column,QBrush(QColor('#f8d7e3')) if moved else QBrush(QColor('#4a148c')) if external else QBrush(background))
+    item.setBackground(column,QBrush(row_background))
    remark=data.get('remark','') if not root else ''
    display=remark
    if external:display=(remark+'\n' if remark else '')+'有其他BOM更新导入此变更'
