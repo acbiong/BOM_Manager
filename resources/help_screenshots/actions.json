@@ -1675,5 +1675,18 @@
       1000,
       620
     ]
+  },
+  "action_bom_material_pending": {
+    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "target": [
+      530,
+      159,
+      227,
+      104
+    ],
+    "size": [
+      800,
+      600
+    ]
   }
 }

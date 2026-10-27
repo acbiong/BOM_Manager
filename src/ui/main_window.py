@@ -896,6 +896,8 @@ class BomWindow(QMainWindow):
   if event.get('type')=='bom_changed' and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
    self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
+   if event.get('type')=='material_changed' and self.current_item is not None:
+    self.show_item_info(self.current_item)
  def closeEvent(self,event):
   if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept(); return
   box=QMessageBox(self); box.setWindowTitle('BOM未保存'); box.setText('BOM结构或物料信息已修改，是否保存？'); save=box.addButton('保存并退出',QMessageBox.AcceptRole); discard=box.addButton('不保存退出',QMessageBox.DestructiveRole); cancel=box.addButton('取消',QMessageBox.RejectRole); box.exec_()
@@ -1542,7 +1544,12 @@ class BomWindow(QMainWindow):
   self._loading_fields=True
   editable=not ((item.data(0,Qt.UserRole) or {}).get('root') or (item.data(0,Qt.UserRole) or {}).get('_deleted'))
   for field in ('quantity','position','remark'):self.fields[field].setEnabled(editable and not self.is_locked())
-  for k in self.fields: self.fields[k].setText(str(d.get(k,'') or ''))
+  latest=self.svc.material_snapshot(d.get('material_id',self.root if item is self.root_item else None))
+  for k in self.fields:
+   value=str(d.get(k,'') or '')
+   if k in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag') and latest and value!=str(latest.get(k,'') or ''):
+    value=f"{value or '（空）'}（待保存：{latest.get(k) or '（空）'}）"
+   self.fields[k].setText(value)
   self._loading_fields=False
   self.alt_table.setRowCount(0)
   if not (item.data(0,Qt.UserRole) or {}).get('root'):

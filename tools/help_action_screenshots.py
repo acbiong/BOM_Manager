@@ -90,6 +90,10 @@ def generate(out,main,materials,bom,svc):
         svc.db.conn.execute('UPDATE skus SET locked=0 WHERE material_id=?',(bom.root,));svc.db.conn.commit()
     bom.apply_lock_state();bom.tree.expandToDepth(1);node=bom.root_item.child(0);bom.tree.setCurrentItem(node);bom.show_item_info(node)
     r=bom.tree.visualItemRect(node);r.translate(bom.tree.viewport().mapTo(bom,QPoint()));snap('bom_select',bom,rect=r)
+    changed=svc.material_snapshot(node.data(0,Qt.UserRole)['material_id'])
+    svc.update_material(changed['id'],{**changed,'name':changed['name']+'（新版名称）'})
+    snap('bom_material_pending',bom,bom.fields['name'])
+    svc.update_material(changed['id'],changed);bom.show_item_info(node)
     for field in ('quantity','position','remark'):
         bom.info_scroll.ensureWidgetVisible(bom.fields[field]);QApplication.processEvents();snap('bom_'+field,bom,bom.fields[field])
     bom.fields['remark'].setText('帮助示例：核对装配位置');QApplication.processEvents()
