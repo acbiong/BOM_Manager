@@ -304,3 +304,13 @@ class CurrentCatalogTests(unittest.TestCase):
    self.assertEqual(window.root,self.p);self.assertTrue(window.is_locked());self.assertFalse(window.save_action.isEnabled())
    self.assertIs(library.open_material_bom(self.p),window)
   finally:library.close()
+ def test_unchanged_catalog_does_not_save_other_latest_skus(self):
+  from services.current_catalog import apply_to_latest,groups
+  from services.mirror_service import MirrorServices
+  updates=groups(self.m);before={r['id']:r['updated_at'] for r in self.s.skus()}
+  with patch.object(MirrorServices,'save_bom',side_effect=AssertionError('unchanged BOM must not be saved')):
+   apply_to_latest(self.s,updates,exclude=self.sid)
+  self.assertEqual(before,{r['id']:r['updated_at'] for r in self.s.skus()})
+  updates[self.p][0]['quantity']=12
+  apply_to_latest(self.s,updates,exclude=self.sid)
+  self.assertEqual(self.s.for_sku(self.tid).bom(self.p)[0]['quantity'],12)

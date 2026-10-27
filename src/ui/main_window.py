@@ -394,7 +394,7 @@ class MainWindow(ProjectManagement,QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build(); WindowRefreshBus.subscribe(self.on_data_change)
  def on_data_change(self,event):
-  if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed'):self.refresh()
+  if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed'):WindowRefreshBus.refresh(self.refresh,priority=0)
  def closeEvent(self,event):
   # Resolve every owned BOM draft before hiding the main window or removing
   # its subscriptions. A rejected close must leave the application usable.
@@ -2032,7 +2032,7 @@ class MaterialWindow(QMainWindow):
    remember_export_path(p)
    from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); w.save(p); w.close()
  def on_event(self,event):
-  if event.get('type') in ('material_changed','bom_changed','sku_changed','sku_order_changed'): self.refresh()
+  if event.get('type') in ('material_changed','bom_changed','sku_changed','sku_order_changed'): WindowRefreshBus.refresh(self.refresh)
  def closeEvent(self,event):
   for window in list(self._local_bom_windows.values()):
    if not window.close(): event.ignore(); return
@@ -2061,12 +2061,18 @@ class MaterialWindow(QMainWindow):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
    for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+([r['latest_used']] if 'latest_used' in r.keys() else [])+[format_quantity(quantities[sku['id']][r['id']]) if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
-    item=QTableWidgetItem(str(v or '')); item.setData(Qt.UserRole,r['id'])
-    if j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用'):item.setTextAlignment(Qt.AlignCenter)
-    if j>=base:
-     item.setBackground(QColor('#eeeeee' if v=='NA' else '#d9ead3'));item.setForeground(QColor('black'))
-    if r['idle']=='Y': item.setBackground(QColor('red')); item.setForeground(QColor('black'))
-    self.t.setItem(i,j,item)
+    text=str(v or '');item=self.t.item(i,j)
+    centered=j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用')
+    style=(centered,r['idle']=='Y',j>=base,v=='NA' if j>=base else False)
+    if item is None:
+     item=QTableWidgetItem();self.t.setItem(i,j,item)
+    if item.text()!=text:item.setText(text)
+    if item.data(Qt.UserRole)!=r['id']:item.setData(Qt.UserRole,r['id'])
+    if item.data(Qt.UserRole+2)!=style:
+     item.setTextAlignment(Qt.AlignCenter if centered else Qt.AlignLeft|Qt.AlignVCenter)
+     item.setBackground(QColor('red') if r['idle']=='Y' else QColor('#eeeeee' if v=='NA' else '#d9ead3') if j>=base else QBrush())
+     item.setForeground(QColor('black') if r['idle']=='Y' or j>=base else QBrush())
+     item.setData(Qt.UserRole+2,style)
   self.apply_filters(); fit_columns(self.t)
   # SKU名称不参与列宽；固定编码宽度，窗口变宽时只拉伸普通物料列。
   header=self.t.horizontalHeader();metrics=header.fontMetrics()

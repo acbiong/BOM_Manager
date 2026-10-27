@@ -4,7 +4,7 @@ from services.mirrors import MirrorDatabase
 class MirrorServices(Services):
     def __init__(self,primary,sid):
         self.primary=primary;self.scope_id=int(sid);self.sku_id=int(sid)
-        super().__init__(MirrorDatabase(primary.db,sid),primary.config_service)
+        self.db=MirrorDatabase(primary.db,sid);self.config_service=primary.config_service;self.UNITS=primary.UNITS
     def skus(self):return [row for row in self.primary.skus() if row['id']==self.sku_id]
     def refresh_usage(self):
         row=self.db.conn.execute('SELECT material_id FROM skus WHERE id=?',(self.sku_id,)).fetchone()

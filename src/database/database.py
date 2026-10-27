@@ -87,7 +87,7 @@ class Database:
    events=getattr(self,'_pending_events',[]);self._pending_events=[]
    if events:
     from infrastructure.events import WindowRefreshBus
-    for event in events:WindowRefreshBus.publish(event)
+    WindowRefreshBus.publish_many(events)
  def validate_schema(self):
   required={'materials','skus','bom_items','material_bom_items','alternates','change_logs','project'}
   got={r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}

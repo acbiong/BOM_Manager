@@ -59,7 +59,11 @@ def apply_to_latest(primary,updates,exclude=None):
         if sku['id']==exclude:continue
         target=primary.for_sku(sku['id']);graph=groups(target)
         used=reachable(graph,sku['material_id'])
-        if not used.intersection(updates):continue
+        shared=used.intersection(updates)
+        if not shared:continue
+        def signature(rows):
+            return [(r['material_id'],float(r['quantity']),r['unit'],r.get('position') or '',r.get('remark') or '',tuple(r.get('alternate_material_ids',[]))) for r in rows]
+        if all(signature(graph.get(mid,[]))==signature(updates[mid]) for mid in shared):continue
         graph.update(updates)
         target._catalog_sync=True
         target.save_bom(sku['material_id'],rows_for(graph,sku['material_id']))
