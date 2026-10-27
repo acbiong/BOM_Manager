@@ -259,6 +259,19 @@
       620
     ]
   },
+  "action_material_duplicate": {
+    "window": "新建物料",
+    "target": [
+      9,
+      582,
+      622,
+      29
+    ],
+    "size": [
+      640,
+      620
+    ]
+  },
   "action_material_ok": {
     "window": "新建物料",
     "target": [
@@ -480,17 +493,56 @@
       620
     ]
   },
-  "action_sku_new": {
-    "window": "Mobius Foot 智能踝关节 BOM管理系统",
+  "action_sku_list_export": {
+    "window": "",
     "target": [
-      165,
       2,
-      80,
-      30
+      66,
+      210,
+      33
     ],
     "size": [
-      1100,
-      700
+      214,
+      101
+    ]
+  },
+  "action_sku_list_filename": {
+    "window": "导出SKU清单",
+    "target": [
+      115,
+      354,
+      429,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_sku_list_save": {
+    "window": "导出SKU清单",
+    "target": [
+      546,
+      354,
+      84,
+      37
+    ],
+    "size": [
+      639,
+      439
+    ]
+  },
+  "action_sku_new": {
+    "window": "",
+    "target": [
+      2,
+      2,
+      210,
+      33
+    ],
+    "size": [
+      214,
+      101
     ]
   },
   "action_sku_input": {
@@ -1471,7 +1523,7 @@
   "action_compare_menu": {
     "window": "Mobius Foot 智能踝关节 BOM管理系统",
     "target": [
-      295,
+      213,
       2,
       84,
       30
@@ -1712,19 +1764,6 @@
     ],
     "size": [
       1000,
-      620
-    ]
-  },
-  "action_material_duplicate": {
-    "window": "新建物料",
-    "target": [
-      9,
-      582,
-      622,
-      29
-    ],
-    "size": [
-      640,
       620
     ]
   }

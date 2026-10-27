@@ -407,12 +407,13 @@ class MainWindow(ProjectManagement,QMainWindow):
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
   WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
-  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); a=bar.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
+  bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); self.sku_menu=bar.addMenu('SKU'); a=self.sku_menu.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
   self.table=QTableWidget(); self.table.setColumnCount(8); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID','锁定']); self.table.horizontalHeader().moveSection(7,1); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self.table._fixed_column_widths={7:max(44,self.table.horizontalHeader().minimumSectionSize(),self.table.fontMetrics().horizontalAdvance('锁定')+20)};self.table.setItemDelegateForColumn(7,CenteredLockDelegate(self.table))
   self._sku_sort=None;self._sku_filters={}
   self._description_hover=VersionDescriptionHover(self.table)
-  filter_action=bar.addAction('筛选');filter_action.triggered.connect(self.filter_skus)
+  filter_action=self.sku_menu.addAction('SKU筛选');filter_action.triggered.connect(self.filter_skus)
+  self.sku_menu.addSeparator();self.sku_menu.addAction('导出SKU清单',self.export_sku_list)
   compare_action=bar.addAction('BOM对比');compare_action.triggered.connect(self.compare_boms)
   help_action=bar.addAction('帮助'); help_action.triggered.connect(self.show_help)
   a=bar.addAction('关于'); a.triggered.connect(self.show_about)
@@ -464,7 +465,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   def update_actions(menu):
    for action in menu.actions():
     if action.menu():update_actions(action.menu())
-    elif action.text() in ('选择SQLite数据库','导出资料库','修改项目信息','物料库','新建SKU','筛选','BOM对比'):action.setEnabled(available)
+    elif action.text() in ('选择SQLite数据库','导出资料库','修改项目信息','物料库','新建SKU','SKU筛选','导出SKU清单','BOM对比'):action.setEnabled(available)
   update_actions(self.menuBar());self.table.setEnabled(available);self.latest_bom_only.setEnabled(available)
   if not available:
    self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单打开历史项目、新建或导入项目');return
@@ -560,6 +561,14 @@ class MainWindow(ProjectManagement,QMainWindow):
    QMessageBox.information(self,'数据库未切换','当前已经在使用该数据库：\n'+str(selected)); return
   if self.switch_project(selected,create=not existed):
    QMessageBox.information(self,'数据库已切换',('已打开已有数据库' if existed else '已创建并打开新数据库')+'：\n'+str(selected))
+ def export_sku_list(self):
+  if self.svc.db is None:return
+  project=self.svc.project();name=' '.join(part for part in (project['project_code'],project['project_name'],'SKU清单') if part)
+  path=QFileDialog.getSaveFileName(self,'导出SKU清单',export_start_path(export_filename(name)),'Excel (*.xlsx)')[0]
+  if not path:return
+  try:
+   self.svc.export_sku_list(path);remember_export_path(path);QMessageBox.information(self,'完成','SKU清单导出成功')
+  except Exception as error:show_operation_error(self,'导出失败',error)
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 资料库').strip())),'Excel (*.xlsx)')[0]
   if p:remember_export_path(p); self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')

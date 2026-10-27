@@ -761,10 +761,16 @@ class Services:
    if progress_callback: progress_callback(total,total)
    return ok,fail
   finally:wb.close()
- def export_database(self,path):
-  wb=Workbook(); ws=wb.active; ws.title='SKU清单'; ws.append(['序号','SKU编码','SKU名称','SKU描述','版本号','修改日期时间'])
-  for n,r in enumerate(self.skus(),1): ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],r['updated_at']])
+ def write_sku_list_sheet(self,ws):
+  ws.title='SKU清单';ws.append(['序号','SKU编码','SKU名称','SKU描述','版本号','修改日期时间'])
+  for n,r in enumerate(self.skus(),1):ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],r['updated_at']])
   self.format_export_sheet(ws,{'序号'})
+ def export_sku_list(self,path):
+  wb=Workbook()
+  try:self.write_sku_list_sheet(wb.active);wb.save(path)
+  finally:wb.close()
+ def export_database(self,path):
+  wb=Workbook();self.write_sku_list_sheet(wb.active)
   self.write_material_sheet(wb.create_sheet('物料库'))
   self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
   for r in self.skus():

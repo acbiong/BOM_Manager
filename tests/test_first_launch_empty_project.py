@@ -37,7 +37,7 @@ class FirstLaunchTests(unittest.TestCase):
   self.assertEqual(list(self.base.iterdir()),[self.config.path]);self.assertEqual(w.projects.entries(),[])
   self.assertIsNone(w.svc.db);self.assertEqual(w.table.rowCount(),0);self.assertIn('未打开项目',w.count_label.text())
   actions=self.actions(w.menuBar())
-  for title in ('物料库','新建SKU','导出资料库','修改项目信息','BOM对比','筛选','选择SQLite数据库'):self.assertFalse(actions[title].isEnabled())
+  for title in ('物料库','新建SKU','导出资料库','修改项目信息','BOM对比','SKU筛选','导出SKU清单','选择SQLite数据库'):self.assertFalse(actions[title].isEnabled())
   for title in ('新增项目','导入项目','导入项目数据库','关于'):self.assertTrue(actions[title].isEnabled())
   with patch.object(main,'choose_database_recovery') as recovery:self.assertIsNone(main.startup_database(self.config,self.config.load()));recovery.assert_not_called()
  def test_new_project_creates_only_selected_database_and_enables_actions(self):

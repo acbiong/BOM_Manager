@@ -81,7 +81,10 @@ def generate(out,main,materials,bom,svc):
     for i,field in enumerate(MATERIAL_IMPORT_HEADERS):
         mapping.mapping_table.scrollToItem(mapping.mapping_table.item(0,i),QAbstractItemView.PositionAtCenter);QApplication.processEvents();snap('mapping_'+str(i),mapping,mapping.combos[field])
     snap('mapping_preview',mapping,mapping.preview);ok('mapping_ok',mapping)
-    bar('sku_new',main,'新建SKU');sku=dialog(NewSkuDialog(svc,main))
+    shown(main.sku_menu);snap('sku_list_export',main.sku_menu,rect=main.sku_menu.actionGeometry(action(main.sku_menu,'导出SKU清单')));main.sku_menu.hide()
+    project_info=svc.project();f=file_dialog('导出SKU清单',True,(project_info['project_code']+' '+project_info['project_name']+' SKU清单.xlsx').strip())
+    snap('sku_list_filename',f,f.findChild(QLineEdit,'fileNameEdit'));snap('sku_list_save',f,save_button(f));f.hide()
+    shown(main.sku_menu);snap('sku_new',main.sku_menu,rect=main.sku_menu.actionGeometry(action(main.sku_menu,'新建SKU')));main.sku_menu.hide();sku=dialog(NewSkuDialog(svc,main))
     candidate=next((i for i in range(sku.model.rowCount()) if sku.model.item(i).isEnabled()),None)
     if candidate is None:raise RuntimeError('截图数据库没有可用于新建SKU的物料')
     sku.combo.setCurrentIndex(candidate);snap('sku_input',sku,sku.combo)
