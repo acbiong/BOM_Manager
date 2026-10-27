@@ -57,6 +57,8 @@ class MaterialDialog(QDialog):
   def field(key,lines=2):
    if key in readonly_keys:
     w=QLabel(str(data.get(key,'') or ''));w.setWordWrap(True);w.setAlignment(Qt.AlignLeft|Qt.AlignTop);w.setTextInteractionFlags(Qt.TextSelectableByMouse|Qt.TextSelectableByKeyboard)
+   elif key in {'base_code','version','manufacturer','mpn','grade'}:
+    w=QLineEdit(str(data.get(key,'') or ''));w.setAlignment(Qt.AlignLeft)
    else:w=MaterialTextEdit(data.get(key,''),lines)
    self.e[key]=w;return w
   for k,l in [('base_code','物料基础编码'),('version','物料版本号'),('name','物料名称'),('description','物料规格描述'),('manufacturer','物料制造商'),('mpn','物料MPN')]:
