@@ -97,7 +97,11 @@ def generate(out,main,materials,bom,svc):
     for field in ('quantity','position','remark'):
         bom.info_scroll.ensureWidgetVisible(bom.fields[field]);QApplication.processEvents();snap('bom_'+field,bom,bom.fields[field])
     bom.fields['remark'].setText('帮助示例：核对装配位置');QApplication.processEvents()
-    toolbar=bom.findChild(QToolBar);snap('bom_save',bom,toolbar.widgetForAction(bom.save_action));bom.dirty=False;bom.load()
+    toolbar=bom.findChild(QToolBar);snap('bom_save',bom,toolbar.widgetForAction(bom.save_action))
+    if not bom.undo_action.isEnabled():raise RuntimeError('撤销截图缺少编辑操作')
+    snap('bom_undo',bom,toolbar.widgetForAction(bom.undo_action));bom.history.undo()
+    if not bom.redo_action.isEnabled():raise RuntimeError('恢复截图缺少撤销操作')
+    snap('bom_redo',bom,toolbar.widgetForAction(bom.redo_action));bom.history.redo();bom.dirty=False;bom.load()
     snap('export_bom',bom,toolbar.widgetForAction(bom.export_action));snap('export_purchase',bom,toolbar.widgetForAction(bom.purchase_export_action))
     f=file_dialog('导出BOM',True,'SKU BOM.xlsx');snap('export_name',f,f.findChild(QLineEdit,'fileNameEdit'));snap('export_save',f,save_button(f));f.hide()
     bar('search_open',materials,'查找物料');search=dialog(MaterialSearchDialog(materials));search.fields['code'].setText(data['base_code']);snap('search_code',search,search.fields['code']);search.fields['name'].setText(data['name']);snap('search_name',search,search.fields['name']);snap('search_run',search,search.search_button);search.search()

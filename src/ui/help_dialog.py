@@ -38,6 +38,7 @@ class HelpDialog(QDialog):
         <tr><td><b>Ctrl+N</b></td><td>新建SKU或新建物料</td><td>SKU清单、物料库</td></tr>
         <tr><td><b>Ctrl+F</b></td><td>打开当前页面的物料查找</td><td>物料库、BOM编辑/浏览</td></tr>
         <tr><td><b>Ctrl+S</b></td><td>保存当前编辑内容</td><td>物料、SKU、BOM及各保存窗口</td></tr>
+        <tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>撤销 / 恢复最近的BOM草稿操作</td><td>BOM编辑，输入框内同样生效</td></tr>
         <tr><td><b>Delete</b></td><td>删除当前选中的BOM物料，随后按回车确认</td><td>BOM编辑</td></tr>
         <tr><td><b>Ctrl/Shift + 鼠标点击</b></td><td>多选同级物料或SKU行</td><td>SKU清单、BOM树</td></tr>
         <tr><td><b>Enter</b></td><td>确认首个筛选候选项或确认当前对话框</td><td>物料选择、查找、导入映射</td></tr></table>

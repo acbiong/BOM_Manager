@@ -22,6 +22,7 @@ from ui.frozen_table import FrozenMaterialTable
 from ui.import_paths import bom_import_directory, remember_bom_import
 from ui.replacement_selection import ReplacementSelectionDialog
 from ui.bom_view_state import preserve_bom_view
+from ui.bom_undo import BomUndo,undoable
 from ui.material_enter import FirstMaterialOnEnter
 
 class WrappingTextEdit(QPlainTextEdit):
@@ -859,6 +860,7 @@ class BomWindow(QMainWindow):
   screen=self.screen().availableGeometry();self.tree.setMinimumWidth(min(420,max(200,screen.width()//2-40)));self.resize(min(self.default_panel_width*2+50,screen.width()),min(850,screen.height()));spl.setSizes([self.default_panel_width,self.default_panel_width])
   self.search_action=tb.addAction('查找物料');self.search_action.setShortcut('Ctrl+F');self.search_action.setShortcutContext(Qt.WindowShortcut);self.search_action.triggered.connect(self.search_materials)
   self.load();self.update_mirror_title();self.apply_lock_state()
+  self.history=BomUndo(self,tb)
  def search_materials(self):
   if not hasattr(self,'_search_dialog'):self._search_dialog=BomSearchDialog(self)
   self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
@@ -871,6 +873,7 @@ class BomWindow(QMainWindow):
   title=self.windowTitle().removesuffix(' — BOM浏览')
   self.setWindowTitle(title+(' — BOM浏览' if locked else ''))
   if self.current_item:self.show_item_info(self.current_item)
+  if hasattr(self,'history'):self.history.update()
  def mirror_suffix(self):
   if getattr(self.svc,'sku_id',None):
    row=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(self.svc.sku_id,)).fetchone()
@@ -895,6 +898,7 @@ class BomWindow(QMainWindow):
    self.update_mirror_title();self.apply_lock_state();return
   if event.get('type')=='bom_changed' and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
+   self._undo_external_epoch=getattr(self,'_undo_external_epoch',0)+1
    self.notice.setText('BOM有更新，请点击刷新或重新打开窗口'); self.export_action.setEnabled(False); self.refresh_action.setEnabled(True); self.statusBar().clearMessage()
    if event.get('type')=='material_changed' and self.current_item is not None:
     self.show_item_info(self.current_item)
@@ -966,6 +970,7 @@ class BomWindow(QMainWindow):
   from ui.bom_colors import ColorMenu
   if self.svc.config_service is None:self.svc.config_service=ConfigService(Path(self.svc.db.path).parent)
   menu.addSeparator();menu.addMenu(ColorMenu(self,self.selected_copy_items(item),menu))
+ @undoable
  @preserve_bom_view
  def set_row_color(self,items,color):
   if self.is_locked():return
@@ -1116,6 +1121,7 @@ class BomWindow(QMainWindow):
    matches=dialog.selected_nodes()
    if not matches:return
   return self.replace_with_subtree_choice(item,matches,material)
+ @undoable
  @preserve_bom_view
  def replace_nodes(self,item,matches,material,swap_alternate=False,version_children=None):
   if self.is_locked():return False
@@ -1144,6 +1150,7 @@ class BomWindow(QMainWindow):
   parent=item.parent()
   if parent is None or direction not in (-1,1) or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return False
   return 0<=parent.indexOfChild(item)+direction<parent.childCount()
+ @undoable
  @preserve_bom_view
  def move_item(self,item,direction):
   if self.is_locked():return False
@@ -1196,6 +1203,7 @@ class BomWindow(QMainWindow):
    entries.append((data.get('material_id',self.root),relation))
   if len(entries)==1:return copy_material(self.svc,*entries[0])
   return copy_materials(self.svc,entries)
+ @undoable
  def cut_material(self,item):
   nodes=self.selected_copy_items(item)
   if self.is_locked() or not nodes or any(node is self.root_item or (node.data(0,Qt.UserRole) or {}).get('_deleted') for node in nodes):return False
@@ -1227,6 +1235,7 @@ class BomWindow(QMainWindow):
    if mid in visited:continue
    visited.add(mid); pending.extend(graph.get(mid,()))
   return ''
+ @undoable
  @preserve_bom_view
  def paste_material(self,item,child):
   if self.is_locked():return False
@@ -1248,6 +1257,7 @@ class BomWindow(QMainWindow):
   data=item.data(0,Qt.UserRole) or {}; parent=item.parent()
   parent_data=parent.data(0,Qt.UserRole) if parent else {}
   return (parent_data.get('material_id'),data.get('material_id'),item.text(3))
+ @undoable
  @preserve_bom_view
  def remove_relation(self,item):
   if self.is_locked():return False
@@ -1277,6 +1287,7 @@ class BomWindow(QMainWindow):
     removed_data['_deleted']=True; removed.setData(0,Qt.UserRole,removed_data)
     pending.extend(removed.child(i) for i in range(removed.childCount()))
   self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+ @undoable
  @preserve_bom_view
  def restore_relation(self,item):
   if self.is_locked():return False
@@ -1431,6 +1442,7 @@ class BomWindow(QMainWindow):
   root_color=(self.root_item.data(0,Qt.UserRole) or {}).get('row_color','') if getattr(self,'_root_color_dirty',False) else colors(self.svc).get((0,self.root),'')
   self.render_tree(exclude_deleted(merged,self.root));root_data=self.root_item.data(0,Qt.UserRole);root_data['row_color']=root_color;self.root_item.setData(0,Qt.UserRole,root_data); self._baseline_tree=deepcopy(fresh)
   self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(True); self.export_action.setEnabled(False); self.refresh_styles()
+  if hasattr(self,'history'):self.history.clear()
   if conflicts:self.statusBar().showMessage('已加载外部更新；检测到冲突，已保留本地未保存修改，请核对后保存。')
  def load(self,preserve=None):
   self._root_color_dirty=False
@@ -1438,6 +1450,7 @@ class BomWindow(QMainWindow):
   from copy import deepcopy
   fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
   self.save_action.setEnabled(False); self.refresh_action.setEnabled(False); self.export_action.setEnabled(True)
+  if hasattr(self,'history'):self.history.clear()
  def expansion_nodes(self):
   if not hasattr(self,'root_item'):return
   def walk(item,path):
@@ -1561,6 +1574,7 @@ class BomWindow(QMainWindow):
     for j,k in enumerate(['base_code','version','name','description','manufacturer','mpn']):
      cell=QTableWidgetItem(str(r[k] or '')); cell.setData(Qt.UserRole,material_id); self.alt_table.setItem(row,j,cell)
   fit_columns(self.alt_table)
+ @undoable
  def update_tree_field(self,key,value):
   if self.is_locked():return False
   if self._loading_fields or self.current_item is None or self.current_item is getattr(self,'root_item',None): return
@@ -1577,6 +1591,7 @@ class BomWindow(QMainWindow):
   if not ok:return
   selected=self.by.get(parent.get('node_id')) if not child else None
   self.insert_material(target,rows[items.index(x)],after=selected)
+ @undoable
  @preserve_bom_view
  def insert_material(self,target,r,after=None):
   if self.is_locked():return False
@@ -1614,6 +1629,7 @@ class BomWindow(QMainWindow):
   key=self.alternate_key(item)
   if key in self._alternate_edits:return list(self._alternate_edits[key])
   return [row['material_id'] for row in self.svc.alternates(key)] if isinstance(key,int) and key>0 else []
+ @undoable
  def add_alternate(self):
   if self.is_locked():return False
   item=self.tree.currentItem()
@@ -1626,6 +1642,7 @@ class BomWindow(QMainWindow):
   if not ok:return
   self._alternate_edits[self.alternate_key(item)]=existing+[rows[choices.index(choice)]['id']]
   self.mark_dirty(); self.show_item_info(item)
+ @undoable
  def alternate_menu(self,pos):
   if self.is_locked():return False
   row=self.alt_table.rowAt(pos.y()); item=self.current_item
@@ -1677,6 +1694,7 @@ class BomWindow(QMainWindow):
    QMessageBox.information(self,'导入完成','BOM已导入编辑缓存，请检查后点击“保存”写入数据库。')
   except BomImportError as error:BomImportIssuesDialog(error,self).exec_()
   except Exception as error:show_operation_error(self,'导入失败',error)
+ @undoable
  def stage_import(self,nodes):
   if self.is_locked():return False
   from copy import deepcopy
@@ -1712,6 +1730,7 @@ class BomWindow(QMainWindow):
   export_material_structure(self,self.svc,self.root)
  def add(self):
   self.add_relative({'id':None,'parent_item_id':None,'level_no':0},False)
+ @undoable
  def stage_import_subtree(self,item,nodes):
   if self.is_locked():return False
   from copy import deepcopy
@@ -1751,6 +1770,7 @@ class BomWindow(QMainWindow):
    QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
   report(0,'正在整理BOM…')
   self._saving=True
+  if hasattr(self,'history'):self.history.update()
   try:
    rows=[]
    def walk(it,parent_material):
@@ -1803,6 +1823,7 @@ class BomWindow(QMainWindow):
    return False
   finally:
    self._saving=False
+   if hasattr(self,'history'):self.history.update()
    from PyQt5 import sip
    if not sip.isdeleted(progress):progress.close();progress.deleteLater()
   if sip.isdeleted(self):return False
