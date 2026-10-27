@@ -41,6 +41,7 @@ class HelpDialog(QDialog):
         <tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>撤销 / 恢复最近的BOM草稿操作</td><td>BOM编辑，输入框内同样生效</td></tr>
         <tr><td><b>Delete</b></td><td>删除当前选中的BOM物料，随后按回车确认</td><td>BOM编辑</td></tr>
         <tr><td><b>Ctrl/Shift + 鼠标点击</b></td><td>多选同级物料或SKU行</td><td>SKU清单、BOM树</td></tr>
+        <tr><td><b>↑ / ↓</b></td><td>在筛选结果中连续选择上一项/下一项，跳过不可选物料，保留筛选文字</td><td>新建SKU、BOM新增/替换/版本更新/新增替代料</td></tr>
         <tr><td><b>Enter</b></td><td>确认首个筛选候选项或确认当前对话框</td><td>物料选择、查找、导入映射</td></tr></table>
         <h3>窗口操作</h3><p>所有主要交互窗口均可独立移动、切换和置顶。关闭有未保存内容的窗口时，请选择保存并退出、不保存退出或取消。</p>'''
 

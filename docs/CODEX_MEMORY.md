@@ -1032,3 +1032,12 @@ Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出�
 - 保存前再次查重，阻止其他窗口新建造成的竞态重复；数据库唯一约束继续保留。原有必填项校验不变。
 - 回归涵盖两个字段即时变化、空格规范化、空值及样式恢复、其他窗口抢先创建后拒绝保存、修改版本后成功创建。实际查看重复提示截图并同步新建/类似新增教程图片和标注；帮助现24个教程142步、133张动作图、总153张静态图。
 - 报告：test_reports/material_duplicate_tests.log、material_duplicate_screenshots.log及收尾日志；源数据库仅通过隔离副本生成截图。
+
+
+## 2026-10-27：物料筛选候选上下键导航修复
+
+- 排查公共FirstMaterialOnEnter：原来只接管回车，上下键依赖Qt原生焦点转交，事件仍落在输入框时无法可靠移动补全候选。offscreen复现输入part后向输入框连续发送Down，候选始终无选中项；修复后依次选中0/1/2行。
+- 对编辑框、组合框、补全弹窗和viewport统一处理↑/↓；直接在当前筛选模型的可选项中导航，阻止高亮回填改变筛选文字，跳过禁用项，首尾停留。回车确认所选项和鼠标选择流程保持兼容。
+- 统一覆盖新建SKU，以及BOM新增同级/子级、替换、物料版本更新、新增替代料的共用选择窗口。父项升版的自由版本输入框不使用该物料筛选流程。
+- 新增2项回归包含4种键盘事件目标、连续上下键、首尾边界、禁用项、无匹配、重新输入及回车确认；既有5项删除恢复/回车测试通过。帮助快捷键和选择步骤同步更新；本次未改变窗口布局。
+- 证据及报告位于test_reports/material_navigation_before_lineedit.log、material_navigation_after.log、material_navigation_tests.log、material_navigation_enter_tests.log；全量测试、提交和AppImage打包按收尾脚本执行。
