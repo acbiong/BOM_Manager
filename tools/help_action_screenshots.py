@@ -60,10 +60,16 @@ def generate(out,main,materials,bom,svc):
     f=file_dialog('创建新项目数据库',True,'新项目.db');snap('database_name',f,f.findChild(QLineEdit,'fileNameEdit'));snap('database_save',f,save_button(f));f.hide()
     bar('library_open',main,'物料库');bar('material_new',materials,'新建物料')
     data=dict(svc.db.conn.execute('SELECT * FROM materials ORDER BY id LIMIT 1').fetchone())
-    material=dialog(CreateMaterialDialog(main,data=data))
+    new_code=data['base_code']+'-NEW'
+    while svc.db.conn.execute('SELECT 1 FROM materials WHERE base_code=? AND version=?',(new_code,data['version'])).fetchone():new_code+='-NEW'
+    material=dialog(CreateMaterialDialog(main,data={**data,'base_code':new_code}))
     for field in ('base_code','version','name','description','grade','manufacturer','mpn'):
         snap('material_'+field,material,material.e[field])
-    snap('material_unit',material,material.unit);snap('material_mp_flag',material,material.mp_flag);ok('material_ok',material)
+    snap('material_unit',material,material.unit);snap('material_mp_flag',material,material.mp_flag)
+    material.e['base_code'].setText(data['base_code'])
+    if not material.check_duplicate_code():raise RuntimeError('重复物料截图未触发查重')
+    snap('material_duplicate',material,material.duplicate_notice)
+    material.e['base_code'].setText(new_code);ok('material_ok',material)
     bar('import_open',materials,'导入物料')
     from openpyxl import Workbook
     book=Workbook();book.active.title='物料清单';book.active.append(MATERIAL_IMPORT_HEADERS);book.create_sheet('填写说明');book.save(out/'物料清单.xlsx');book.close()

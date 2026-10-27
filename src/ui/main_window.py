@@ -74,10 +74,26 @@ class CreateMaterialDialog(MaterialDialog):
  def __init__(self,owner,data=None):
   super().__init__(owner,data=data);self.setWindowTitle('新建物料');self.setWindowModality(Qt.NonModal)
   self.service=owner.svc;self.database=owner.svc.db;self._saving=False;self._saved=False
+  self.duplicate_notice=QLabel('');self.duplicate_notice.setWordWrap(True);self.duplicate_notice.setAlignment(Qt.AlignLeft|Qt.AlignVCenter)
+  self.duplicate_notice.setStyleSheet('color:#e53935;');self.duplicate_notice.setMinimumHeight(self.fontMetrics().height());self.layout().addWidget(self.duplicate_notice)
+  self._identity_styles={key:self.e[key].styleSheet() for key in ('base_code','version')}
+  for key in ('base_code','version'):self.e[key].textChanged.connect(self.check_duplicate_code)
+  self.check_duplicate_code()
+ def check_duplicate_code(self,*args):
+  duplicate=False
+  if self.service.db is self.database and getattr(self.parentWidget(),'svc',None) is self.service:
+   code=self.e['base_code'].text().strip();version=self.e['version'].text().strip()
+   if code and version:
+    duplicate=self.database.conn.execute('SELECT 1 FROM materials WHERE base_code=? AND version=? LIMIT 1',(code,version)).fetchone() is not None
+  for key in ('base_code','version'):
+   self.e[key].setStyleSheet('QLineEdit {background-color:#f8d7da;color:#4a1111;}' if duplicate else self._identity_styles[key])
+  self.duplicate_notice.setText('当前物料编码已经存在，请重新选择新的物料编码' if duplicate else '')
+  return duplicate
  def accept(self):
   if self._saving or self._saved:return
   if self.service.db is not self.database:
    QMessageBox.warning(self,'数据库已切换','此窗口属于之前的数据库，请关闭后重新新建物料。');return
+  if self.check_duplicate_code():self.e['base_code'].setFocus();return
   self._saving=True
   try:
    self.service.create_material(self.data())

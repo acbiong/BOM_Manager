@@ -33,7 +33,9 @@ class NonmodalMaterialCreationTests(unittest.TestCase):
   dialog.accept();self.assertEqual(len([m for m in self.s.materials() if m['base_code']=='NEW']),1)
  def test_failure_preserves_input_and_cancel_does_not_insert(self):
   dialog=self.main.new_material();self.fill(dialog,'R');dialog.e['version'].setText('1')
-  with patch.object(QMessageBox,'warning') as warning:dialog.accept();warning.assert_called_once()
+  with patch.object(QMessageBox,'warning') as warning:dialog.accept();warning.assert_not_called()
+  self.assertIn('当前物料编码已经存在',dialog.duplicate_notice.text())
+  self.assertEqual(len([m for m in self.s.materials() if m['base_code']=='R']),1)
   self.assertTrue(dialog.isVisible());self.assertEqual(dialog.e['name'].text(),'New material')
   dialog.e['base_code'].setText('FIXED');dialog.accept();self.assertTrue(any(m['base_code']=='FIXED' for m in self.s.materials()))
   other=self.main.new_material();self.fill(other,'CANCEL');other.reject();self.assertFalse(any(m['base_code']=='CANCEL' for m in self.s.materials()))
