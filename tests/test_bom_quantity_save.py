@@ -2,6 +2,7 @@ import os,sys,tempfile,unittest,math
 os.environ['QT_QPA_PLATFORM']='offscreen'
 from pathlib import Path
 from unittest.mock import patch
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from database.database import Database
 from services.services import Services
@@ -38,7 +39,8 @@ class BomQuantitySaveTests(unittest.TestCase):
     self.assertTrue(item.data(0,Qt.UserRole)['_deleted']);self.assertEqual(w.root_item.child(0).text(1),'0.01234567')
     progress=[];original=QProgressDialog.setValue
     def set_value(dialog,n):progress.append(n);return original(dialog,n)
-    with patch.object(QProgressDialog,'setValue',set_value),patch.object(QMessageBox,'information'):
+    from ui.operation_progress import OperationProgress
+    with patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'paint_interval',0),patch.object(QProgressDialog,'setValue',set_value),patch.object(QMessageBox,'information'):
      self.assertTrue(w.save())
     self.assertEqual(progress[-1],100);self.assertIn(90,progress)
     self.assertEqual(len(s.bom(root)),79);self.assertEqual(s.bom(root)[0]['quantity'],.01234567)

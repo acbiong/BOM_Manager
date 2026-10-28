@@ -78,5 +78,7 @@ def run_smoke_test(report_path):
     finally:
         for window in windows:window.close()
         if db is not None:db.close()
+        from ui.operation_progress import RECENT_OPERATIONS
+        report['operation_timings']=list(RECENT_OPERATIONS)
         Path(report_path).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     return 0 if report['passed'] else 1

@@ -50,7 +50,7 @@ class HelpDialog(QDialog):
         layout.addWidget(self._section('SKU清单窗口：项目总览与批量入口', '这里显示当前项目全部SKU及其历史版本。“SKU”菜单包含新建SKU、SKU筛选、导出SKU清单；清单导出包含项目全部SKU历史版本，复用资料库表格格式并记忆导出目录。点击表头可排序，选择一行后双击打开BOM；Ctrl/Shift可多选，再右键对多个SKU执行浏览、编辑、导出或锁定。锁定列显示小锁，版本号加粗表示存在变更描述；底部同时显示“共计N个SKU，M个BOM”。', self._image_widget('sku_overview', '实际截图：SKU清单窗口')))
         layout.addWidget(self._section('物料库窗口：公共物料资料', '物料库维护基础编码、版本号、名称、规格、单位、等级、制造商、MPN和M/P，并显示BOM状态、呆滞状态及各SKU用量。菜单按钮可执行导入、导出、查找、筛选；右键可编辑、复制、删除、反查、版本更新、编辑BOM和新增替代料。', self._image_widget('material_library', '实际截图：物料库窗口')))
         layout.addWidget(self._section('BOM编辑窗口：树状结构与属性', '左侧是递归BOM树，右侧是当前节点属性和替代料。根节点显示SKU或选中的公共物料；树节点左键切换右侧资料，右键按分组提供新增、复制剪切粘贴、替换、版本更新、替代料、颜色、反查和导出。保存前变更有颜色标识，保存后恢复默认。', self._image_widget('bom_window', '实际截图：BOM编辑/浏览窗口')))
-        layout.addWidget(self._section('导入、导出、对比和主题', '物料/BOM导入均支持Sheet选择、表头映射、必填项检查、进度条和结果明细；BOM对比支持两个SKU历史版本或外部Excel，并同步标记新增、删除、修改、换料和交换。右上角太阳/月亮按钮切换主题，窗口尺寸和路径自动记忆。', self._image_widget('menu_theme', '实际截图：菜单和主题按钮')))
+        layout.addWidget(self._section('导入、导出、对比和主题', '物料/BOM导入均支持Sheet选择、表头映射、必填项检查和结果明细。导入、导出、保存、打开/刷新清单及BOM对比等工作超过100毫秒时显示进度条；能确定数量时显示实际处理进度，未知总量或文件读写时显示忙碌状态。短操作不弹进度窗，等待用户选择/确认时暂停提示。修改日期和变更历史在界面及Excel中只显示整数秒，数据库保留高精度时间；BOM对比支持两个SKU历史版本或外部Excel，并同步标记新增、删除、修改、换料和交换。右上角太阳/月亮按钮切换主题，窗口尺寸和路径自动记忆。', self._image_widget('menu_theme', '实际截图：菜单和主题按钮')))
         return self._scroll(page)
 
     def _guide_page(self):

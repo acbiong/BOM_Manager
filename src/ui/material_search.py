@@ -1,3 +1,5 @@
+from infrastructure.operation_progress import checkpoint
+from ui.operation_progress import operation
 """物料组合查找对话框：输入模糊条件，输出匹配清单并定位物料库。编辑时间：2026-10-10。"""
 from ui.table_layout import fit_columns
 from PyQt5.QtCore import Qt
@@ -19,6 +21,7 @@ class MaterialSearchDialog(QDialog):
         self.fields = {}
         for key, label in [('code', '物料编码'), ('name', '物料名称'),
                            ('description', '物料规格'), ('manufacturer', '制造商'), ('mpn', 'MPN')]:
+            checkpoint()
             edit = QLineEdit()
             edit.returnPressed.connect(self.search)
             self.fields[key] = edit
@@ -46,8 +49,10 @@ class MaterialSearchDialog(QDialog):
 
     def candidates(self):
         for number,material in enumerate(self.library.svc.materials(),1):
+            checkpoint()
             yield number,material['id'],dict(material)
 
+    @operation('查找物料')
     def search(self):
         queries = {key: edit.text().strip().casefold() for key, edit in self.fields.items() if edit.text().strip()}
         self.table.setRowCount(0)
@@ -55,12 +60,14 @@ class MaterialSearchDialog(QDialog):
             self.count_label.setText('请至少输入一个查找条件')
             return
         for number, identity, values in self.candidates():
+            checkpoint()
             values['code'] = values['base_code'] + values['version']
             if not all(query in str(values.get(key) or '').casefold() for key, query in queries.items()):
                 continue
             row = self.table.rowCount()
             self.table.insertRow(row)
             for col, value in enumerate((number, values['code'], values['name'], values['description'], values['manufacturer'], values['mpn'])):
+                checkpoint()
                 item = QTableWidgetItem(str(value or ''))
                 item.setData(Qt.UserRole, identity)
                 if col == 0:
@@ -101,6 +108,7 @@ class BomSearchDialog(MaterialSearchDialog):
     def candidates(self):
         materials = {m['id']:dict(m) for m in self.library.svc.materials()}
         for path,node in self.library.expansion_nodes():
+            checkpoint()
             data = node.data(0,Qt.UserRole) or {}
             if data.get('_deleted'):
                 continue
@@ -109,10 +117,12 @@ class BomSearchDialog(MaterialSearchDialog):
             position = []
             current = node
             while current.parent() is not None:
+                checkpoint()
                 position.append(str(current.parent().indexOfChild(current)+1))
                 current = current.parent()
             yield '.'.join(['1']+list(reversed(position))),path,values
 
+    @operation('查找物料')
     def search(self):
         super().search()
         if not any(edit.text().strip() for edit in self.fields.values()):
@@ -124,10 +134,12 @@ class BomSearchDialog(MaterialSearchDialog):
         if result is None:
             return
         for path,node in self.library.expansion_nodes():
+            checkpoint()
             if path != result.data(Qt.UserRole) or (node.data(0,Qt.UserRole) or {}).get('_deleted'):
                 continue
             parent = node.parent()
             while parent is not None:
+                checkpoint()
                 parent.setExpanded(True)
                 parent = parent.parent()
             self.library.tree.setCurrentItem(node)

@@ -1,3 +1,4 @@
+from infrastructure.operation_progress import checkpoint, file_work
 """Read Excel into a detached comparison graph. Never accesses a database."""
 from pathlib import Path
 from collections import defaultdict
@@ -27,7 +28,7 @@ class ExcelSource:
             self.names=self.book.sheet_names()
         else:
             from openpyxl import load_workbook
-            self.book=load_workbook(path,read_only=True,data_only=True);self.names=self.book.sheetnames
+            self.book=file_work(load_workbook,path,read_only=True,data_only=True);self.names=self.book.sheetnames
     def rows(self,name):
         if self.xls:
             sheet=self.book.sheet_by_name(name)
@@ -41,9 +42,11 @@ def build_external_bom(rows,mapping):
     headers=[text(v) for v in rows[0]] if rows else []
     issues=[];indices={}
     for field in REQUIRED:
+        checkpoint()
         if not mapping.get(field):issues.append('必选项未映射：'+field)
     used=[]
     for field,target in mapping.items():
+        checkpoint()
         if not target:continue
         if headers.count(target)!=1:issues.append('源表头缺失或重名：'+target);continue
         indices[field]=headers.index(target);used.append(target)
@@ -51,10 +54,12 @@ def build_external_bom(rows,mapping):
     if issues:raise ValueError('\n'.join(issues))
     groups=sorted({int(m.group(1)) for f in mapping for m in [re.fullmatch(r'替代料(\d+)'+r'(?:'+'|'.join(ALT_SUFFIXES)+')',f)] if m})
     for n in groups:
+        checkpoint()
         pair=[mapping.get(f'替代料{n}{suffix}') for suffix in ('编码','版本号')]
         if any(mapping.get(f'替代料{n}{suffix}') for suffix in ALT_SUFFIXES) and not all(pair):issues.append(f'替代料{n}编码与版本号必须成对映射')
     edges=defaultdict(dict);roots=[];defined=set();parents=set()
     for line,values in enumerate(rows[1:],2):
+        checkpoint()
         def get(field):
             i=indices.get(field);return text(values[i]) if i is not None and i<len(values) else ''
         if not any(get(f) for f in indices):continue
@@ -69,6 +74,7 @@ def build_external_bom(rows,mapping):
         data.update(material_id=code,quantity=quantity,children=[],alternate_ids=frozenset(),_external=True)
         alt_codes=[];alt_text=[]
         for n in groups:
+            checkpoint()
             vals=[get(f'替代料{n}{suffix}') for suffix in ALT_SUFFIXES]
             if not any(vals):continue
             if not all(vals[:2]):issues.append(f'第{line}行替代料{n}缺少编码或版本号');continue
@@ -103,6 +109,7 @@ def build_external_bom(rows,mapping):
     if roots:
         reachable=set();pending=[roots[0][0]]
         while pending:
+            checkpoint()
             code=pending.pop()
             if code in reachable:continue
             reachable.add(code);pending.extend(edges.get(code,{}))

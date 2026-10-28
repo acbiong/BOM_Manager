@@ -1,3 +1,4 @@
+from infrastructure.operation_progress import checkpoint
 from domain.quantity import format_quantity
 """Read-only, parent-local comparison of saved SKU/mirror graphs."""
 from difflib import SequenceMatcher
@@ -24,6 +25,7 @@ def snapshot(service, sku):
     alternate_cache = {}
     rows=scoped.bom(sku['material_id']);groups=scoped.alternate_groups(row['id'] for row in rows)
     for source in rows:
+        checkpoint()
         row = dict(source)
         if row['id'] not in alternate_cache:
             alternatives=[dict(x) for x in groups[row['id']]]
@@ -60,10 +62,12 @@ def align_children(left, right):
     """
     pairs = {}; unused = set(range(len(right)))
     for i,node in enumerate(left):
+        checkpoint()
         j = next((j for j in sorted(unused) if (right[j]['base_code'],right[j].get('version'))==(node['base_code'],node.get('version'))),None)
         if j is not None:pairs[i]=j;unused.remove(j)
     # Explicit reciprocal main/alternate identities outrank names or positions.
     for i,node in enumerate(left):
+        checkpoint()
         if i in pairs:continue
         matches=[j for j in unused if is_exchange(node,right[j])]
         if matches:
@@ -71,6 +75,7 @@ def align_children(left, right):
     # Exact versions have already matched. Pair remaining versions by base code,
     # even when several versions of the same material occur under one parent.
     for i,node in enumerate(left):
+        checkpoint()
         if i in pairs:continue
         matches=[j for j in unused if right[j]['base_code']==node['base_code']]
         if matches:
@@ -79,14 +84,17 @@ def align_children(left, right):
     # Similar names align for inspection, but never establish material identity.
     candidates=[]
     for i,node in enumerate(left):
+        checkpoint()
         if i in pairs:continue
         name=''.join(str(node.get('name','')).casefold().split())
         if not name:continue
         for j in unused:
+            checkpoint()
             other=''.join(str(right[j].get('name','')).casefold().split())
             score=SequenceMatcher(None,name,other,autojunk=False).ratio()
             if score>=0.6:candidates.append((-score,abs(i-j),i,j))
     for _,_,i,j in sorted(candidates):
+        checkpoint()
         if i not in pairs and j in unused:pairs[i]=j;unused.remove(j)
     reverse={j:i for i,j in pairs.items()}
     # Unique tokens prevent incidental identical text from pairing different branches.
@@ -95,15 +103,18 @@ def align_children(left, right):
                            autojunk=False).get_matching_blocks()
     li=ri=0
     for block in blocks:
+        checkpoint()
         missing_left=[i for i in range(li,block.a) if i not in pairs]
         missing_right=[j for j in range(ri,block.b) if j in unused]
         for i,j in zip(missing_left,missing_right):pairs[i]=j;unused.remove(j)
         li=block.a+block.size;ri=block.b+block.size
     pending=sorted(unused);cursor=0
     for i,node in enumerate(left):
+        checkpoint()
         j=pairs.get(i)
         if j is not None:
             while cursor<len(pending) and pending[cursor]<j:
+                checkpoint()
                 yield None,right[pending[cursor]];cursor+=1
         yield node,right[j] if j is not None else None
     for j in pending[cursor:]:yield None,right[j]
@@ -128,6 +139,7 @@ def compare_trees(left_tree,right_tree):
         ls = left['children'] if left else []
         rs = right['children'] if right else []
         for index,(l,r) in enumerate(align_children(ls,rs),1):
+            checkpoint()
             visit(l,r,depth+1,serial+'.'+str(index))
     visit(left_tree,right_tree,0,'1')
     return result

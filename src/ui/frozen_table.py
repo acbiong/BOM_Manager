@@ -1,4 +1,5 @@
 """Shared-model overlay keeps leading material identity columns visible."""
+from infrastructure.operation_progress import checkpoint
 from PyQt5.QtCore import Qt,QEvent,QTimer
 from PyQt5.QtWidgets import QTableWidget,QTableView,QAbstractItemView,QFrame
 
@@ -34,6 +35,7 @@ class FrozenMaterialTable(QTableWidget):
    self.frozen.setColumnHidden(col,col>=3)
    if col<3:self.frozen.setColumnWidth(col,self.columnWidth(col))
   for row in range(self.rowCount()):
+   checkpoint()
    self.frozen.setRowHidden(row,self.isRowHidden(row));self.frozen.setRowHeight(row,self.rowHeight(row))
   self.frozen.horizontalHeader().setFixedHeight(self.horizontalHeader().height())
   width=sum(self.columnWidth(col) for col in range(min(3,self.columnCount())))

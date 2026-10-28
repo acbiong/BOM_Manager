@@ -1,3 +1,5 @@
+from domain.timestamps import seconds_timestamp
+from infrastructure.operation_progress import checkpoint, file_work
 from domain.quantity import format_quantity
 import math
 """业务服务层：物料、SKU、BOM、日志和Excel；UI不得直接访问数据库。编辑时间：2026-09-24。"""
@@ -110,6 +112,7 @@ class Services:
     parents={r[0] for r in primary.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items')}
     from services.current_catalog import material_structure_sources
     for mid,sources in material_structure_sources(primary).items():
+     checkpoint()
      if sources[0]['children']:parents.add(mid)
      else:parents.discard(mid)
     return [dict(row,latest_used='Y' if row['id'] in used else 'N',has_bom='Y' if row['id'] in parents else 'N') for row in rows]
@@ -147,14 +150,17 @@ class Services:
   from decimal import Decimal
   graph={}
   for row in self.db.conn.execute('SELECT parent_material_id,child_material_id,quantity FROM material_bom_items ORDER BY sort_no,id'):
+   checkpoint()
    graph.setdefault(row['parent_material_id'],[]).append((row['child_material_id'],Decimal(str(row['quantity']))))
   result={}
   for sku in self.skus() if skus is None else skus:
+   checkpoint()
    if sku['scope_id'] and sku['scope_id']!=getattr(self,'scope_id',0):
     result.update(self.for_sku(sku['id']).sku_material_quantities());continue
    root=sku['material_id'];totals={root:Decimal('1')}
    def walk(parent,quantity,ancestors):
     for child,usage in graph.get(parent,[]):
+     checkpoint()
      if child in ancestors:continue
      amount=quantity*usage;totals[child]=totals.get(child,Decimal('0'))+amount
      walk(child,amount,ancestors|{child})
@@ -204,6 +210,7 @@ class Services:
     owned.update(row[0] for row in self.db.conn.execute("SELECT id FROM change_logs WHERE object_type='bom' AND object_id=?",(root,)))
     self.db.conn.execute('DELETE FROM bom_log_roots WHERE root_id=?',(root,))
     for log_id in owned:
+     checkpoint()
      if not self.db.conn.execute('SELECT 1 FROM bom_log_roots WHERE log_id=?',(log_id,)).fetchone():self.db.conn.execute('DELETE FROM change_logs WHERE id=?',(log_id,))
    self.db.conn.execute("DELETE FROM change_logs WHERE object_type='sku' AND object_id=?",(sid,))
    self.db.conn.execute('INSERT OR REPLACE INTO sku_history_reset(root_id,start_log_id) VALUES(?,0)',(root,))
@@ -220,12 +227,14 @@ class Services:
   # Operation-local snapshot: each reachable edge is fetched once even when
   # shared subassemblies appear on many paths. UNION terminates cyclic data.
   for row in self.db.conn.execute('WITH RECURSIVE reachable(mid) AS (SELECT ? UNION SELECT b.child_material_id FROM material_bom_items b JOIN reachable r ON b.parent_material_id=r.mid) SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.grade,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN reachable r ON r.mid=b.parent_material_id JOIN materials m ON m.id=b.child_material_id ORDER BY b.sort_no,b.id',(root,)):
+   checkpoint()
    children.setdefault(row['parent_material_id'],[]).append(row)
   def walk(parent_id,level,parent_item_id,parent_node_id,ancestors):
    if parent_id in ancestors:return
    ancestors=ancestors|{parent_id}
    rows=children.get(parent_id,[])
    for r in rows:
+    checkpoint()
     if r['child_material_id'] in ancestors:continue
     node_id=f"{parent_node_id or ''}/{r['id']}"
     d=dict(r); d.update(row_color=row_colors.get((parent_id,r['child_material_id']),''),material_id=r['child_material_id'],unit=r['material_unit'],level_no=level,parent_item_id=parent_item_id,bom_root_id=root,node_id=node_id,parent_node_id=parent_node_id)
@@ -252,6 +261,7 @@ class Services:
   def payload(row):
    return (float(row['quantity']),row['unit'],row.get('remark','') or '')
   for row in items:
+   checkpoint()
    parent=row.get('parent_material_id')
    if parent is None:
     pid=row.get('parent_item_id'); parent_row=by_id.get(pid)
@@ -265,6 +275,7 @@ class Services:
     if key in alternate_updates and alternate_updates[key]!=alternates:raise ValueError('共享BOM的替代料修改不一致')
     if row['material_id'] in alternates:raise ValueError('物料不能作为自身的替代料')
     for mid in alternates:
+     checkpoint()
      if not self.db.conn.execute('SELECT 1 FROM materials WHERE id=?',(mid,)).fetchone():raise ValueError('替代料不存在，请重新选择')
     alternate_updates[key]=alternates
    values=payload(row)
@@ -281,16 +292,20 @@ class Services:
   changed_parents=set()
   old_groups={}; new_groups={}
   for key,row in sorted(old.items(),key=lambda pair:(pair[1]['sort_no'],pair[1]['id'])):
+   checkpoint()
    old_groups.setdefault(key[0],[]).append((key,payload(row)))
   for key,values in desired.items():new_groups.setdefault(key[0],[]).append((key,values))
   for parent in parents:
+   checkpoint()
    if old_groups.get(parent,[])!=new_groups.get(parent,[]):changed_parents.add(parent)
   for key,alternates in alternate_updates.items():
+   checkpoint()
    previous=[row['material_id'] for row in self.alternates(old[key]['id'])] if key in old else []
    if previous!=alternates:changed_parents.add(key[0])
   # 同一个物料关系可能在树的多条路径出现，但数据库只保存一份。
   graph={}
   for key in old:
+   checkpoint()
    if key[0] not in parents: graph.setdefault(key[0],set()).add(key[1])
   for parent,child,_ in desired: graph.setdefault(parent,set()).add(child)
   visiting=set(); visited=set()
@@ -307,6 +322,7 @@ class Services:
    relations.update(desired)
    groups={}; materials={r['id']:dict(r) for r in self.materials()}
    for number,(key,values) in enumerate(relations.items(),1):
+    checkpoint()
     parent,child,position=key; quantity,unit,remark=values
     previous=old.get(key); relation_id=previous['id'] if previous else -number
     data=dict(materials[child]); data.update(id=relation_id,material_id=child,parent_material_id=parent,quantity=quantity,unit=unit,position=position,remark=remark)
@@ -320,7 +336,9 @@ class Services:
   def reachable(root,relations):
    found={root};pending=[root]
    while pending:
+    checkpoint()
     for child in relations.get(pending.pop(),()):
+     checkpoint()
      if child not in found:found.add(child);pending.append(child)
    return found
   old_graph={}
@@ -330,6 +348,7 @@ class Services:
   def alternate_map():
    mapping={}
    for row in self.db.conn.execute('SELECT bom_item_id,material_id FROM alternates ORDER BY sort_no,id'):
+    checkpoint()
     mapping.setdefault(row[0],[]).append(row[1])
    return mapping
   old_alternates=alternate_map()
@@ -338,10 +357,12 @@ class Services:
   affected_skus=[]
   with self.db.transaction():
    for key,row in old.items():
+    checkpoint()
     if key[0] in parents and key not in desired:
      self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(row['id'],))
      self.db.conn.execute('DELETE FROM material_bom_items WHERE id=?',(row['id'],))
    for order,(key,values) in enumerate(desired.items()):
+    checkpoint()
     parent,child,position=key; quantity,unit,remark=values
     if key in old and payload(old[key])==values and old[key]['sort_no']==order:continue
     self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?) ON CONFLICT(parent_material_id,child_material_id,position) DO UPDATE SET quantity=excluded.quantity,unit=excluded.unit,remark=excluded.remark,sort_no=excluded.sort_no,updated_at=CURRENT_TIMESTAMP',(parent,child,quantity,unit,position,remark,order))
@@ -354,10 +375,13 @@ class Services:
    graph={}
    for parent,child in remaining:graph.setdefault(parent,[]).append(child)
    while pending:
+    checkpoint()
     parent=pending.pop()
     for child in graph.get(parent,[]):
+     checkpoint()
      if child not in protected:protected.add(child);pending.append(child)
    for parent in candidates-protected:
+    checkpoint()
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(parent,))
     self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(parent,))
     self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(parent,))
@@ -365,6 +389,7 @@ class Services:
    self.db.conn.execute('DELETE FROM bom_items WHERE bom_root_id=?',(root,))
    self.db.conn.execute('DELETE FROM alternates WHERE NOT EXISTS (SELECT 1 FROM material_bom_items b WHERE b.id=alternates.bom_item_id)')
    for key,alternates in alternate_updates.items():
+    checkpoint()
     relation=self.db.conn.execute('SELECT id FROM material_bom_items WHERE parent_material_id=? AND child_material_id=? AND position=?',key).fetchone()[0]
     self.db.conn.execute('DELETE FROM alternates WHERE bom_item_id=?',(relation,))
     for order,mid in enumerate(alternates):self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',(relation,mid,order))
@@ -376,6 +401,7 @@ class Services:
    # 在同一事务内更新时间，保证界面收到通知时读取的是已提交数据。
    affected_rows=[]
    for sku in self.bom_skus():
+    checkpoint()
     sku_root=sku['material_id']
     contained=log_roots.get(sku_root,{sku_root})|reachable(sku_root,graph)
     if contained & changed_parents:
@@ -389,6 +415,7 @@ class Services:
      except ValueError:pass
    saved_at=saved_time.strftime('%Y-%m-%d %H:%M:%S.%f')
    for sku in affected_rows:
+    checkpoint()
     if not getattr(self,'scope_id',0):self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(saved_at,sku['material_id']))
     self.db.conn.execute('UPDATE skus SET updated_at=? WHERE id=?',(saved_at,sku['id']))
     affected_skus.append(sku['id'])
@@ -403,6 +430,7 @@ class Services:
    # 按父项+子物料配对位置变化，避免一处位置修改被写成删除和新增两条。
    remaining=set(after); pairs=[]
    for key,before in old.items():
+    checkpoint()
     target=key if key in remaining else None
     if target is None:
      candidates=[candidate for candidate in remaining if candidate[:2]==key[:2] and candidate not in old]
@@ -412,23 +440,28 @@ class Services:
     pairs.append((key,before,target,after.get(target)))
    pairs.extend((key,None,key,after[key]) for key in after if key in remaining)
    for key,before,target,current in pairs:
+    checkpoint()
     detail=[]
     if before is None:detail.append(f"新增物料；数量：{format_quantity(current['quantity'])}；单位：{current['unit']}；备注：{current['remark']}")
     elif current is None:detail.append('删除物料（含关系属性及替代料）')
     else:
      for field,title in [('position','位置'),('quantity','数量'),('unit','单位'),('remark','备注')]:
+      checkpoint()
       if before[field]!=current[field]:detail.append(f'{title}：{before[field] or "（空）"} → {current[field] or "（空）"}')
     previous=old_alternates.get(before['id'],[]) if before else []
     following=after_alternates.get(current['id'],[]) if current else []
     for mid in following:
+     checkpoint()
      if mid not in previous:detail.append('新增替代料：'+label(mid))
     for mid in previous:
+     checkpoint()
      if mid not in following:detail.append('删除替代料：'+label(mid))
     if not detail:continue
     description='父项：'+label(key[0])+'\n物料：'+label(key[1])+'\n物料位置：'+(key[2] or '（未填写）')+'\n'+'\n'.join(detail)
     self.log('bom',key[0],'update',description,snapshot=self.material_snapshot(key[1]))
     log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     for affected,contained in log_roots.items():
+     checkpoint()
      if key[0] in contained or affected==root:self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,affected))
    from services.current_catalog import enabled as catalog_enabled,prune_snapshot,synchronize
    if catalog_enabled(self):prune_snapshot(self)
@@ -463,7 +496,7 @@ class Services:
  BOM_HEADERS=['父项物料编码','父项版本号','物料基础编码','物料版本号','物料数量','位置']
  def import_bom(self,path,root=None,sheet_name=None,header_mapping=None,persist=True,conflict_resolver=None):
   import math
-  wb=load_workbook(path,read_only=True,data_only=True)
+  wb=file_work(load_workbook,path,read_only=True,data_only=True)
   try:
    if sheet_name is None:
     if len(wb.sheetnames)!=1:raise ValueError('文件包含多个工作表，请选择BOM所在工作表')
@@ -479,6 +512,7 @@ class Services:
    groups=sorted({int(match.group(1)) for field in mapping for match in [re.fullmatch(r'替代料(\d+)(?:编码|版本号)',field)] if match})
    alternate_fields=[f'替代料{number}{suffix}' for number in groups for suffix in ('编码','版本号')]
    for field in alternate_fields:
+    checkpoint()
     if not mapping.get(field) or mapping[field] not in headers:raise ValueError('替代料映射不完整：'+field)
    selected=[mapping[field] for field in self.BOM_HEADERS+alternate_fields]
    if len(set(selected))!=len(selected):raise ValueError('表头映射重复')
@@ -490,6 +524,7 @@ class Services:
    current=self.material_snapshot(root) if root is not None else None
    if root is not None and not current:issues.append('当前BOM根物料不存在')
    for no,values in enumerate(ws.iter_rows(values_only=True),1):
+    checkpoint()
     if no==1:continue
     data={field:str(values[i] if i<len(values) and values[i] is not None else '').strip() for field,i in index.items()}
     if not any(data.values()):continue
@@ -509,6 +544,7 @@ class Services:
     records.append((no,data))
    edge_lines={}
    for no,data in records:
+    checkpoint()
     start_errors=len(issues)
     absent=[field for field in self.BOM_HEADERS[:-1] if not data[field]]
     if absent:issues.append(f'第{no}行必填项缺失：'+ '、'.join(absent))
@@ -523,6 +559,7 @@ class Services:
      except ValueError:issues.append(f'第{no}行数量不是有效数字')
     alternate_ids=[]
     for number in groups:
+     checkpoint()
      code=data[f'替代料{number}编码']; version=data[f'替代料{number}版本号']
      if not code and not version:continue
      if not code or not version:issues.append(f'第{no}行替代料{number}编码和版本号必须同时填写');continue
@@ -548,6 +585,7 @@ class Services:
     if mid in visited:return
     active.add(mid)
     for child in children.get(mid,[]):
+     checkpoint()
      if child in active:issues.append(f'第{edge_lines[mid,child]}行关系使BOM结构存在循环包含')
      else:walk(child)
     active.remove(mid);visited.add(mid)
@@ -573,6 +611,7 @@ class Services:
   system=defaultdict(list); incoming=defaultdict(list)
   materials={r['id']:dict(r) for r in self.materials()}
   for record in self.db.conn.execute('SELECT * FROM material_bom_items ORDER BY parent_material_id,sort_no,id'):
+   checkpoint()
    data=dict(record);data['material_id']=data['child_material_id']
    data['unit']=materials[data['material_id']]['unit']
    data['alternate_material_ids']=[a['material_id'] for a in self.alternates(data['id'])]
@@ -587,11 +626,13 @@ class Services:
   conflicts=[];conflict_parents=set()
   # 检查明确提供子项且系统也已有子项的每个物料，包含导入根。
   for parent,new_rows in incoming.items():
+   checkpoint()
    if not new_rows or not system.get(parent):continue
    old_by=defaultdict(list);new_by=defaultdict(list)
    for row in system[parent]:old_by[row['material_id']].append(row)
    for row in new_rows:new_by[row['material_id']].append(row)
    for mid in sorted(set(old_by)|set(new_by)):
+    checkpoint()
     old=old_by[mid];new=new_by[mid]
     if sorted(map(signature,old))==sorted(map(signature,new)):continue
     fields=[]
@@ -612,6 +653,7 @@ class Services:
    # 保留系统整个子树，包括系统叶子节点；防止较深导入定义绕过选择。
    protected=set();pending=list(conflict_parents)
    while pending:
+    checkpoint()
     parent=pending.pop()
     if parent==root and root not in conflict_parents:raise BomImportError(['保留系统子BOM会使当前导入根物料成为自身的下阶，存在循环引用，未导入'])
     if parent in protected:continue
@@ -620,6 +662,7 @@ class Services:
   # 丢弃已被替换分支中的孤立导入定义；同一父物料只保存一套定义。
   resolved=[];visited=set();pending=[root]
   while pending:
+   checkpoint()
    parent=pending.pop()
    if parent in visited:continue
    visited.add(parent)
@@ -636,18 +679,22 @@ class Services:
   if catalog_enabled(self) and not getattr(self,'scope_id',0):parents=[]  # 公共目录是历史版本缓存，不是独立SKU引用。
   result=[]
   for parent in parents:
+   checkpoint()
    usages=[]; sku_ids=[]
    for sku in self.bom_skus():
+    checkpoint()
     if any(row['material_id']==i and row['parent_material_id']==parent['id'] for row in self.bom(sku['material_id'])):
      usages.append(f"{sku['base_code']}{sku['version']} {sku['name']}"); sku_ids.append(sku['id'])
    parent_label=f"{parent['base_code']}{parent['version']} {parent['name']}"
    result.append({'parent_id':parent['id'],'sku_ids':sku_ids or [None],'sku_labels':usages or ['未包含在SKU中'],'parent_label':parent_label,'labels':[f'{label}/{parent_label}' for label in (usages or ['未包含在SKU中'])]})
   if not getattr(self,'scope_id',0):
    for sku in self.skus():
+    checkpoint()
     if not sku['scope_id']:continue
     service=self.for_sku(sku['id'])
     parent_ids={row['parent_material_id'] for row in service.bom(sku['material_id']) if row['material_id']==i}
     for parent_id in sorted(parent_ids):
+     checkpoint()
      parent=self.material_snapshot(parent_id);label=parent['base_code']+parent['version']+' '+parent['name']
      sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}"
      result.append(dict(parent_id=f"mirror:{sku['id']}:{parent_id}",material_parent_id=parent_id,sku_ids=[sku['id']],sku_labels=[sku_label],parent_label=label,labels=[sku_label+'/'+label]))
@@ -659,6 +706,7 @@ class Services:
    return actual_material_usage(self,i)
   result=[{'sku_id':sid,'sku':sku,'parent':reference['parent_label'],'parent_id':reference.get('material_parent_id',reference['parent_id'])} for reference in self.material_version_references(i) for sid,sku in zip(reference['sku_ids'],reference['sku_labels'])]
   for sku in self.skus():
+   checkpoint()
    if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}",'parent':'SKU根节点（无父级）'})
   return result
  def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
@@ -683,15 +731,18 @@ class Services:
     new_id=self.db.conn.execute('INSERT INTO materials('+','.join(columns)+',version) VALUES('+','.join('?' for _ in range(len(columns)+1))+')',values+[new_version]).lastrowid
     # 新版本继承原物料自己的下阶结构和替代料，新旧版本后续可独立维护。
     for child in self.db.conn.execute('SELECT * FROM material_bom_items WHERE parent_material_id=?',(i,)).fetchall():
+     checkpoint()
      relation=self.db.conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(new_id,child['child_material_id'],child['quantity'],child['unit'],child['position'],child['remark'],child['sort_no'])).lastrowid
      self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) SELECT ?,material_id,sort_no FROM alternates WHERE bom_item_id=?',(relation,child['id']))
     cloned_mirrors=set()
     for parent in selected:
+     checkpoint()
      if isinstance(parent,str) and parent.startswith('mirror:'):
       _,sid,parent_id=parent.split(':');service=self.for_sku(int(sid));connection=service.db.conn
       if sid not in cloned_mirrors:
        # New identity inherits the old identity's private descendants in this mirror.
        for child in connection.execute('SELECT * FROM material_bom_items WHERE parent_material_id=?',(i,)).fetchall():
+        checkpoint()
         relation=connection.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(new_id,child['child_material_id'],child['quantity'],child['unit'],child['position'],child['remark'],child['sort_no'])).lastrowid
         connection.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) SELECT ?,material_id,sort_no FROM alternates WHERE bom_item_id=?',(relation,child['id']))
        cloned_mirrors.add(sid)
@@ -701,6 +752,7 @@ class Services:
   from infrastructure.events import WindowRefreshBus
   self.publish({'type':'material_changed','id':new_id})
   for parent in selected:
+   checkpoint()
    if isinstance(parent,str):
     _,sid,parent_id=parent.split(':');self.for_sku(int(sid)).publish({'type':'bom_changed','root':int(parent_id)})
    else:self.publish({'type':'bom_changed','root':parent})
@@ -710,6 +762,7 @@ class Services:
  def alternate_groups(self,relation_ids):
   ids=list(dict.fromkeys(relation_ids));result={rid:[] for rid in ids}
   for offset in range(0,len(ids),500):
+   checkpoint()
    batch=ids[offset:offset+500]
    for row in self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id IN ('+','.join('?' for _ in batch)+') ORDER BY a.sort_no,a.id',batch):result[row['bom_item_id']].append(row)
   return result
@@ -721,7 +774,7 @@ class Services:
   # 配置中首个大小写变体为标准写法，先归一化再做重复判断和入库。
   unit_spellings={}
   for unit in self.UNITS:unit_spellings.setdefault(unit.casefold(),unit)
-  wb=load_workbook(path,read_only=True,data_only=True)
+  wb=file_work(load_workbook,path,read_only=True,data_only=True)
   try:
    if sheet_name is None:
     if len(wb.sheetnames)!=1:raise ValueError('文件包含多个工作表，请先选择物料库所在的工作表')
@@ -739,8 +792,10 @@ class Services:
    optional_indices={field:headers.index(header_mapping[field]) if header_mapping.get(field) else None for field in MATERIAL_IMPORT_DEFAULTS}
    if progress_callback: progress_callback(0,total)
    for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
+    checkpoint()
     d={k:str(row[i] if row[i] is not None else '').strip() for k,i in idx.items()};
     for field,default in MATERIAL_IMPORT_DEFAULTS.items():
+     checkpoint()
      index=optional_indices[field]
      d[field]=(str(row[index]).strip() if index is not None and index<len(row) and row[index] is not None else '') or default
     d['M/P']=d['M/P'].upper()
@@ -757,6 +812,7 @@ class Services:
     old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
     if old:
      for field,key in (('物料等级','grade'),('M/P','mp_flag')):
+      checkpoint()
       if optional_indices[field] is None:d[field]=old[key]
      same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('mp_flag','M/P'),('manufacturer','物料制造商'),('mpn','物料MPN')])
      if same:
@@ -773,11 +829,11 @@ class Services:
   finally:wb.close()
  def write_sku_list_sheet(self,ws,skus=None):
   ws.title='SKU清单';ws.append(['序号','SKU编码','SKU名称','SKU描述','版本号','修改日期时间'])
-  for n,r in enumerate(self.skus() if skus is None else skus,1):ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],r['updated_at']])
+  for n,r in enumerate(self.skus() if skus is None else skus,1):ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],seconds_timestamp(r['updated_at'])])
   self.format_export_sheet(ws,{'序号'})
  def export_sku_list(self,path):
   wb=Workbook()
-  try:self.write_sku_list_sheet(wb.active);wb.save(path)
+  try:self.write_sku_list_sheet(wb.active);file_work(wb.save,path)
   finally:wb.close()
  def export_database(self,path):
   from collections import Counter
@@ -786,18 +842,20 @@ class Services:
   self.write_material_sheet(wb.create_sheet('物料库'))
   self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
   for r in skus:
+   checkpoint()
    self.for_sku(r['id']).write_bom_sheet(wb.create_sheet((r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if counts[r['material_id']]>1 else ''))[:31]),r['material_id'])
-  wb.save(path)
+  file_work(wb.save,path)
  def export_materials(self,path):
   wb=Workbook(); ws=wb.active; ws.title='变更记录'
   self.write_change_sheet(ws,list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
   self.write_material_sheet(wb.create_sheet('物料库'))
-  wb.save(path)
+  file_work(wb.save,path)
  def write_material_sheet(self,sheet):
   from services.snapshot_bom import enabled
   extra=['是否被最新历史版本使用'] if enabled(self.db) else []
   sheet.append(['序号','物料基础编码','物料版本号','物料名称','物料规格描述','单位','物料等级','物料制造商','物料MPN','M/P','是否存在BOM结构','是否为呆滞料']+extra)
   for number,row in enumerate(self.materials(),1):
+   checkpoint()
    sheet.append([number]+[row[key] for key in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag','has_bom','idle')]+([row['latest_used']] if extra else []))
   self.format_export_sheet(sheet,{'序号','单位','物料等级','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用'})
  def write_change_sheet(self,sheet,records):
@@ -806,6 +864,7 @@ class Services:
   sheet.append(['序号','变更日期','变更时间','变更物料编码','变更物料名称','变更类型','变更详细内容'])
   legacy_codes={}
   for historical in self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id"):
+   checkpoint()
    text=historical['detail'] or ''
    base=re.search(r'基础编码：([^；\n]+)',text);version=re.search(r'版本号：([^；\n]+)',text)
    if base and version:
@@ -819,6 +878,7 @@ class Services:
   records=[row for row in records if not (row['object_type']=='bom' and (row['detail'] or '').startswith('父项 '))]
   visible=[]
   for row in records:
+   checkpoint()
    row=dict(row)
    if row['object_type']=='bom':
     lines=(row['detail'] or '').split('\n')
@@ -828,6 +888,7 @@ class Services:
      row['detail']='\n'.join(filtered)
    visible.append(row)
   for number,row in enumerate(visible,1):
+   checkpoint()
    code=row['material_code'];name=row['material_name'];detail=row['detail'] or ''
    if row['object_type']=='bom':
     changed_material=re.search(r'^物料：([^\n]+)',detail,re.MULTILINE)
@@ -868,7 +929,7 @@ class Services:
     if '删除替代料：' in detail:types.append('删除替代料')
     change_type='、'.join(types) or ('删除物料' if row['action']=='delete' else '修改物料')
    if row['object_type']=='material' and row['action']=='create':detail=''
-   changed=row['changed_at'] or ''
+   changed=seconds_timestamp(row['changed_at'])
    sheet.append([number,changed[:10],changed[11:],code,name,change_type,detail])
   self.format_export_sheet(sheet,{'序号','变更日期','变更时间'})
   sheet.auto_filter.ref=sheet.dimensions
@@ -887,6 +948,7 @@ class Services:
   sheet.cell(2,1).number_format='@'; sheet.cell(2,10).number_format='0.############'
   counters={}; numbers={}
   for row in rows:
+   checkpoint()
    parent_path=row['parent_node_id']
    counters[parent_path]=counters.get(parent_path,0)+1
    number=(numbers[parent_path] if parent_path else '1')+'.'+str(counters[parent_path])
@@ -906,8 +968,10 @@ class Services:
   row_colors=colors(self)
   palette=[row_colors.get((0,root),'') if root_color is None else root_color]+[row.get('row_color','') for row in rows]
   for index,color in enumerate(palette,2):
+   checkpoint()
    if not color:continue
    for cell in sheet[index]:
+    checkpoint()
     cell.fill=PatternFill('solid',fgColor=color[1:]);font=copy(cell.font);font.color=foreground(color)[1:];cell.font=font
  def export_purchase_bom(self,root,path):
   """汇总全部下阶物料：路径用量连乘，同版本物料合并，根物料不采购。"""
@@ -918,6 +982,7 @@ class Services:
   totals={}; path_quantities={None:Decimal('1')}; path_labels={None:material['base_code']+material['version']}
   alternate_cache={}; snapshots={}
   for row in self.bom(root):
+   checkpoint()
    quantity=path_quantities[row['parent_node_id']]*Decimal(str(row['quantity']))
    path_quantities[row['node_id']]=quantity
    label=path_labels[row['parent_node_id']]+'/'+row['base_code']+row['version']
@@ -929,6 +994,7 @@ class Services:
    if row['id'] not in alternate_cache:alternate_cache[row['id']]=list(self.alternates(row['id']))
    alternatives=alternate_cache[row['id']]
    for alternate in alternatives:
+    checkpoint()
     mid=alternate['material_id']
     if mid not in snapshots:snapshots[mid]=self.material_snapshot(mid)
     entry['alternates'].setdefault(mid,snapshots[mid])
@@ -941,11 +1007,13 @@ class Services:
   sheet.append(headers)
   try:
    for number,entry in enumerate(totals.values(),1):
+    checkpoint()
     row=entry['material']; notes=list(entry['remarks'])
     # 合并物料不代表不同使用位置的替代关系可以互换，明确标注适用范围。
     if len({frozenset(ids) for _,_,ids in entry['occurrences']})>1:
      notes.append('替代料仅适用于对应BOM位置：')
      for label,quantity,ids in entry['occurrences']:
+      checkpoint()
       codes='、'.join(snapshots[mid]['base_code']+snapshots[mid]['version'] for mid in ids) or '无替代料'
       notes.append(f'{label}（用量{format_quantity(quantity)}）：{codes}')
     values=[v for a in entry['alternates'].values() for v in (a['base_code']+a['version'],a['name'],a['description'],a['manufacturer'],a['mpn'])]
@@ -954,9 +1022,10 @@ class Services:
     sheet.append([number,row['base_code']+row['version'],row['name'],row['description'],quantity,row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn']]+values+['\n'.join(notes)])
     sheet.cell(sheet.max_row,5).number_format='0.############'
    self.format_export_sheet(sheet,{'序号','用量','单位','物料等级','M/P'})
-   wb.save(path)
+   file_work(wb.save,path)
   finally:wb.close()
  def format_export_sheet(self,sheet,centered):
+  checkpoint('正在设置Excel表格格式…')
   from openpyxl.styles import Alignment, Border, Side, Font
   from openpyxl.utils import get_column_letter
   import math, unicodedata
@@ -969,12 +1038,15 @@ class Services:
    return str(cell.value)
   widths={}
   for column,header in enumerate(headers,1):
+   checkpoint()
    longest=max(width(line) for cells in sheet.iter_rows(min_col=column,max_col=column) for line in (display(cells[0]).split('\n')))
    widths[column]=min(60,max(5,longest+2))
    sheet.column_dimensions[get_column_letter(column)].width=widths[column]
   for cells in sheet:
+   checkpoint()
    lines=1
    for cell in cells:
+    checkpoint()
     cell.border=border
     cell.alignment=Alignment(horizontal='center' if headers[cell.column-1] in centered else 'left',vertical='center',wrap_text=True)
     if cell.row==1:cell.font=Font(bold=True)
@@ -1002,4 +1074,4 @@ class Services:
   # Excel工作表名称限制：非法字符替换、31字符上限，重名由openpyxl消歧。
   title=re.sub(r'[\\/*?:\[\]]','_',name).strip().strip("'")[:31] or 'BOM'
   self.write_bom_sheet(wb.create_sheet(title),root,root_color=root_color)
-  wb.save(path)
+  file_work(wb.save,path)

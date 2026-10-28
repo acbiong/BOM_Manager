@@ -1,4 +1,5 @@
 """表格响应式列宽：保留默认宽度，宽窗口按比例填满，窄窗口横向滚动。编辑时间：2026-10-10。"""
+from infrastructure.operation_progress import checkpoint, _current
 from PyQt5.QtCore import QObject, QEvent, QTimer, Qt
 from PyQt5.QtWidgets import QHeaderView
 
@@ -42,7 +43,11 @@ class ProportionalColumns(QObject):
             if self.header.sectionSize(i) != widths[i]:
                 self.header.resizeSection(i, widths[i])
         if hasattr(self.widget, 'resizeRowsToContents'):
-            self.widget.resizeRowsToContents()
+            if _current.get() is None:self.widget.resizeRowsToContents()
+            else:
+                for row in range(self.widget.rowCount()):
+                    checkpoint('正在调整表格行高…',row,self.widget.rowCount())
+                    self.widget.resizeRowToContents(row)
 
 
 def fit_columns(widget):
@@ -52,6 +57,7 @@ def fit_columns(widget):
     widths = {}
     header.setStretchLastSection(False)
     for i in range(header.count()):
+        checkpoint('正在调整表格列宽…')
         if header.isSectionHidden(i):
             continue
         if i in getattr(widget, "_fixed_column_widths", {}):

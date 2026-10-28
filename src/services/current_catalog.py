@@ -1,3 +1,4 @@
+from infrastructure.operation_progress import checkpoint
 """Public material BOM catalog shared by latest SKU mirrors; history stays private."""
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ def enabled(service):
 def latest_skus(primary):
     latest={}
     for sku in primary.skus():
+        checkpoint()
         key=sku['material_id']
         if key not in latest or sku['mirror_version']>latest[key]['mirror_version']:latest[key]=sku
     return list(latest.values())
@@ -19,8 +21,10 @@ def latest_skus(primary):
 def groups(service):
     result={};alternates={}
     for alt in service.db.conn.execute('SELECT bom_item_id,material_id FROM alternates ORDER BY sort_no,id'):
+        checkpoint()
         alternates.setdefault(alt[0],[]).append(alt[1])
     for row in service.db.conn.execute('SELECT * FROM material_bom_items ORDER BY sort_no,id'):
+        checkpoint()
         data=dict(row);data['material_id']=data['child_material_id']
         data['alternate_material_ids']=alternates.get(data['id'],[])
         result.setdefault(data['parent_material_id'],[]).append(data)
@@ -29,6 +33,7 @@ def groups(service):
 def reachable(graph,root):
     seen=set();pending=[root]
     while pending:
+        checkpoint()
         mid=pending.pop()
         if mid in seen:continue
         seen.add(mid);pending.extend(r['material_id'] for r in graph.get(mid,[]))
@@ -39,6 +44,7 @@ def rows_for(graph,root):
     def walk(mid,path):
         if mid in path:raise ValueError('公共子BOM同步将导致循环引用，请检查物料结构')
         for source in graph.get(mid,[]):
+            checkpoint()
             row={k:v for k,v in source.items() if k not in ('id','parent_item_id','node_id','parent_node_id')}
             row.update(parent_material_id=mid,replace_children=True)
             rows.append(row);walk(row['material_id'],path|{mid})
@@ -47,15 +53,18 @@ def rows_for(graph,root):
 def write_public(primary,updates):
     conn=primary.db.conn
     for mid,rows in updates.items():
+        checkpoint()
         conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(mid,))
         conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(mid,))
         for order,row in enumerate(rows):
+            checkpoint()
             rid=conn.execute('INSERT INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(mid,row['material_id'],row['quantity'],row['unit'],row.get('position',''),row.get('remark',''),order)).lastrowid
             conn.executemany('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,?)',[(rid,aid,n) for n,aid in enumerate(row['alternate_material_ids'])])
     conn.execute('UPDATE materials SET has_bom=EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id)')
 
 def apply_to_latest(primary,updates,exclude=None):
     for sku in latest_skus(primary):
+        checkpoint()
         if sku['id']==exclude:continue
         target=primary.for_sku(sku['id']);graph=groups(target)
         used=reachable(graph,sku['material_id'])
@@ -80,6 +89,7 @@ def synchronize(service,changed_parents):
     if not updates:return
     pending=[r['material_id'] for rows in updates.values() for r in rows]
     while pending:
+        checkpoint()
         mid=pending.pop()
         if mid in updates:continue
         updates[mid]=graph.get(mid,[])
@@ -107,6 +117,7 @@ def initialize(db):
     # Last saved latest mirror wins per parent, including explicitly empty leaves.
     updates={}
     for sku in sorted(latest_skus(primary),key=lambda s:(s['updated_at'] or '',s['id'])):
+        checkpoint()
         graph=groups(primary.for_sku(sku['id']))
         for mid in reachable(graph,sku['material_id']):updates[mid]=graph.get(mid,[])
     with db.transaction():
@@ -115,6 +126,7 @@ def initialize(db):
         apply_to_latest(primary,updates)
         from services.snapshot_bom import signature
         for mid,rows in updates.items():
+            checkpoint()
             if db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
             codes=[primary.material_snapshot(r['material_id'])['base_code'] for r in rows]
             db.conn.execute('INSERT INTO bom_revision_definitions VALUES(?,?) ON CONFLICT(material_id) DO UPDATE SET child_codes=excluded.child_codes',(mid,signature(codes)))
@@ -131,14 +143,17 @@ def material_structure_sources(service):
     primary=getattr(service,'primary',service);candidates={};graphs={}
     skus=sorted(primary.skus(),key=lambda row:row['mirror_version'],reverse=True)
     for sku in skus:
+        checkpoint()
         source=primary.for_sku(sku['id']);scope=sku['scope_id']
         if scope not in graphs:
             graph={}
             for row in source.db.conn.execute('SELECT parent_material_id,child_material_id FROM material_bom_items'):
+                checkpoint()
                 graph.setdefault(row[0],set()).add(row[1])
             graphs[scope]=graph
         graph=graphs[scope];pending=[sku['material_id']];seen=set()
         while pending:
+            checkpoint()
             mid=pending.pop()
             if mid in seen:continue
             seen.add(mid);pending.extend(graph.get(mid,()))
@@ -165,6 +180,7 @@ def selection_tree(service,root):
     from services.services import Services
     nodes={};roots=[]
     for row in Services.bom(source,root):
+        checkpoint()
         node={'data':dict(row),'children':[]}
         node['data']['_db_alternates']=[a['material_id'] for a in source.alternates(row['id'])]
         nodes[row['node_id']]=node;parent=nodes.get(row['parent_node_id'])
@@ -179,6 +195,7 @@ def prune_snapshot(service):
     used=reachable(groups(service),row[0])
     parents={r[0] for r in conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items')}
     for mid in parents-used:
+        checkpoint()
         conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(mid,))
         conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(mid,))
     conn.execute('DELETE FROM alternates WHERE NOT EXISTS(SELECT 1 FROM material_bom_items b WHERE b.id=alternates.bom_item_id)')
@@ -190,9 +207,11 @@ def prune_snapshot(service):
 def prune_public(primary):
     used=set()
     for sku in latest_skus(primary):
+        checkpoint()
         used.update(reachable(groups(primary.for_sku(sku['id'])),sku['material_id']))
     conn=primary.db.conn
     for row in conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items').fetchall():
+        checkpoint()
         if row[0] not in used:
             conn.execute('DELETE FROM alternates WHERE bom_item_id IN (SELECT id FROM material_bom_items WHERE parent_material_id=?)',(row[0],))
             conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=?',(row[0],))
@@ -213,6 +232,7 @@ def ensure_indexes(db):
         db.conn.execute('CREATE INDEX IF NOT EXISTS mirror_usage_parent ON mirror_material_usage(parent_id,role,sku_id)')
         db.conn.execute('CREATE INDEX IF NOT EXISTS alternate_relation ON alternates(bom_item_id,sort_no)')
         for row in db.conn.execute('SELECT id FROM skus WHERE scope_id<>0').fetchall():
+            checkpoint()
             table=table_name(row[0],'alternates')
             db.conn.execute(f'CREATE INDEX IF NOT EXISTS {table}_relation ON {table}(bom_item_id,sort_no)')
 
@@ -228,6 +248,7 @@ def synchronization_plan(service,root,items):
     desired={mid:[] for mid in touched}
     by_id={r.get('id'):r for r in items if r.get('id') is not None}
     for original in items:
+        checkpoint()
         row=dict(original);parent=row.get('parent_material_id')
         if parent is None:
             source=by_id.get(row.get('parent_item_id'))
@@ -247,21 +268,26 @@ def synchronization_plan(service,root,items):
         for mid in old_by.keys()-new_by.keys():details.append('删除物料：'+label(mid))
         for mid in new_by.keys()-old_by.keys():details.append('新增物料：'+label(mid))
         for mid in old_by.keys()&new_by.keys():
+            checkpoint()
             a,b=old_by[mid],new_by[mid]
             from domain.quantity import format_quantity
             for key,title in [('quantity','数量'),('position','位置'),('remark','备注')]:
+                checkpoint()
                 av,bv=a.get(key,''),b.get(key,'')
                 if key=='quantity':av,bv=format_quantity(av),format_quantity(bv)
                 if av!=bv:details.append(f'{label(mid)} {title}：{av or "（空）"} → {bv or "（空）"}')
             aa=a.get('alternate_material_ids',[]);bb=b.get('alternate_material_ids',[])
             for value in aa:
+                checkpoint()
                 if value not in bb:details.append(label(mid)+' 删除替代料：'+label(value))
             for value in bb:
+                checkpoint()
                 if value not in aa:details.append(label(mid)+' 新增替代料：'+label(value))
         if not details:details.append('物料或替代料排序发生变化')
         return '\n'.join(details)
     plan=[]
     for mid,after in desired.items():
+        checkpoint()
         before=old.get(mid,[]) if mid in existing else public.get(mid,[])
         if [payload(r) for r in before]==[payload(r) for r in after]:continue
         owners={r[0] for r in primary.db.conn.execute('SELECT sku_id FROM mirror_material_usage WHERE material_id=?',(mid,))}
@@ -279,6 +305,7 @@ def save_confirmed(service,root,items,plan,selections,versions,progress=None):
     if fresh!=plan:raise ValueError('受影响的BOM或变更内容已变化，请重新保存并确认')
     partial=[p for p in plan if set(selections.get(p['material_id'],()))!={s['id'] for s in p['other_skus']}]
     for p in plan:
+        checkpoint()
         if not set(selections.get(p['material_id'],()))<={s['id'] for s in p['other_skus']}:raise ValueError('同步目标已变化')
     approved={p['material_id'] for p in plan if p not in partial}
     service._approved_catalog_parents=approved
@@ -289,13 +316,17 @@ def save_confirmed(service,root,items,plan,selections,versions,progress=None):
             mapping=save_with_revisions(service,root,items,versions,progress,required=list(conflicts.values())) if conflicts else {}
             if not conflicts:service.save_bom(root,items,progress=progress)
             for problem in partial:
+                checkpoint()
                 old=problem['material_id'];new=mapping[old]
                 source=groups(service)
                 descendants=reachable(source,new)
                 for sid in selections.get(old,[]):
+                    checkpoint()
                     target=service.primary.for_sku(sid);graph=groups(target)
                     for rows in graph.values():
+                        checkpoint()
                         for row in rows:
+                            checkpoint()
                             if row['material_id']==old:row['material_id']=new
                     for mid in descendants:graph[mid]=source.get(mid,[])
                     target._catalog_sync=True

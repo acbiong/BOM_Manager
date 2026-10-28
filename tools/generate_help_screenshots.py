@@ -51,7 +51,8 @@ def main():
         from ui.main_window import MainWindow,MaterialDialog,NewSkuDialog,MaterialHeaderMappingDialog
         from ui.material_search import MaterialSearchDialog
         app=QApplication.instance() or QApplication([])
-        main=MainWindow(svc);main.show();QApplication.processEvents()
+        from version import get_version
+        main=MainWindow(svc,get_version());main.show();QApplication.processEvents()
         capture(main,OUT/'sku_overview.png')
         main.show_materials();materials=main._materials;capture(materials,OUT/'material_library.png')
         row=svc.db.conn.execute('SELECT id FROM skus ORDER BY id LIMIT 1').fetchone()

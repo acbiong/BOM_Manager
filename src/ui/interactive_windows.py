@@ -4,6 +4,7 @@ A local event loop preserves the existing validation/transaction continuation,
 while show() (never Qt's modal exec) leaves every other window interactive.
 Native transient ownership is cleared without losing Python/Qt lifetime ownership.
 """
+from infrastructure.operation_progress import pause_progress
 from PyQt5 import sip
 from PyQt5.QtCore import Qt, QEventLoop, QObject, QEvent
 from PyQt5.QtWidgets import (QDialog as QtDialog, QMainWindow as QtMainWindow,
@@ -48,6 +49,7 @@ class OwnerGuard(QObject):
 
 
 class ResultWindow(IndependentWindow):
+    @pause_progress
     def exec_(self):
         if getattr(self,'_waiting_result',False):return QtDialog.Rejected
         self._waiting_result=True;self._context_valid=True
@@ -145,6 +147,15 @@ class QColorDialog(ResultWindow,QtColorDialog):
 
 
 class QMessageBox(ResultWindow,QtMessageBox):
+    @staticmethod
+    @pause_progress
+    def information(*args, **kwargs):return QtMessageBox.information(*args, **kwargs)
+    @staticmethod
+    @pause_progress
+    def warning(*args, **kwargs):return QtMessageBox.warning(*args, **kwargs)
+    @staticmethod
+    @pause_progress
+    def critical(*args, **kwargs):return QtMessageBox.critical(*args, **kwargs)
     def clickedButton(self):
         return super().clickedButton() if not sip.isdeleted(self) and getattr(self,'_context_valid',True) else None
     @staticmethod

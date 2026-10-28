@@ -13,6 +13,8 @@ from PyQt5.QtCore import QRect,QEvent,QCoreApplication
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication,QDialog,QWidget,QProgressDialog,QMessageBox,QInputDialog,QFileDialog
 from ui.interactive_windows import QFileDialog,QMessageBox,QProgressDialog
+from ui.operation_progress import OperationProgress
+from infrastructure.operation_progress import checkpoint
 from config.config_service import ConfigService
 from ui.window_geometry import WindowGeometryMemory
 
@@ -71,13 +73,14 @@ class DialogPlacementTests(unittest.TestCase):
   main=self.track(MainWindow(svc));main.show();main.show_materials();library=main._materials
   calls=[]
   def importing(*args,**kwargs):
+   checkpoint('正在导入物料…',1,10)
    visible=[w for w in QApplication.topLevelWidgets() if isinstance(w,QProgressDialog) and w.isVisible()]
    self.assertEqual(len(visible),1);self.assertIs(visible[0].parentWidget(),library);self.assert_centered(visible[0])
    calls.append(visible[0])
    if len(calls)==1:raise MaterialHeaderError(['编码'],['物料基础编码'])
    return [],[]
   try:
-   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(Path(self.tmp.name)/'input.xlsx'),'')),patch('ui.main_window.choose_material_sheet',return_value='Sheet'),patch.object(svc,'import_materials',side_effect=importing),patch.object(MaterialHeaderMappingDialog,'exec_',return_value=QDialog.Accepted),patch.object(MaterialImportResultDialog,'exec_',return_value=QDialog.Accepted):
+   with patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'paint_interval',0),patch.object(QFileDialog,'getOpenFileName',return_value=(str(Path(self.tmp.name)/'input.xlsx'),'')),patch('ui.main_window.choose_material_sheet',return_value='Sheet'),patch.object(svc,'import_materials',side_effect=importing),patch.object(MaterialHeaderMappingDialog,'exec_',return_value=QDialog.Accepted),patch.object(MaterialImportResultDialog,'exec_',return_value=QDialog.Accepted):
     main.import_materials()
    self.assertEqual(len(calls),2)
   finally:library.close();main.close();db.close()
@@ -89,13 +92,14 @@ class DialogPlacementTests(unittest.TestCase):
   db=Database(str(Path(self.tmp.name)/'save.db'));svc=Services(db,self.cfg)
   root=svc.create_material(dict(base_code='R',version='100',name='root',unit='pcs'));svc.create_sku(root)
   window=self.track(BomWindow(svc,root));window.show();self.app.processEvents()
-  checked=[];original=QProgressDialog.setValue
-  def update(progress,value):
-   original(progress,value)
-   for _ in range(3):self.app.processEvents()
-   self.assertIs(progress.parentWidget(),window);self.assert_centered(progress);checked.append(value)
+  checked=[];original=OperationProgress.update
+  def update(controller,message=None,current=None,total=None):
+   original(controller,message,current,total)
+   progress=controller.dialog
+   if progress is not None and progress.isVisible():
+    self.assertIs(progress.parentWidget(),window);self.assert_centered(progress);checked.append(current)
   try:
-   with patch.object(QProgressDialog,'setValue',update),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning',side_effect=AssertionError('BOM save failed')):
+   with patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'paint_interval',0),patch.object(OperationProgress,'update',update),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'warning',side_effect=AssertionError('BOM save failed')):
     self.assertTrue(window.save())
    self.assertIn(100,checked)
   finally:window.dirty=False;window.close();db.close()

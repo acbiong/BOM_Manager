@@ -1,3 +1,4 @@
+from infrastructure.operation_progress import checkpoint
 """Whole-tree SKU snapshots and immutable base-code definitions per material revision."""
 import json,re,sqlite3
 from datetime import datetime
@@ -20,9 +21,11 @@ def scope_definitions(conn,sid,root):
     table=table_name(sid,'material_bom_items') if sid else 'material_bom_items'
     groups={};graph={}
     for row in conn.execute(f'SELECT b.parent_material_id,b.child_material_id,m.base_code FROM {table} b JOIN materials m ON m.id=b.child_material_id'):
+        checkpoint()
         groups.setdefault(row[0],set()).add(row[2]);graph.setdefault(row[0],set()).add(row[1])
     pending=[root];seen=set()
     while pending:
+        checkpoint()
         mid=pending.pop()
         if mid in seen:continue
         seen.add(mid);pending.extend(graph.get(mid,()))
@@ -40,23 +43,28 @@ def migrate(db):
     # Materialize each existing effective graph before removing shared views.
     datasets={}
     for sku in skus:
+        checkpoint()
         datasets[sku['id']]={}
         for table in TABLES:
+            checkpoint()
             source=table_name(sku['id'],table) if sku['scope_id'] else table
             datasets[sku['id']][table]=[dict(r) for r in conn.execute(f'SELECT * FROM {source}')]
     with db.transaction():
         create_tables(conn)
         for sku in skus:
+            checkpoint()
             sid=sku['id'];root=sku['material_id'];data=datasets[sid]
             edges={}
             for row in data['material_bom_items']:edges.setdefault(row['parent_material_id'],[]).append(row)
             pending=[root];seen=set();relations=set()
             while pending:
+                checkpoint()
                 mid=pending.pop()
                 if mid in seen:continue
                 seen.add(mid)
                 for row in edges.get(mid,[]):relations.add(row['id']);pending.append(row['child_material_id'])
             for table in TABLES:
+                checkpoint()
                 name=table_name(sid,table)
                 kind=conn.execute('SELECT type FROM sqlite_master WHERE name=?',(name,)).fetchone()
                 if kind:conn.execute(f'DROP {kind[0].upper()} {name}')
@@ -78,6 +86,7 @@ def migrate(db):
             conn.execute(f'CREATE INDEX mirror_{sid}_parent ON {table_name(sid,"material_bom_items")}(parent_material_id)')
             conn.execute(f'CREATE INDEX mirror_{sid}_child ON {table_name(sid,"material_bom_items")}(child_material_id)')
             for mid,codes in scope_definitions(conn,sid,root).items():
+                checkpoint()
                 if conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
                 old=conn.execute('SELECT child_codes FROM bom_revision_definitions WHERE material_id=?',(mid,)).fetchone()
                 if old and old[0]!=codes:conn.execute('INSERT OR REPLACE INTO bom_revision_legacy_conflicts VALUES(?,?,?)',(sid,mid,codes))
@@ -97,9 +106,11 @@ def draft_definitions(service,root,items):
     groups={root:set()}
     retained={root}|{r['material_id'] for r in items}
     for row in service.bom(root):
+        checkpoint()
         if row['parent_material_id'] in retained:groups.setdefault(row['parent_material_id'],set())
     by_id={r.get('id'):r for r in items if r.get('id') is not None}
     for row in items:
+        checkpoint()
         parent=row.get('parent_material_id')
         if parent is None:
             ancestor=by_id.get(row.get('parent_item_id'))
@@ -130,6 +141,7 @@ def revision_conflicts(service,root,items):
     if not enabled(service.db):return []
     conflicts=[]
     for mid,codes in draft_definitions(service,root,items).items():
+        checkpoint()
         if service.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
         if mid in getattr(service,'_approved_catalog_parents',set()) or exclusive_to_current_sku(service,mid):continue
         known=service.db.conn.execute('SELECT child_codes FROM bom_revision_definitions WHERE material_id=?',(mid,)).fetchone()
@@ -141,6 +153,7 @@ def revision_conflicts(service,root,items):
 def record_definitions(service,root):
     conn=getattr(service.db.conn,'raw',service.db.conn)
     for mid,codes in scope_definitions(conn,getattr(service,'scope_id',0),root).items():
+        checkpoint()
         if conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
         if mid in getattr(service,'_approved_catalog_parents',set()) or exclusive_to_current_sku(service,mid):
             conn.execute('INSERT INTO bom_revision_definitions VALUES(?,?) ON CONFLICT(material_id) DO UPDATE SET child_codes=excluded.child_codes',(mid,codes))
@@ -155,6 +168,7 @@ def save_with_revisions(service,root,items,versions,progress=None,required=None)
     mapping={}
     with original.transaction():
         for problem in violations:
+            checkpoint()
             mid=problem['material_id'];old=service.material_snapshot(mid);version=str(versions[mid]).strip()
             if not version or version==old['version']:raise ValueError('请选择或输入不同的新版本号：'+problem['label'])
             if old['version'].isdigit() and version.isdigit() and int(version)<=int(old['version']):raise ValueError('父项新版本号必须大于原版本号：'+problem['label'])
@@ -170,6 +184,7 @@ def save_with_revisions(service,root,items,versions,progress=None,required=None)
             mapping[mid]=new_id
         rows=[]
         for original_row in items:
+            checkpoint()
             row=dict(original_row)
             if 'alternate_material_ids' not in row and row.get('id') is not None:
                 row['alternate_material_ids']=[a['material_id'] for a in service.alternates(row['id'])]
@@ -184,10 +199,12 @@ def save_with_revisions(service,root,items,versions,progress=None,required=None)
 def latest_usage(service):
     primary=getattr(service,'primary',service);skus=list(primary.skus());latest={}
     for sku in skus:
+        checkpoint()
         key=(sku['base_code'],sku['version'])
         if key not in latest or sku['mirror_version']>latest[key]['mirror_version']:latest[key]=sku
     used={sku['material_id'] for sku in latest.values()}
     for sku in latest.values():
+        checkpoint()
         used.update(row[0] for row in primary.db.conn.execute('SELECT material_id FROM mirror_material_usage WHERE sku_id=?',(sku['id'],)))
     return used
 
@@ -198,6 +215,7 @@ def material_sources(service,mid):
         sources=material_structure_sources(primary).get(mid,[])
         return [sources[0]['sku']] if sources and sources[0]['children'] else []
     for sku in primary.skus():
+        checkpoint()
         key=(sku['base_code'],sku['version'])
         if key not in latest or sku['mirror_version']>latest[key]['mirror_version']:latest[key]=sku
     owners={row[0] for row in primary.db.conn.execute('SELECT DISTINCT sku_id FROM mirror_material_usage WHERE parent_id=? AND role="main"',(mid,))}

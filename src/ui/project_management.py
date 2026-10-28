@@ -1,3 +1,5 @@
+from infrastructure.operation_progress import checkpoint
+from ui.operation_progress import operation
 """Project menu and safe database handover for the SKU window."""
 from pathlib import Path
 from PyQt5.QtCore import Qt
@@ -29,6 +31,7 @@ class ProjectManagement:
  def refresh_project_menu(self):
   self.history_menu.clear()
   for record in self.projects.entries():
+   checkpoint()
    label=' '.join(record.get(k,'').strip() for k in ('project_code','project_name')).strip() or '未命名项目'
    action=self.history_menu.addAction(label);action.setData(record['id']);action.setCheckable(True);action.setChecked(record['id']==self._project_id)
    action.triggered.connect(lambda checked=False,key=record['id']:self.open_history_project(key))
@@ -66,16 +69,19 @@ class ProjectManagement:
  def import_project_database(self):
   path=self.choose_project_database('导入项目数据库')
   if path:self.switch_project(path)
+ @operation('导入项目')
  def import_project(self):
   path=QFileDialog.getOpenFileName(self,'选择原项目config文件',str(self.svc.config_service.base),'配置文件 (*.ini);;所有文件 (*)')[0]
   if not path:return
   try:database,metadata,settings=self.projects.read_import(path)
   except Exception as error:QMessageBox.warning(self,'导入项目失败',str(error));return
   self.switch_project(database,metadata=metadata,settings=settings)
+ @operation('新建项目')
  def new_project(self):
   from ui.main_window import ProjectDialog
   dialog=ProjectDialog(self,self.projects.draft());dialog.setWindowTitle('请填写新项目信息')
   while True:
+   checkpoint()
    if dialog.exec_()!=QDialog.Accepted:return
    metadata=dialog.data();self.projects.draft(metadata)
    if metadata['project_code'] and metadata['project_name']:break
@@ -86,6 +92,7 @@ class ProjectManagement:
   if chooser.exec_()!=QDialog.Accepted:return
   paths=chooser.selectedFiles()
   if paths and self.switch_project(paths[0],metadata=metadata,create=True):self.projects.clear_draft()
+ @operation('打开项目')
  def switch_project(self,path,key=None,metadata=None,settings=None,create=False):
   from main import open_existing_database,selected_database_path
   from ui.snapshot_migration import prepare_snapshot_bom
@@ -109,6 +116,7 @@ class ProjectManagement:
    windows=set(self._material_bom_windows.values())|set(self._bom_windows.values())
    if self._materials is not None:windows.update(self._materials._local_bom_windows.values())
    for window in windows:
+    checkpoint()
     if not window.close():return False
    self.remember_current_project()
    from services.services import Services
@@ -136,6 +144,7 @@ class ProjectManagement:
   windows=set(self._material_bom_windows.values())|set(self._bom_windows.values())
   if self._materials is not None:windows.update(self._materials._local_bom_windows.values())
   for window in windows:
+   checkpoint()
    if not window.close():return False
   self.remember_current_project()
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close();self._compare_dialog.deleteLater();self._compare_dialog=None
