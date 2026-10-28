@@ -24,7 +24,8 @@ def restore_project(config,cfg):
  from infrastructure.project_lock import ProjectInUseError
  registry=ProjectRegistry(config);value=cfg['database'].get('path','').strip()
  key=cfg.get('projects','active',fallback='') or None
- candidate=None;preserve_memory=False
+ candidate=None;remembered_failed=False
+ remembered_path=value;remembered_key=key
  if not value:
   if cfg.getboolean('projects','closed',fallback=False):return None
   record=registry.get(key) if key else None
@@ -39,6 +40,7 @@ def restore_project(config,cfg):
   # Activation/settings are committed only after database validation succeeds.
   try:candidate=str(config.resolve_path(value))
   except ValueError:candidate=value
+ remembered_value=value
  while True:
   db=None;occupied=False
   try:
@@ -54,19 +56,23 @@ def restore_project(config,cfg):
   except Exception as error:
    if db is not None:db.close()
    occupied=isinstance(error,ProjectInUseError)
-   preserve_memory=preserve_memory or occupied
+   if not occupied and (candidate or value)==remembered_value:remembered_failed=True
+   elif not occupied:
+    try:remembered_failed=remembered_failed or selected_database_path(candidate or value)==config.resolve_path(remembered_value)
+    except (OSError,ValueError):pass
    reason=database_error_message(error,candidate or value)
   while True:
    choice=occupied_choice(reason) if occupied else recovery_choice(reason)
    if choice=='close':
-    if preserve_memory:
-     # Only this launch is closed: another instance still owns the remembered project.
-     # main() uses this in-memory path to enter the empty SKU window. Never save it.
-     cfg['database']['path']='';return None
-    latest=config.load();latest['database']['path']=''
-    if not latest.has_section('projects'):latest.add_section('projects')
-    latest.remove_option('projects','active');latest['projects']['closed']='true'
-    config.save(latest);cfg['database']['path']='';return None
+    # Occupancy is not a broken project. Only clear a failed remembered target,
+    # and never overwrite a newer selection made by another instance.
+    latest=config.load()
+    if remembered_failed and latest.get('database','path',fallback='')==remembered_path and (latest.get('projects','active',fallback='') or None)==remembered_key:
+     latest['database']['path']=''
+     if not latest.has_section('projects'):latest.add_section('projects')
+     latest.remove_option('projects','active');latest['projects']['closed']='true'
+     config.save(latest)
+    cfg['database']['path']='';return None
    if choice=='select':
     selected=QFileDialog.getOpenFileName(None,'指定项目数据库',str(config.base),'SQLite (*.db *.sqlite *.sqlite3);;所有文件 (*)')[0]
     if not selected:continue

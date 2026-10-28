@@ -102,9 +102,28 @@ class StartupProjectRestoreTests(unittest.TestCase):
   with patch.object(QInputDialog,'getItem',return_value=('',False)):
    self.assertIsNone(restore_project(self.config,self.config.load()))
   self.assertEqual(before,self.config.path.read_bytes())
- def test_explicit_close_does_not_reopen_and_activation_clears_closed_flag(self):
+ def test_explicit_close_preserves_memory_and_next_launch_restores(self):
   self.windows[0].close_project()
-  with patch.object(QInputDialog,'getItem') as chooser:self.assertIsNone(restore_project(self.config,self.config.load()))
-  chooser.assert_not_called();self.assertTrue(self.config.load().getboolean('projects','closed'))
-  self.registry.activate(self.key)
-  self.assertFalse(self.config.load().getboolean('projects','closed'))
+  self.assertEqual(self.config.load()['projects']['active'],self.key)
+  with patch.object(QInputDialog,'getItem') as chooser:db=restore_project(self.config,self.config.load())
+  self.dbs.append(db);chooser.assert_not_called();self.assertEqual(Path(db.path),self.path)
+
+ def test_corrupt_database_clears_remembered_path(self):
+  self.s.db.close();self.path.write_bytes(b'corrupt')
+  with patch('ui.startup_project.recovery_choice',return_value='close'):
+   self.assertIsNone(restore_project(self.config,self.config.load()))
+  self.assertEqual(self.config.load()['database']['path'],'')
+
+ def test_open_failure_clears_remembered_path(self):
+  with patch('main.open_existing_database',side_effect=OSError('cannot open')),patch('ui.startup_project.recovery_choice',return_value='close'):
+   self.assertIsNone(restore_project(self.config,self.config.load()))
+  self.assertEqual(self.config.load()['database']['path'],'')
+
+ def test_failed_old_target_does_not_clear_another_instances_new_project(self):
+  self.missing();other=self.base/'other.db';Database(str(other)).close()
+  def choose(reason):
+   self.registry.remember(other,dict(project_name='新工程'),active=True)
+   return 'close'
+  with patch('ui.startup_project.recovery_choice',side_effect=choose):
+   self.assertIsNone(restore_project(self.config,self.config.load()))
+  self.assertEqual(self.config.load()['database']['path'],'other.db')

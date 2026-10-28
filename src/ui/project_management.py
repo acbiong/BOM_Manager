@@ -148,14 +148,10 @@ class ProjectManagement:
   for window in windows:
    checkpoint()
    if not window.close():return False
-  self.remember_current_project()
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close();self._compare_dialog.deleteLater();self._compare_dialog=None
   if self._materials is not None:self._materials.close()
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
-  config=self.svc.config_service.load();config['database']['path']=''
-  if not config.has_section('projects'):config.add_section('projects')
-  config.remove_option('projects','active');config['projects']['closed']='true'
-  self.svc.config_service.save(config)
+  # Closing this window is not evidence that its remembered database is invalid.
   if self.svc.db is not None:self.svc.db.close()
   self.svc.db=None;self._project_id=None;self.refresh();return True
  def handle_occupied_project(self,error):
