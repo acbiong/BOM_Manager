@@ -57,7 +57,7 @@ class ProjectOwnershipTests(unittest.TestCase):
   with patch('ui.startup_project.occupied_choice',return_value='close') as choice,patch('ui.startup_project.recovery_choice') as recovery:
    self.assertIsNone(restore_project(config,config.load()));choice.assert_called_once();recovery.assert_not_called()
   self.assertEqual(owner.conn.execute('PRAGMA integrity_check').fetchone()[0],'ok')
-  self.assertEqual(config.load()['database']['path'],'')
+  self.assertEqual(config.load()['database']['path'],'one.db')
   with self.assertRaises(ProjectInUseError):ProjectLock(self.path).require()
  def test_two_windows_different_projects_busy_switch_close_only_requesting_window(self):
   config=ConfigService(self.base)
@@ -116,3 +116,32 @@ class ProjectOwnershipTests(unittest.TestCase):
    with patch.object(dialog,'fit_mapping_columns') as fit:dialog.run_mapping_fit();fit.assert_not_called()
    sip.delete(dialog.combos['物料名称']);dialog.fit_mapping_columns()
   finally:dialog.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
+
+ def test_busy_empty_instance_preserves_memory_through_window_close_and_next_launch(self):
+  from config.project_registry import ProjectRegistry
+  config=ConfigService(self.base);registry=ProjectRegistry(config)
+  key=registry.remember(self.path,dict(project_code='ONE',project_name='工程一'),active=True)
+  owner=Database(str(self.path),exclusive=True);self.dbs.append(owner)
+  before=config.path.read_bytes();launch=config.load()
+  with patch('ui.startup_project.occupied_choice',return_value='close'):
+   self.assertIsNone(restore_project(config,launch))
+  self.assertEqual(launch['database']['path'],'')
+  self.assertEqual(config.path.read_bytes(),before)
+  empty=MainWindow(Services(None,config));self.windows.append(empty)
+  self.assertIsNone(empty.svc.db);self.assertEqual(empty.table.rowCount(),0)
+  with patch('ui.startup_project.occupied_choice',return_value='close'):
+   self.assertFalse(empty.switch_project(self.path))
+  self.assertTrue(empty.close_project());empty.close()
+  persisted=config.load();self.assertEqual(persisted['database']['path'],'one.db')
+  self.assertEqual(persisted['projects']['active'],key);self.assertFalse(persisted.getboolean('projects','closed'))
+  owner.close()
+  reopened=restore_project(config,config.load());self.dbs.append(reopened)
+  self.assertEqual(Path(reopened.path),self.path)
+
+ def test_empty_instance_does_not_clear_project_selected_by_another_instance(self):
+  from config.project_registry import ProjectRegistry
+  config=ConfigService(self.base);empty=MainWindow(Services(None,config));self.windows.append(empty)
+  other=self.base/'two.db';Database(str(other)).close()
+  key=ProjectRegistry(ConfigService(self.base)).remember(other,dict(project_name='另一个项目'),active=True)
+  before=config.path.read_bytes();self.assertTrue(empty.close_project());empty.close()
+  self.assertEqual(config.path.read_bytes(),before);self.assertEqual(config.load()['projects']['active'],key)

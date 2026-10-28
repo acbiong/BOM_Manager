@@ -141,6 +141,8 @@ class ProjectManagement:
    if created_path is not None:created_path.unlink(missing_ok=True)
 
  def close_project(self):
+  # An empty instance has no project to close and must not clear shared startup memory.
+  if self.svc.db is None:return True
   windows=set(self._material_bom_windows.values())|set(self._bom_windows.values())
   if self._materials is not None:windows.update(self._materials._local_bom_windows.values())
   for window in windows:

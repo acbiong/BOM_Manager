@@ -24,7 +24,7 @@ def restore_project(config,cfg):
  from infrastructure.project_lock import ProjectInUseError
  registry=ProjectRegistry(config);value=cfg['database'].get('path','').strip()
  key=cfg.get('projects','active',fallback='') or None
- candidate=None
+ candidate=None;preserve_memory=False
  if not value:
   if cfg.getboolean('projects','closed',fallback=False):return None
   record=registry.get(key) if key else None
@@ -54,10 +54,15 @@ def restore_project(config,cfg):
   except Exception as error:
    if db is not None:db.close()
    occupied=isinstance(error,ProjectInUseError)
+   preserve_memory=preserve_memory or occupied
    reason=database_error_message(error,candidate or value)
   while True:
    choice=occupied_choice(reason) if occupied else recovery_choice(reason)
    if choice=='close':
+    if preserve_memory:
+     # Only this launch is closed: another instance still owns the remembered project.
+     # main() uses this in-memory path to enter the empty SKU window. Never save it.
+     cfg['database']['path']='';return None
     latest=config.load();latest['database']['path']=''
     if not latest.has_section('projects'):latest.add_section('projects')
     latest.remove_option('projects','active');latest['projects']['closed']='true'
