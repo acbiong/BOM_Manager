@@ -58,7 +58,7 @@ class OperationProgress:
         screen = self.owner.screen() if self.owner is not None else QApplication.primaryScreen()
         if screen is not None:dialog.move(dialog.pos()+screen.availableGeometry().center()-dialog.frameGeometry().center())
         # Do not process clicks, timers, or queued save/refresh slots mid-transaction.
-        QApplication.sendPostedEvents(None, QEvent.UpdateRequest)
+        QApplication.sendPostedEvents(dialog, QEvent.UpdateRequest)
         dialog.repaint()
 
     def pause(self):
@@ -72,6 +72,8 @@ class OperationProgress:
     def close(self, failed=False):
         elapsed = (time.perf_counter()-self.started)*1000
         if self.dialog is not None and not sip.isdeleted(self.dialog):
+            # Stop Qt busy-bar style animations before scheduling destruction.
+            self.dialog.setRange(0,100)
             self.dialog.close();self.dialog.deleteLater()
         record = dict(operation=self.title, ms=round(elapsed, 2), progress_shown=self.shown, failed=failed)
         RECENT_OPERATIONS.append(record)

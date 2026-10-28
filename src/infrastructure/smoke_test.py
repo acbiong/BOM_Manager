@@ -21,6 +21,7 @@ def run_smoke_test(report_path):
         from openpyxl import load_workbook
         import xlrd
         from services.external_bom import ExcelSource,build_external_bom,ALIASES
+        owns_app = QApplication.instance() is None
         app = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory(prefix='bom-smoke-') as tmp:
             lock_target=Path(tmp)/'lock-test.db';lock_target.touch()
@@ -78,6 +79,12 @@ def run_smoke_test(report_path):
     finally:
         for window in windows:window.close()
         if db is not None:db.close()
+        # Destroy native windows while QApplication is still alive, rather than
+        # relying on Python/Qt shutdown order with pending widget timers.
+        if locals().get('owns_app',False):
+            from PyQt5.QtCore import QEvent
+            for window in app.topLevelWidgets():window.deleteLater()
+            app.sendPostedEvents(None,QEvent.DeferredDelete)
         from ui.operation_progress import RECENT_OPERATIONS
         report['operation_timings']=list(RECENT_OPERATIONS)
         Path(report_path).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
