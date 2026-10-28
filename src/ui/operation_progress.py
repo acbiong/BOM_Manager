@@ -30,7 +30,8 @@ class OperationProgress:
         if self.paused is not None:return
         now = time.perf_counter()
         if message:self.message = message
-        if now-self.started < self.threshold or now-self.last_paint < self.paint_interval:return
+        complete=total is not None and total>0 and current==total
+        if now-self.started < self.threshold or (not complete and now-self.last_paint < self.paint_interval):return
         if self.owner is not None and sip.isdeleted(self.owner):return
         self.last_paint = now
         if self.dialog is None:

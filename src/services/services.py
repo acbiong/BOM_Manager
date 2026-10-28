@@ -1,5 +1,5 @@
 from domain.timestamps import seconds_timestamp
-from infrastructure.operation_progress import checkpoint, file_work
+from infrastructure.operation_progress import checkpoint, file_work, progress_stage
 from domain.quantity import format_quantity
 import math
 """业务服务层：物料、SKU、BOM、日志和Excel；UI不得直接访问数据库。编辑时间：2026-09-24。"""
@@ -838,13 +838,23 @@ class Services:
  def export_database(self,path):
   from collections import Counter
   skus=list(self.skus());counts=Counter(r['material_id'] for r in skus)
-  wb=Workbook();self.write_sku_list_sheet(wb.active,skus)
-  self.write_material_sheet(wb.create_sheet('物料库'))
-  self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
-  for r in skus:
-   checkpoint()
-   self.for_sku(r['id']).write_bom_sheet(wb.create_sheet((r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if counts[r['material_id']]>1 else ''))[:31]),r['material_id'])
-  file_work(wb.save,path)
+  sheet_count=len(skus)+3;total=sheet_count+1
+  wb=Workbook()
+  try:
+   with progress_stage(f'正在生成工作表 1/{sheet_count}：SKU清单',0,total):
+    self.write_sku_list_sheet(wb.active,skus)
+   with progress_stage(f'正在生成工作表 2/{sheet_count}：物料库',1,total):
+    self.write_material_sheet(wb.create_sheet('物料库'))
+   with progress_stage(f'正在生成工作表 3/{sheet_count}：变更记录',2,total):
+    self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
+   for index,r in enumerate(skus,3):
+    title=(r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if counts[r['material_id']]>1 else ''))[:31]
+    with progress_stage(f'正在生成工作表 {index+1}/{sheet_count}：{title}',index,total):
+     self.for_sku(r['id']).write_bom_sheet(wb.create_sheet(title),r['material_id'])
+   with progress_stage(f'{sheet_count}张工作表已生成，正在写入Excel文件…',sheet_count,total):
+    file_work(wb.save,path)
+   checkpoint('资料库导出完成',total,total)
+  finally:wb.close()
  def export_materials(self,path):
   wb=Workbook(); ws=wb.active; ws.title='变更记录'
   self.write_change_sheet(ws,list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))

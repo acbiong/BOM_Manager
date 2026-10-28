@@ -616,7 +616,10 @@ class MainWindow(ProjectManagement,QMainWindow):
  @operation('导出资料库')
  def export_database(self):
   p=QFileDialog.getSaveFileName(self,'导出资料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 资料库').strip()),self.svc),'Excel (*.xlsx)')[0]
-  if p:remember_export_path(p,self.svc); self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
+  if not p:return
+  try:
+   self.svc.export_database(p);remember_export_path(p,self.svc);QMessageBox.information(self,'完成','资料库导出成功')
+  except Exception as error:show_operation_error(self,'导出资料库失败',error)
  def edit_project(self):
   d=ProjectDialog(self,self.svc.project())
   if d.exec_(): self.svc.update_project(d.data()); self.remember_current_project(); self.refresh()

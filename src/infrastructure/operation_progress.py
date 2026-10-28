@@ -5,9 +5,12 @@ from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 _current = ContextVar('operation_progress', default=None)
+_stage = ContextVar('operation_progress_stage', default=None)
 
 
 def checkpoint(message=None, current=None, total=None):
+    stage = _stage.get()
+    if stage is not None:message, current, total = stage
     controller = _current.get()
     if controller is not None and not getattr(controller,'_updating',False):
         controller._updating=True
@@ -44,12 +47,14 @@ def file_work(function, *args, **kwargs):
 def suspend_progress():
     controller = _current.get()
     token = _current.set(None)
+    stage_token = _stage.set(None)
     if controller is not None:controller.pause()
     try:
         yield
     finally:
         if controller is not None:controller.resume()
         _current.reset(token)
+        _stage.reset(stage_token)
 
 
 def pause_progress(function):
@@ -57,3 +62,14 @@ def pause_progress(function):
     def wrapped(*args, **kwargs):
         with suspend_progress():return function(*args, **kwargs)
     return wrapped
+
+
+@contextmanager
+def progress_stage(message, completed, total):
+    """Nested row/format/I/O checkpoints preserve the enclosing operation's scale."""
+    token = _stage.set((message, completed, total))
+    try:
+        checkpoint()
+        yield
+    finally:
+        _stage.reset(token)
