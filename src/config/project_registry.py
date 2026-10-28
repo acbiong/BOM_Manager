@@ -7,7 +7,7 @@ from config.config_service import ConfigService,read_config_file
 
 FIELDS=('project_code','project_name','product_name','product_model')
 SETTINGS=('materials','import_mappings')
-HISTORY=('last_import_dir','last_bom_import_dir','last_compare_bom_file')
+HISTORY=('last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir')
 
 class ProjectRegistry:
  def __init__(self,config):self.config=config
@@ -42,7 +42,9 @@ class ProjectRegistry:
   settings=json.loads(r.get('settings','{}'))
   for section in SETTINGS:
    if section in settings:c[section]=settings[section]
+  same_project=c.get('projects','active',fallback='')==key
   for field in HISTORY:
+   if same_project and c.get('database',field,fallback=''):continue
    c.remove_option('database',field)
    if settings.get('database',{}).get(field):c['database'][field]=settings['database'][field]
   if not c.has_section('projects'):c.add_section('projects')

@@ -331,17 +331,33 @@ def export_filename(text):
  import re
  return re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', text).strip().rstrip('.')+'.xlsx'
 
-def export_start_path(filename):
- import sys
- from PyQt5.QtCore import QSettings
- settings=QSettings('Biong','BOMManager'); folder=settings.value('export_directory','')
- if not folder or not Path(folder).is_dir():
-  folder=str((Path(os.environ.get('APPIMAGE')).resolve().parent if os.environ.get('APPIMAGE') else (Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[2])))
- return str(Path(folder)/filename)
+def export_path_config(service=None):
+ if service is not None and service.config_service is not None:return service.config_service
+ if service is not None and service.db is not None:return ConfigService(Path(service.db.path).parent)
+ from main import app_base
+ return ConfigService(app_base())
 
-def remember_export_path(path):
- from PyQt5.QtCore import QSettings
- QSettings('Biong','BOMManager').setValue('export_directory',str(Path(path).resolve().parent))
+def export_start_path(filename,service=None):
+ config=export_path_config(service);stored=config.load()['database'].get('last_export_dir','')
+ folder=None
+ if stored:
+  try:
+   candidate=config.resolve_path(stored)
+   if candidate.is_dir():folder=candidate
+  except (OSError,ValueError):pass
+ else:
+  # One-time compatibility with older releases' machine-local Qt settings.
+  legacy=QSettings('Biong','BOMManager').value('export_directory','')
+  if legacy and Path(legacy).is_dir():
+   try:
+    cfg=config.load();cfg['database']['last_export_dir']=str(legacy);config.save(cfg);folder=Path(legacy)
+   except (OSError,ValueError):pass
+ return str((folder or config.base)/filename)
+
+def remember_export_path(path,service=None):
+ from ui.import_paths import local_import_path
+ config=export_path_config(service);cfg=config.load()
+ cfg['database']['last_export_dir']=str(local_import_path(path).parent);config.save(cfg)
 
 
 def export_material_structure(parent,service,material_id,root_color=None):
@@ -354,10 +370,10 @@ def export_material_structure(parent,service,material_id,root_color=None):
  sku=service.db.conn.execute('SELECT material_id,mirror_version FROM skus WHERE id=?',(sid,)).fetchone() if sid else None
  suffix=' 历史版本'+str(sku['mirror_version']) if sku and getattr(service,'scope_id',0) else ''
  filename=export_filename(material['base_code']+material['version']+' '+material['name']+suffix)
- path=QFileDialog.getSaveFileName(parent,'导出BOM结构',export_start_path(filename),'Excel (*.xlsx)')[0]
+ path=QFileDialog.getSaveFileName(parent,'导出BOM结构',export_start_path(filename,service),'Excel (*.xlsx)')[0]
  if not path:return
  try:
-  remember_export_path(path)
+  remember_export_path(path,service)
   if sku and sku['material_id']==material_id:service.export_sku(sid,path)
   else:service.export_bom_structure(material_id,path,root_color=root_color)
   QMessageBox.information(parent,'完成','BOM结构导出成功')
@@ -592,15 +608,15 @@ class MainWindow(ProjectManagement,QMainWindow):
  def export_sku_list(self):
   if self.svc.db is None:return
   project=self.svc.project();name=' '.join(part for part in (project['project_code'],project['project_name'],'SKU清单') if part)
-  path=QFileDialog.getSaveFileName(self,'导出SKU清单',export_start_path(export_filename(name)),'Excel (*.xlsx)')[0]
+  path=QFileDialog.getSaveFileName(self,'导出SKU清单',export_start_path(export_filename(name),self.svc),'Excel (*.xlsx)')[0]
   if not path:return
   try:
-   self.svc.export_sku_list(path);remember_export_path(path);QMessageBox.information(self,'完成','SKU清单导出成功')
+   self.svc.export_sku_list(path);remember_export_path(path,self.svc);QMessageBox.information(self,'完成','SKU清单导出成功')
   except Exception as error:show_operation_error(self,'导出失败',error)
  @operation('导出资料库')
  def export_database(self):
-  p=QFileDialog.getSaveFileName(self,'导出资料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 资料库').strip())),'Excel (*.xlsx)')[0]
-  if p:remember_export_path(p); self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
+  p=QFileDialog.getSaveFileName(self,'导出资料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 资料库').strip()),self.svc),'Excel (*.xlsx)')[0]
+  if p:remember_export_path(p,self.svc); self.svc.export_database(p); QMessageBox.information(self,'完成','资料库导出成功')
  def edit_project(self):
   d=ProjectDialog(self,self.svc.project())
   if d.exec_(): self.svc.update_project(d.data()); self.remember_current_project(); self.refresh()
@@ -769,9 +785,9 @@ class MainWindow(ProjectManagement,QMainWindow):
  @operation('批量导出BOM')
  def export_sku_batch(self,sids,purchase=False):
   title='批量采购BOM导出' if purchase else '批量导出BOM'
-  folder=QFileDialog.getExistingDirectory(self,title+'：选择统一导出文件夹',str(Path(export_start_path('BOM.xlsx')).parent))
+  folder=QFileDialog.getExistingDirectory(self,title+'：选择统一导出文件夹',str(Path(export_start_path('BOM.xlsx',self.svc)).parent))
   if not folder:return
-  remember_export_path(Path(folder)/'BOM.xlsx')
+  remember_export_path(Path(folder)/'BOM.xlsx',self.svc)
   success=[];failed=[]
   for sid in sids:
    checkpoint()
@@ -794,9 +810,9 @@ class MainWindow(ProjectManagement,QMainWindow):
   if not row:return
   title='采购BOM导出' if purchase else '导出BOM'
   filename=row['base_code']+row['version']+' '+row['name']+(' 历史版本'+str(row['mirror_version']) if row['scope_id'] else '')+(' 采购BOM' if purchase else '')
-  p=str(destination) if destination is not None else QFileDialog.getSaveFileName(self,title,export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
+  p=str(destination) if destination is not None else QFileDialog.getSaveFileName(self,title,export_start_path(export_filename(filename),self.svc),'Excel (*.xlsx)')[0]
   if p:
-   remember_export_path(p)
+   remember_export_path(p,self.svc)
    if purchase:self.svc.for_sku(sid).export_purchase_bom(row['material_id'],p)
    else:self.svc.export_sku(sid,p)
    if notify:QMessageBox.information(self,'完成',title+'成功')
@@ -836,13 +852,13 @@ class MainWindow(ProjectManagement,QMainWindow):
   return window
  @operation('导出物料库')
  def export_materials(self):
-  p=QFileDialog.getSaveFileName(self,'导出物料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 物料库').strip())),'Excel (*.xlsx)')[0]
-  if p:remember_export_path(p); self.svc.export_materials(p); QMessageBox.information(self,'完成','导出成功')
+  p=QFileDialog.getSaveFileName(self,'导出物料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 物料库').strip()),self.svc),'Excel (*.xlsx)')[0]
+  if p:remember_export_path(p,self.svc); self.svc.export_materials(p); QMessageBox.information(self,'完成','导出成功')
  @operation('导出物料模板')
  def template(self):
-  p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx'),'Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx',self.svc),'Excel (*.xlsx)')[0]
   if p:
-   remember_export_path(p)
+   remember_export_path(p,self.svc)
    from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); file_work(w.save,p); w.close()
 class BomImportIssuesDialog(QDialog):
  def __init__(self,error,parent=None):
@@ -1847,9 +1863,9 @@ class BomWindow(QMainWindow):
   if not self.purchase_export_action.isEnabled():return
   material=self.svc.material_snapshot(self.root)
   filename=material['base_code']+material['version']+' '+material['name']+self.mirror_suffix()+' 采购BOM'
-  p=QFileDialog.getSaveFileName(self,'采购BOM导出',export_start_path(export_filename(filename)),'Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'采购BOM导出',export_start_path(export_filename(filename),self.svc),'Excel (*.xlsx)')[0]
   if p:
-   remember_export_path(p);self.svc.export_purchase_bom(self.root,p);QMessageBox.information(self,'完成','采购BOM导出成功')
+   remember_export_path(p,self.svc);self.svc.export_purchase_bom(self.root,p);QMessageBox.information(self,'完成','采购BOM导出成功')
  @operation('导出BOM')
  def export_bom(self):
   if not self.export_action.isEnabled():return
@@ -2129,13 +2145,13 @@ class MaterialWindow(QMainWindow):
    except Exception as error:show_operation_error(self,'导入失败',error)
  @operation('导出物料库')
  def export_materials(self):
-  p=QFileDialog.getSaveFileName(self,'导出物料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 物料库').strip())),'Excel (*.xlsx)')[0]
-  if p:remember_export_path(p); self.svc.export_materials(p)
+  p=QFileDialog.getSaveFileName(self,'导出物料库',export_start_path(export_filename((self.svc.project()['project_code']+' '+self.svc.project()['project_name']+' 物料库').strip()),self.svc),'Excel (*.xlsx)')[0]
+  if p:remember_export_path(p,self.svc); self.svc.export_materials(p)
  @operation('导出物料模板')
  def template(self):
-  p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx'),'Excel (*.xlsx)')[0]
+  p=QFileDialog.getSaveFileName(self,'导出模板',export_start_path('物料模板.xlsx',self.svc),'Excel (*.xlsx)')[0]
   if p:
-   remember_export_path(p)
+   remember_export_path(p,self.svc)
    from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); file_work(w.save,p); w.close()
  def on_event(self,event):
   if event.get('type') in ('material_changed','bom_changed','sku_changed','sku_order_changed'): WindowRefreshBus.refresh(self.refresh)

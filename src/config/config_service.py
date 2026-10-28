@@ -71,19 +71,19 @@ class ConfigService:
   return (self.base/self.relative_path(value)).resolve()
  def _normalize_paths(self,c,strict=True):
   if not c.has_section('database'):return
-  for key in ('path','last_import_dir','last_bom_import_dir','last_compare_bom_file'):
+  for key in ('path','last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir'):
    value=c['database'].get(key,'')
    if not value:continue
    try:c['database'][key]=self.relative_path(value)
    except ValueError:
-    if key in ('last_import_dir','last_bom_import_dir','last_compare_bom_file'):c.remove_option('database',key)
+    if key in ('last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir'):c.remove_option('database',key)
     elif strict:raise
  def save(self,c):
   self._normalize_paths(c)
   proposed={s:dict(c[s]) for s in c.sections()}
   with self._mutex():
    before=getattr(c,'_bom_snapshot',None)
-   if before is None:self._write(c)
+   if before is None:current=c
    else:
     current=ConfigParser(interpolation=None)
     if self.path.exists():current=read_config_file(self.path)
@@ -93,7 +93,22 @@ class ConfigService:
      for key in set(before.get(section,{}))|set(proposed[section]):
       if key not in proposed[section]:current.remove_option(section,key)
       elif key not in before.get(section,{}) or proposed[section][key]!=before[section][key]:current[section][key]=proposed[section][key]
-    self._write(current)
+   # Persist changed chooser paths into the active project's snapshot immediately;
+   # a later project activation must not restore an obsolete directory.
+   history=('last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir')
+   changed_paths=[k for k in history if proposed.get('database',{}).get(k)!= (before or {}).get('database',{}).get(k)]
+   active=current.get('projects','active',fallback='');section='project:'+active
+   if changed_paths and active and current.has_section(section):
+    import json
+    try:settings=json.loads(current[section].get('settings','{}'))
+    except (ValueError,TypeError):settings={}
+    if not isinstance(settings,dict):settings={}
+    if not isinstance(settings.get('database'),dict):settings['database']={}
+    for key in changed_paths:
+     if key in proposed.get('database',{}):settings['database'][key]=proposed['database'][key]
+     else:settings['database'].pop(key,None)
+    current[section]['settings']=json.dumps(settings,ensure_ascii=False)
+   self._write(current)
   c._bom_snapshot=proposed
  def _write(self,c):
   self.base.mkdir(parents=True,exist_ok=True)
