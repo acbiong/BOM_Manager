@@ -1361,9 +1361,9 @@ class BomWindow(QMainWindow):
  def capture_tree(self):
   return [self.capture_item(self.root_item.child(n)) for n in range(self.root_item.childCount())]
  def database_tree(self,root=None):
-  roots=[]; nodes={}; alternate_cache={}
-  for row in self.svc.bom(self.root if root is None else root):
-   if row['id'] not in alternate_cache:alternate_cache[row['id']]=[r['material_id'] for r in self.svc.alternates(row['id'])]
+  roots=[]; nodes={};rows=self.svc.bom(self.root if root is None else root)
+  alternate_cache={rid:[r['material_id'] for r in values] for rid,values in self.svc.alternate_groups(row['id'] for row in rows).items()}
+  for row in rows:
    node={'data':dict(row),'children':[]}; node['data']['_db_alternates']=alternate_cache[row['id']]; nodes[row['node_id']]=node
    parent=nodes.get(row['parent_node_id'])
    (parent['children'] if parent else roots).append(node)
@@ -1591,10 +1591,9 @@ class BomWindow(QMainWindow):
   self._loading_fields=False
   self.alt_table.setRowCount(0)
   if not (item.data(0,Qt.UserRole) or {}).get('root'):
-   materials={row['id']:row for row in self.svc.materials()}
    for material_id in self.alternate_ids(item):
-    r=materials.get(material_id)
-    if r is None:continue
+    r=self.svc.material_snapshot(material_id)
+    if not r:continue
     row=self.alt_table.rowCount(); self.alt_table.insertRow(row)
     for j,k in enumerate(['base_code','version','name','description','manufacturer','mpn']):
      cell=QTableWidgetItem(str(r[k] or '')); cell.setData(Qt.UserRole,material_id); self.alt_table.setItem(row,j,cell)

@@ -22,10 +22,11 @@ def snapshot(service, sku):
     root.update(material_id=sku['material_id'], quantity=1, children=[], alternates='', alternate_ids=frozenset(), alternate_codes=frozenset(), level=0, serial='1', parent_code='ROOT')
     nodes = {None: root}
     alternate_cache = {}
-    for source in scoped.bom(sku['material_id']):
+    rows=scoped.bom(sku['material_id']);groups=scoped.alternate_groups(row['id'] for row in rows)
+    for source in rows:
         row = dict(source)
         if row['id'] not in alternate_cache:
-            alternatives=[dict(x) for x in scoped.alternates(row['id'])]
+            alternatives=[dict(x) for x in groups[row['id']]]
             alternate_cache[row['id']] = ('\n'.join(sorted(
                 ' | '.join(str(a.get(k) or '') for k in
                            ('base_code','version','name','description','manufacturer','mpn'))

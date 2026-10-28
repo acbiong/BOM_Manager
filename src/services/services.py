@@ -216,11 +216,15 @@ class Services:
   """递归展开物料关系表，返回兼容BOM编辑器的扁平树行。"""
   from services.bom_colors import colors
   row_colors=colors(self)
-  result=[]
+  result=[];children={}
+  # Operation-local snapshot: each reachable edge is fetched once even when
+  # shared subassemblies appear on many paths. UNION terminates cyclic data.
+  for row in self.db.conn.execute('WITH RECURSIVE reachable(mid) AS (SELECT ? UNION SELECT b.child_material_id FROM material_bom_items b JOIN reachable r ON b.parent_material_id=r.mid) SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.grade,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN reachable r ON r.mid=b.parent_material_id JOIN materials m ON m.id=b.child_material_id ORDER BY b.sort_no,b.id',(root,)):
+   children.setdefault(row['parent_material_id'],[]).append(row)
   def walk(parent_id,level,parent_item_id,parent_node_id,ancestors):
    if parent_id in ancestors:return
    ancestors=ancestors|{parent_id}
-   rows=self.db.conn.execute('SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.grade,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN materials m ON m.id=b.child_material_id WHERE b.parent_material_id=? ORDER BY b.sort_no,b.id',(parent_id,)).fetchall()
+   rows=children.get(parent_id,[])
    for r in rows:
     if r['child_material_id'] in ancestors:continue
     node_id=f"{parent_node_id or ''}/{r['id']}"
@@ -703,6 +707,12 @@ class Services:
   return new_id
  def add_alternate(self,bom_item_id,material_id):
   with self.db.transaction(): self.db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(?,?,COALESCE((SELECT MAX(sort_no)+1 FROM alternates WHERE bom_item_id=?),0))',(bom_item_id,material_id,bom_item_id))
+ def alternate_groups(self,relation_ids):
+  ids=list(dict.fromkeys(relation_ids));result={rid:[] for rid in ids}
+  for offset in range(0,len(ids),500):
+   batch=ids[offset:offset+500]
+   for row in self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id IN ('+','.join('?' for _ in batch)+') ORDER BY a.sort_no,a.id',batch):result[row['bom_item_id']].append(row)
+  return result
  def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
  def remove_alternate(self,aid):
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
@@ -761,20 +771,22 @@ class Services:
    if progress_callback: progress_callback(total,total)
    return ok,fail
   finally:wb.close()
- def write_sku_list_sheet(self,ws):
+ def write_sku_list_sheet(self,ws,skus=None):
   ws.title='SKU清单';ws.append(['序号','SKU编码','SKU名称','SKU描述','版本号','修改日期时间'])
-  for n,r in enumerate(self.skus(),1):ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],r['updated_at']])
+  for n,r in enumerate(self.skus() if skus is None else skus,1):ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],r['updated_at']])
   self.format_export_sheet(ws,{'序号'})
  def export_sku_list(self,path):
   wb=Workbook()
   try:self.write_sku_list_sheet(wb.active);wb.save(path)
   finally:wb.close()
  def export_database(self,path):
-  wb=Workbook();self.write_sku_list_sheet(wb.active)
+  from collections import Counter
+  skus=list(self.skus());counts=Counter(r['material_id'] for r in skus)
+  wb=Workbook();self.write_sku_list_sheet(wb.active,skus)
   self.write_material_sheet(wb.create_sheet('物料库'))
   self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
-  for r in self.skus():
-   self.for_sku(r['id']).write_bom_sheet(wb.create_sheet((r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if sum(x['material_id']==r['material_id'] for x in self.skus())>1 else ''))[:31]),r['material_id'])
+  for r in skus:
+   self.for_sku(r['id']).write_bom_sheet(wb.create_sheet((r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if counts[r['material_id']]>1 else ''))[:31]),r['material_id'])
   wb.save(path)
  def export_materials(self,path):
   wb=Workbook(); ws=wb.active; ws.title='变更记录'
@@ -863,12 +875,12 @@ class Services:
  def write_bom_sheet(self,sheet,root,root_color=None):
   headers=['序号','层级','父项编码','父项版本','物料基础编码','物料版本号','物料名称','物料规格描述','物料位置','用量','单位','物料等级','M/P','制造商','MPN','备注']
   rows=self.bom(root)
-  alternates={row['id']:list(self.alternates(row['id'])) for row in rows}
+  alternates=self.alternate_groups(row['id'] for row in rows)
   count=max((len(values) for values in alternates.values()),default=0)
   alternate_headers=[f'替代料{number}{field}' for number in range(1,count+1) for field in ('物料编码','版本号','名称','供应商','MPN')]
   headers=headers[:-1]+alternate_headers+['备注']
   sheet.append(headers)
-  materials={row['id']:row for row in self.materials()}
+  materials={row['id']:row for row in self.db.conn.execute('SELECT * FROM materials')}
   # 根SKU也属于导出的BOM：ROOT标记便于导入时核对根物料身份。
   material=materials[root]
   sheet.append(['1',0,'ROOT','ROOT',material['base_code'],material['version'],material['name'],material['description'],'',1.0,material['unit'],material['grade'],material['mp_flag'],material['manufacturer'],material['mpn']]+['']*(count*5)+[''])
