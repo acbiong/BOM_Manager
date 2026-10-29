@@ -1,15 +1,26 @@
-"""100ms delayed, nonmodal progress; paint without re-entering application slots."""
+"""100ms delayed, nonmodal progress; native painting with guarded application operations."""
 import inspect
 import logging
 import time
 from collections import deque
 from functools import wraps
 from PyQt5 import sip
-from PyQt5.QtCore import Qt, QEvent, QThread
+from PyQt5.QtCore import Qt, QEvent, QThread, QEventLoop, QObject, QTimer
 from PyQt5.QtWidgets import QApplication, QWidget
 from infrastructure.operation_progress import _current
 
 RECENT_OPERATIONS = deque(maxlen=200)
+
+
+class _PaintGuard(QObject):
+    """Leave timer delivery pending and reject native close while work is active."""
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Timer:
+            return True  # QTimer has not received it; its registered timer remains active.
+        if event.type() == QEvent.Close:
+            event.ignore()
+            return True
+        return False
 
 
 class OperationProgress:
@@ -25,6 +36,8 @@ class OperationProgress:
         self.dialog = None
         self.paused = None
         self.shown = False
+        self.dispatching = False
+        self.pending_operations = []
 
     def update(self, message=None, current=None, total=None):
         if self.paused is not None:return
@@ -58,7 +71,24 @@ class OperationProgress:
             dialog.show();self.shown = True
         screen = self.owner.screen() if self.owner is not None else QApplication.primaryScreen()
         if screen is not None:dialog.move(dialog.pos()+screen.availableGeometry().center()-dialog.frameGeometry().center())
-        # Do not process clicks, timers, or queued save/refresh slots mid-transaction.
+        # Dispatch native map/expose events: repaint alone cannot expose a new native window.
+        app = QApplication.instance()
+        guard = _PaintGuard()
+        app.installEventFilter(guard)
+        self.dispatching = True
+        try:
+            flags = (QEventLoop.ExcludeUserInputEvents | QEventLoop.ExcludeSocketNotifiers |
+                     QEventLoop.X11ExcludeTimers)
+            QApplication.processEvents(flags)
+            # X11 mapping is asynchronous. Give the first expose a bounded
+            # opportunity to arrive before repainting the backing store.
+            deadline = time.monotonic() + .030
+            while not dialog.windowHandle().isExposed() and time.monotonic() < deadline:
+                QThread.msleep(1)
+                QApplication.processEvents(flags)
+        finally:
+            self.dispatching = False
+            app.removeEventFilter(guard)
         QApplication.sendPostedEvents(dialog, QEvent.UpdateRequest)
         dialog.repaint()
 
@@ -76,6 +106,9 @@ class OperationProgress:
             # Stop Qt busy-bar style animations before scheduling destruction.
             self.dialog.setRange(0,100)
             self.dialog.close();self.dialog.deleteLater()
+        for callback in self.pending_operations:
+            QTimer.singleShot(0, callback)
+        self.pending_operations.clear()
         record = dict(operation=self.title, ms=round(elapsed, 2), progress_shown=self.shown, failed=failed)
         RECENT_OPERATIONS.append(record)
         logging.getLogger(__name__).info('operation_timing %s', record)
@@ -90,6 +123,15 @@ def operation(title, owner=None):
             # Qt normally drops excess signal arguments; decorators must retain that behavior.
             if maximum is not None:args=args[:maximum]
             app = QApplication.instance()
+            active = _current.get()
+            if active is not None and active.dispatching:
+                # Queued Qt slots can arrive with expose events. Run the entire
+                # operation after the current transaction/refresh has finished.
+                def later():
+                    if args and isinstance(args[0], QWidget) and sip.isdeleted(args[0]):return
+                    wrapped(*args, **kwargs)
+                active.pending_operations.append(later)
+                return None
             if app is None or QThread.currentThread() != app.thread() or _current.get() is not None:
                 return function(*args, **kwargs)
             parent = args[0] if args and isinstance(args[0], QWidget) else app.activeWindow()

@@ -56,10 +56,27 @@ class OperationProgressTests(unittest.TestCase):
   calls=[]
   @operation('按钮测试')
   def handler():
-   QTimer.singleShot(0,lambda:calls.append('timer'))
+   timer=QTimer();timer.setSingleShot(True);timer.timeout.connect(lambda:calls.append('timer'));timer.start(0)
+   self.timer=timer
    time.sleep(.105);checkpoint('处理中')
    self.assertNotIn('timer',calls)
    calls.append('done')
   button=QPushButton();button.clicked.connect(handler);button.click()
   self.assertEqual(calls,['done']);self.app.processEvents();self.assertIn('timer',calls)
   button.close()
+
+ def test_queued_operation_waits_until_current_operation_finishes(self):
+  from PyQt5.QtCore import QTimer
+  calls=[]
+  @operation('排队保存')
+  def save():calls.append('save')
+  @operation('导出')
+  def export():
+   QTimer.singleShot(0,save)
+   time.sleep(.105);checkpoint('正在导出',1,2)
+   self.assertEqual(calls,[])
+   calls.append('export done')
+  export()
+  self.assertEqual(calls,['export done'])
+  self.app.processEvents()
+  self.assertEqual(calls,['export done','save'])
