@@ -764,6 +764,8 @@ class MainWindow(ProjectManagement,QMainWindow):
   else:lock=menu.addAction('取消锁定' if locked else '锁定SKU')
   menu.addSeparator();copy=menu.addAction('复制BOM');compare=menu.addAction('BOM对比')
   copy.setEnabled(not multiple);compare.setEnabled(not multiple)
+  menu.addSeparator();copy_code=menu.addAction('复制SKU编码');copy_name=menu.addAction('复制SKU名称')
+  copy_code.setEnabled(not multiple);copy_name.setEnabled(not multiple)
   menu.addSeparator();export_action=menu.addAction('导出BOM');purchase_action=menu.addAction('采购BOM导出')
   menu.addSeparator();delete=menu.addAction('删除SKU');delete.setEnabled(not locked and not multiple)
   action=menu.exec_(self.table.viewport().mapToGlobal(pos))
@@ -774,6 +776,9 @@ class MainWindow(ProjectManagement,QMainWindow):
    if multiple:self.set_selected_sku_locks(sids,True)
    else:self.toggle_sku_lock(sid)
   elif action==unlock:self.set_selected_sku_locks(sids,False)
+  elif action in (copy_code,copy_name):
+   material=self.svc.db.conn.execute('SELECT m.base_code,m.version,m.name FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
+   if material:QApplication.clipboard().setText(material['base_code']+material['version'] if action==copy_code else material['name'])
   elif action==description:self.edit_sku_change_description(sid)
   elif action==copy:self.copy_sku_bom(sid)
   elif action==compare:self.compare_sku_bom(sid)
@@ -2073,8 +2078,11 @@ class MaterialWindow(QMainWindow):
   export=m.addAction('导出BOM结构') if material['has_bom']=='Y' else None
   reverse=m.addAction('物料反查') if material['idle']=='N' else None
   m.addSeparator();similar=m.addAction('类似新增物料');copy=m.addAction('复制物料')
+  m.addSeparator();copy_code=m.addAction('复制物料编码');copy_name=m.addAction('复制物料名称')
   m.addSeparator();d=m.addAction('删除物料');d.setEnabled(material['idle']=='Y')
   a=m.exec_(self.t.viewport().mapToGlobal(pos))
+  if a in (copy_code,copy_name):
+   QApplication.clipboard().setText(material['base_code']+material['version'] if a==copy_code else material['name']);return
   if a==similar:
    show_create_material(self,data=dict(self.svc.material_snapshot(rid)));return
   if a==copy:copy_material(self.svc,rid); return

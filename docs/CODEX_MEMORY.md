@@ -1126,3 +1126,11 @@ Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出�
 - 审查全源码进度窗口创建点，仅有共用组件实际创建QProgressDialog；因此覆盖导入、保存、刷新、比较及各导出入口。短操作100ms门槛、居中、用户交互期间隐藏、异常关闭不变。无UI布局变更，不需替换帮助静态截图。
 - tools/check_native_export_progress.py使用只读源数据库backup副本进行真实资料库/物料库导出与物料导入；另外以可控慢任务检查各入口的共用组件。抓取屏幕像素而非QWidget.grab，记录原生exposed与源库哈希。源数据库不修改；测试报告与截图在test_reports/native_progress_after*。
 - 回归补充普通计时器延后、排队保存不重入；保留阈值、嵌套、线程边界、异常、暂停、进度单调与窗口定位覆盖。完整收尾及打包证据见test_reports/finish_native_progress.log。
+
+
+## 2026-10-29：清单右键复制编码和名称
+
+- SKU单选右键新增“复制SKU编码”“复制SKU名称”，多选禁用，锁定SKU仍可复制。
+- 物料库右键新增“复制物料编码”“复制物料名称”，复制右键目标行的值。
+- 编码为基础编码直接拼接物料版本号，不含连接符或BOM历史版本号；名称保留原文。使用系统文本剪贴板，与原复制BOM/复制物料结构命令分组。
+- 打包时重新生成实际界面静态截图，包含更新后的右键菜单。测试报告见test_reports/finish_copy_labels.log。
