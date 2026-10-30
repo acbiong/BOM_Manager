@@ -1,4 +1,4 @@
-from infrastructure.operation_progress import checkpoint, file_work
+from infrastructure.operation_progress import checkpoint, file_work, silent_progress
 from ui.operation_progress import operation
 """Aligned, read-only side-by-side BOM comparison."""
 from difflib import SequenceMatcher
@@ -121,6 +121,7 @@ class BomCompareDialog(QDialog):
         self.button=QPushButton('对比');self.button.clicked.connect(self.compare);layout.addWidget(self.button)
         self.live_timer=QTimer(self);self.live_timer.setSingleShot(True);self.live_timer.timeout.connect(self.live_refresh)
         self._rows=[];self._compared=False
+        self._choices_dirty=False
         self.external_sources={};self._chosen=[None,None]
         for side,combo in enumerate((self.left,self.right)):
             checkpoint()
@@ -134,16 +135,19 @@ class BomCompareDialog(QDialog):
         if event.get('type')=='sku_order_changed':
             self.reload_choices();return
         if event.get('type') in ('bom_draft_changed','bom_changed','material_changed','sku_changed'):
-            self.live_timer.start(0)
+            # Merge consecutive text edits; final state is compared after a short pause.
+            if event.get('type') in ('material_changed','sku_changed'):self._choices_dirty=True
+            self.live_timer.start(200 if event.get('type')=='bom_draft_changed' else 0)
+    @silent_progress()
     def live_refresh(self):
         compared=self._compared
-        self.reload_choices()
+        if self._choices_dirty:self.reload_choices();self._choices_dirty=False
         if self.left.currentData() is None or self.right.currentData() is None:self.clear_results();return
         if compared:
             positions=[(t.horizontalScrollBar().value(),t.verticalScrollBar().value()) for t in self.tables]
             for table in self.tables:table.setUpdatesEnabled(False)
             try:
-                self.compare()
+                self.compare(quiet=True)
                 for table,(x,y) in zip(self.tables,positions):
                     checkpoint()
                     table.horizontalScrollBar().setValue(x);table.verticalScrollBar().setValue(y)
@@ -152,15 +156,23 @@ class BomCompareDialog(QDialog):
     def live_snapshot(self,sku):
         main=self.parent();window=getattr(main,'_bom_windows',{}).get(sku['id'])
         if window is None or not window.dirty:return snapshot(self.service,sku)
+        material_cache={};alternate_cache={}
+        def material(mid):
+            if mid not in material_cache:material_cache[mid]=window.svc.material_snapshot(mid)
+            return material_cache[mid]
         def node(item,parent=None,path=()):
             data=dict(item.data(0,Qt.UserRole) or {})
             mid=data.get('material_id',window.root)
-            result=dict(data);result.update(window.svc.material_snapshot(mid))
+            result=dict(data);result.update(material(mid))
             for key in ('quantity','position','remark'):
                 checkpoint()
                 if key in data:result[key]=data[key]
-            ids=window.alternate_ids(item) if parent else []
-            alternatives=[window.svc.material_snapshot(i) for i in ids]
+            if parent:
+                key=window.alternate_key(item)
+                if key not in alternate_cache:alternate_cache[key]=window.alternate_ids(item)
+                ids=alternate_cache[key]
+            else:ids=[]
+            alternatives=[material(i) for i in ids]
             result.update(material_id=mid,children=[],alternate_ids=frozenset(ids),alternate_codes=frozenset((a['base_code'],a['version']) for a in alternatives),
                 alternates='\n'.join(sorted(' | '.join(str(a.get(k) or '') for k in ('base_code','version','name','description','manufacturer','mpn')) for a in alternatives)),
                 level=len(path),parent_code=(str(parent['base_code'])+str(parent['version'])) if parent else 'ROOT',_material_path=path)
@@ -335,23 +347,37 @@ class BomCompareDialog(QDialog):
                 if was_compared:self.compare()
 
     @operation('BOM对比')
-    def compare(self):
+    def compare(self,quiet=False):
+        self.live_timer.stop()
+        if self._choices_dirty:self.reload_choices();self._choices_dirty=False
         if self.left.currentData() is None or self.right.currentData() is None:return
         if 'load_external' in (self.left.currentData(),self.right.currentData()):return
         try:rows=file_work(compare_trees,self.selected_snapshot(self.left.currentData()),self.selected_snapshot(self.right.currentData()))
         except Exception as exc:
-            self.clear_results();QMessageBox.warning(self,'BOM对比失败',str(exc));self.reload_choices();return
-        self.clear_results()
+            self.clear_results()
+            if quiet:self.summary.setText('BOM对比暂未更新：'+str(exc))
+            else:QMessageBox.warning(self,'BOM对比失败',str(exc))
+            self.reload_choices();return
+        previous=self._rows
+        reuse=quiet and len(previous)==len(rows)
+        changed_rows=set();changed_columns=set()
+        if not reuse:self.clear_results()
         names={'added':'新增','deleted':'删除','modified':'修改','same':'相同','replaced':'换料','exchanged':'交换'}
         for table in self.tables:table.setRowCount(len(rows))
+        def display_signature(diff):
+            return (diff.status,diff.changed,tuple(tuple(display_value(node,key) for key,_ in DISPLAY_FIELDS) if node else None for node in (diff.left,diff.right)))
         for r,diff in enumerate(rows):
             checkpoint()
+            if reuse and display_signature(diff)==display_signature(previous[r]):continue
+            changed_rows.add(r)
             for table,node,other in ((self.tables[0],diff.left,diff.right),(self.tables[1],diff.right,diff.left)):
                 checkpoint()
                 side_status=diff.status
                 texts=([names[side_status]]+[display_value(node,k) for k,_ in DISPLAY_FIELDS]) if node else ['']*(len(DISPLAY_FIELDS)+1)
                 for c,text in enumerate(texts):
                     checkpoint()
+                    old_item=table.item(r,c)
+                    if old_item is None or old_item.text()!=text:changed_columns.add(c)
                     item=QTableWidgetItem(text);table.setItem(r,c,item);item.setToolTip(text)
                     field=DISPLAY_FIELDS[c-1][0] if c else 'status'
                     if field in ('status','level','serial','unit','quantity','mp_flag'):item.setTextAlignment(Qt.AlignCenter)
@@ -368,8 +394,8 @@ class BomCompareDialog(QDialog):
                             item.setData(RICH_TEXT_ROLE,character_diff(text,'' if field=='material_code' else peer,color))
                             font=item.font();font.setStrikeOut(side_status=='deleted');item.setFont(font)
         self._rows=rows;self._compared=True
-        self.auto_columns()
-        self.align_rows()
+        widths_changed=self.auto_columns(changed_columns if reuse else None)
+        self.align_rows(changed_rows if reuse and not widths_changed else None)
         self.apply_difference_filter()
         counts={s:sum(d.status==s for d in rows) for s in names}
         self.summary.setText('；'.join(f'{names[s]}：{counts[s]}' for s in names)+'（含根节点，排序变化不作为内容差异）')
@@ -400,11 +426,12 @@ class BomCompareDialog(QDialog):
             for bar in bars:bar.blockSignals(False)
             for table in self.tables:table.setUpdatesEnabled(True)
 
-    def auto_columns(self):
+    def auto_columns(self,columns=None):
+        changed=False
         font=QFont(self.font());font.setBold(True);metrics=QFontMetrics(font)
         self.max_column_width=metrics.horizontalAdvance('中')*20
         for table in self.tables:table.horizontalHeader().setMaximumSectionSize(self.max_column_width)
-        for col in range(self.tables[0].columnCount()):
+        for col in (range(self.tables[0].columnCount()) if columns is None else sorted(columns)):
             checkpoint()
             width=metrics.horizontalAdvance(self.tables[0].horizontalHeaderItem(col).text())+20
             for table in self.tables:
@@ -414,7 +441,13 @@ class BomCompareDialog(QDialog):
                     for line in table.item(row,col).text().splitlines():
                         checkpoint()
                         width=max(width,metrics.horizontalAdvance(line)+12)
-            for table in self.tables:table.setColumnWidth(col,min(self.max_column_width,width))
+            for table in self.tables:
+                target=max(table.horizontalHeader().minimumSectionSize(),min(self.max_column_width,width))
+                before=table.columnWidth(col)
+                if before!=target:
+                    table.setColumnWidth(col,target)
+                    changed=changed or table.columnWidth(col)!=before
+        return changed
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
@@ -427,14 +460,19 @@ class BomCompareDialog(QDialog):
         if event.key()==Qt.Key_Escape and self.isFullScreen():
             self.toggle_fullscreen();event.accept();return
         super().keyPressEvent(event)
-    def align_rows(self):
+    def align_rows(self,rows=None):
+        self.row_timer.stop()
         if not self.tables or not self.tables[0].rowCount():return
         # Block intermediate scrollbar range/value updates while recomputing heights.
         position=self.tables[0].verticalScrollBar().value()
         bars=[t.verticalScrollBar() for t in self.tables]
         for bar in bars:bar.blockSignals(True)
-        for table in self.tables:table.resizeRowsToContents()
-        for row in range(self.tables[0].rowCount()):
+        selected=range(self.tables[0].rowCount()) if rows is None else sorted(rows)
+        for table in self.tables:
+            if rows is None:table.resizeRowsToContents()
+            else:
+                for row in selected:table.resizeRowToContents(row)
+        for row in selected:
             checkpoint()
             height=max(t.rowHeight(row) for t in self.tables)
             for table in self.tables:

@@ -7,7 +7,7 @@ from functools import wraps
 from PyQt5 import sip
 from PyQt5.QtCore import Qt, QEvent, QThread, QEventLoop, QObject, QTimer
 from PyQt5.QtWidgets import QApplication, QWidget
-from infrastructure.operation_progress import _current
+from infrastructure.operation_progress import _current, _silent
 
 RECENT_OPERATIONS = deque(maxlen=200)
 
@@ -130,6 +130,7 @@ def operation(title, owner=None):
         def wrapped(*args, **kwargs):
             # Qt normally drops excess signal arguments; decorators must retain that behavior.
             if maximum is not None:args=args[:maximum]
+            if _silent.get():return function(*args, **kwargs)
             app = QApplication.instance()
             active = _current.get()
             if active is not None and active.dispatching:

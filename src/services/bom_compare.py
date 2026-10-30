@@ -3,6 +3,7 @@ from domain.quantity import format_quantity
 """Read-only, parent-local comparison of saved SKU/mirror graphs."""
 from difflib import SequenceMatcher
 from dataclasses import dataclass
+from collections import defaultdict, deque
 
 FIELDS = [('level','层级'),('serial','序号'),('parent_code','父项物料编码'),('base_code','物料编码'),('version','版本号'),('name','物料名称'),
           ('description','规格'),('quantity','用量'),('unit','单位'),('grade','物料等级'),
@@ -61,10 +62,13 @@ def align_children(left, right):
     reordering; positional replacement is only used for otherwise unmatched rows.
     """
     pairs = {}; unused = set(range(len(right)))
+    exact = defaultdict(deque)
+    for j,node in enumerate(right):exact[node['base_code'],node.get('version')].append(j)
     for i,node in enumerate(left):
         checkpoint()
-        j = next((j for j in sorted(unused) if (right[j]['base_code'],right[j].get('version'))==(node['base_code'],node.get('version'))),None)
-        if j is not None:pairs[i]=j;unused.remove(j)
+        matches=exact[node['base_code'],node.get('version')]
+        if matches:
+            j=matches.popleft();pairs[i]=j;unused.remove(j)
     # Explicit reciprocal main/alternate identities outrank names or positions.
     for i,node in enumerate(left):
         checkpoint()

@@ -354,13 +354,14 @@ class BomCompareTests(unittest.TestCase):
    self.assertEqual(window.tree.currentItem().data(0,Qt.UserRole)['material_id'],self.a)
    self.assertEqual(window.tree.currentItem().parent().data(0,Qt.UserRole)['material_id'],self.c)
    item=window.tree.currentItem();data=dict(item.data(0,Qt.UserRole));data['quantity']=9;item.setData(0,Qt.UserRole,data);window.mark_dirty()
-   self.app.processEvents();self.app.processEvents()
+   from PyQt5.QtTest import QTest
+   QTest.qWait(250)
    self.assertEqual(dialog._rows[4].left['quantity'],9)
    self.assertEqual(dialog._rows[4].right['quantity'],1)
    self.assertEqual(dialog._rows[4].status,'modified')
    dialog.open_editor(0,4);self.assertIs(main._bom_windows[self.sid],window)
    self.assertIs(window.tree.currentItem(),item)
-   window.dirty=False;window.close();self.app.processEvents();self.app.processEvents()
+   window.dirty=False;window.close();QTest.qWait(250)
    self.assertTrue(all(d.status=='same' for d in dialog._rows))
   finally:
    if getattr(main,'_compare_dialog',None):main._compare_dialog.close()
@@ -425,3 +426,57 @@ class BomCompareTests(unittest.TestCase):
    main.compare_sku_bom(copy);self.assertEqual(dialog.left.currentData(),copy);self.assertEqual(dialog._rows,[]);self.app.processEvents();self.assertFalse(dialog._compared);dialog.button.click();self.assertEqual(dialog._rows[1].status,'modified')
    main.compare_boms();self.assertEqual(dialog.left.currentData(),copy);self.assertEqual(dialog.right.currentData(),self.sid);self.assertFalse(dialog._compared);self.assertEqual(dialog._rows,[])
   finally:main.close()
+ def test_typing_debounces_live_compare_without_progress_and_reuses_unchanged_rows(self):
+  from unittest.mock import patch
+  from PyQt5.QtTest import QTest
+  from ui.main_window import MainWindow
+  from ui.operation_progress import OperationProgress
+  self.put(self.s,self.r,[(self.p,1,{}),(self.c,1,{})]);copied=self.s.copy_sku_bom(self.sid);main=MainWindow(self.s)
+  try:
+   main.compare_boms();dialog=main._compare_dialog
+   dialog.left.setCurrentIndex(dialog.left.findData(self.sid));dialog.right.setCurrentIndex(dialog.right.findData(copied));dialog.compare()
+   editor=main.open_bom_id(self.sid);editor.show_item_info(editor.root_item.child(0));untouched=dialog.tables[0].item(2,0)
+   with patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'update',wraps=OperationProgress.update) as progress,patch.object(dialog,'compare',wraps=dialog.compare) as compare:
+    for i in range(20):editor.update_tree_field('remark',f'连续输入{i}')
+    compare.assert_not_called();QTest.qWait(300)
+    self.assertEqual(compare.call_count,1);progress.assert_not_called()
+   self.assertEqual(dialog._rows[1].left['remark'],'连续输入19')
+   self.assertIs(dialog.tables[0].item(2,0),untouched)
+   self.assertEqual(dialog._rows[1].status,'modified')
+   with patch.object(dialog.tables[0],'resizeRowsToContents',wraps=dialog.tables[0].resizeRowsToContents) as resize:
+    dialog.live_refresh();resize.assert_not_called()
+  finally:
+   for window in list(main._bom_windows.values()):window.dirty=False;window.close()
+   main.close();self.app.processEvents()
+ def test_live_snapshot_reuses_shared_material_reads_only_within_call(self):
+  from unittest.mock import patch
+  from ui.main_window import MainWindow
+  self.put(self.s,self.r,[(self.p,1,{}),(self.c,1,{})]);self.put(self.s,self.p,[(self.a,1,{})]);self.put(self.s,self.c,[(self.a,1,{})]);main=MainWindow(self.s)
+  try:
+   editor=main.open_bom_id(self.sid);editor.dirty=True;dialog=BomCompareDialog(self.s,main);sku=dict(self.s.skus()[0])
+   with patch.object(editor.svc,'material_snapshot',wraps=editor.svc.material_snapshot) as read:
+    dialog.live_snapshot(sku);self.assertEqual(read.call_count,4)
+    dialog.live_snapshot(sku);self.assertEqual(read.call_count,8)
+   dialog.close()
+  finally:
+   for window in list(main._bom_windows.values()):window.dirty=False;window.close()
+   main.close();self.app.processEvents()
+ def test_exact_identity_alignment_is_linear_even_for_reversed_siblings(self):
+  from services.bom_compare import align_children
+  class Counted(dict):
+   reads=0
+   def __getitem__(self,key):
+    if key=='base_code':Counted.reads+=1
+    return super().__getitem__(key)
+  nodes=[Counted(base_code=str(i),version='100',material_id=i) for i in range(2000)]
+  pairs=list(align_children(nodes,list(reversed(nodes))))
+  self.assertEqual(len(pairs),2000);self.assertTrue(all(a is b for a,b in pairs));self.assertLessEqual(Counted.reads,8000)
+ def test_live_compare_failure_stays_inline_and_restores_progress_context(self):
+  from unittest.mock import patch
+  from infrastructure.operation_progress import _silent,_current
+  dialog=BomCompareDialog(self.s);dialog.left.setCurrentIndex(1);dialog.right.setCurrentIndex(1);dialog.compare()
+  try:
+   with patch('ui.bom_compare.compare_trees',side_effect=ValueError('测试外部文件失效')),patch('ui.bom_compare.QMessageBox.warning') as warning:
+    dialog.live_refresh();warning.assert_not_called()
+   self.assertIn('测试外部文件失效',dialog.summary.text());self.assertFalse(_silent.get());self.assertIsNone(_current.get())
+  finally:dialog.close()

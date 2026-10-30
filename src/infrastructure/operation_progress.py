@@ -6,6 +6,16 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 _current = ContextVar('operation_progress', default=None)
 _stage = ContextVar('operation_progress_stage', default=None)
+_silent = ContextVar('operation_progress_silent', default=False)
+
+
+@contextmanager
+def silent_progress():
+    """Background UI synchronization must never create a progress window."""
+    silent_token=_silent.set(True);token=_current.set(None);stage_token=_stage.set(None)
+    try:yield
+    finally:
+        _stage.reset(stage_token);_current.reset(token);_silent.reset(silent_token)
 
 
 def checkpoint(message=None, current=None, total=None):
