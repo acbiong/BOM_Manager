@@ -16,7 +16,7 @@ def capture(widget,path):
     pix.save(str(path),'PNG')
 
 def main():
-    from help_screenshot_cache import reusable, record
+    from help_screenshot_cache import reusable, record as record_cache
     from ui.help_guides import GUIDE_KEYS
     expected=['sku_overview','material_library','bom_window','menu_theme']+[f'step{i:02d}_{x}' for i,x in [(1,'project'),(2,'material'),(3,'mapping'),(4,'sku'),(5,'bom_tree'),(6,'bom_edit'),(7,'bom_info'),(8,'export'),(9,'bom_lock'),(10,'search')]]+['tip%02d_%s'%v for v in [(1,'filter'),(2,'clipboard'),(3,'colors'),(4,'shared'),(5,'mapping'),(6,'theme')]]+GUIDE_KEYS
     if 'BOM_HELP_CONFIG' in os.environ and not CONFIG.is_file():
@@ -37,7 +37,7 @@ def main():
             if image.suffix in ('.png','.json'):shutil.copy2(image,OUT/image.name)
         missing=[name for name in expected if not (OUT/(name+'.png')).is_file()]
         if missing:raise SystemExit('缺少帮助截图：'+','.join(missing))
-        record(ROOT,OUT)
+        record_cache(ROOT,OUT)
         print('使用随源码提供的静态帮助截图');return
     from config.config_service import read_config_file
     source_config=ConfigService(CONFIG.parent); raw=read_config_file(CONFIG)
@@ -97,6 +97,6 @@ def main():
     expected+=GUIDE_KEYS
     missing=[x for x in expected if not (OUT/(x+'.png')).is_file()]
     if missing:raise SystemExit('缺少帮助截图：'+','.join(missing))
-    record(ROOT,OUT)
+    record_cache(ROOT,OUT)
     print(f'帮助静态截图已生成：{len(expected)}张，数据源：{dbpath}')
 if __name__=='__main__':main()
