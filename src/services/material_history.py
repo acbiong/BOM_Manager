@@ -59,6 +59,17 @@ def versions(service, mid):
         'SELECT history_version,created_at,source_sku_id FROM material_histories WHERE material_id=? ORDER BY history_version DESC', (mid,))]
 
 
+def sku_references(service, mid, version):
+    """Actual bindings to this exact revision, including older SKU histories."""
+    if not enabled(service):return []
+    ids={r[0] for r in connection(service).execute(
+        'SELECT b.sku_id FROM material_history_bindings b JOIN skus s ON s.id=b.sku_id '
+        'WHERE b.material_id=? AND b.history_version=?',(mid,version))}
+    primary=getattr(service,'primary',service)
+    return sorted((dict(s) for s in primary.skus() if s['id'] in ids),
+                  key=lambda s:(s['base_code'],s['version'],-s['mirror_version'],s['id']))
+
+
 def read(service, mid, version):
     row = connection(service).execute(
         'SELECT * FROM material_histories WHERE material_id=? AND history_version=?', (mid, version)).fetchone()

@@ -1,7 +1,7 @@
 """Nonmodal material history decisions and immutable subtree inspection."""
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QDialogButtonBox, QRadioButton, QTreeWidget, QTreeWidgetItem, QAbstractItemView,QScrollArea)
+    QDialogButtonBox, QRadioButton, QTreeWidget, QTreeWidgetItem, QAbstractItemView,QScrollArea,QWidget,QFormLayout,QHBoxLayout,QComboBox,QSplitter,QGroupBox)
 from ui.interactive_windows import QDialog,QMessageBox
 from services import material_history as history
 from domain.quantity import format_quantity
@@ -36,35 +36,87 @@ class MaterialHistoryChoiceDialog(QDialog):
 
 
 class MaterialHistoryDialog(QDialog):
+    FIELDS=[('base_code','基础编码'),('version','物料版本号'),('name','名称'),('description','规格描述'),
+            ('unit','单位'),('grade','物料等级'),('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P'),
+            ('history_version','物料历史版本'),('created_at','记录时间'),('alternates','替代料')]
+
     def __init__(self,service,mid,version,parent=None):
-        super().__init__(parent);self.resize(1050,650)
-        record=history.read(service,mid,version);attrs=record['attributes']
-        self.setWindowTitle(attrs['base_code']+attrs['version']+' '+attrs['name']+' 物料历史版本'+str(version)+'（只读）')
-        layout=QVBoxLayout(self);self.info=QLabel();self.info.setWordWrap(True);self.info.setTextInteractionFlags(Qt.TextSelectableByMouse);self.info.setTextFormat(Qt.PlainText)
-        info_scroll=QScrollArea();info_scroll.setWidgetResizable(True);info_scroll.setWidget(self.info);info_scroll.setMinimumHeight(180);info_scroll.setMaximumHeight(280);layout.addWidget(info_scroll)
-        self.tree=QTreeWidget();self.tree.setHeaderLabels(['物料编码','物料名称','物料历史版本','数量','单位','位置','备注','替代料']);self.tree.setWordWrap(True);layout.addWidget(self.tree,1)
+        super().__init__(parent);self.resize(1150,760);self.service=service;self.material_id=mid
+        layout=QVBoxLayout(self);bar=QHBoxLayout();bar.addWidget(QLabel('查看物料历史版本：'))
+        self.version_combo=QComboBox();self.version_combo.setMinimumWidth(130)
+        for row in history.versions(service,mid):self.version_combo.addItem(str(row['history_version']),row['history_version'])
+        bar.addWidget(self.version_combo);self.root_label=QLabel();self.root_label.setTextFormat(Qt.PlainText);self.root_label.setWordWrap(True);bar.addWidget(self.root_label,1);layout.addLayout(bar)
+        self.info=QWidget();form=QFormLayout(self.info);form.setLabelAlignment(Qt.AlignRight|Qt.AlignVCenter);form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.attribute_labels={};self.attribute_values={}
+        for key,title in self.FIELDS:
+            label=QLabel(title+'：');label.setAlignment(Qt.AlignRight|Qt.AlignVCenter)
+            value=QLabel();value.setAlignment(Qt.AlignLeft|Qt.AlignVCenter);value.setWordWrap(True);value.setTextFormat(Qt.PlainText);value.setTextInteractionFlags(Qt.TextSelectableByMouse|Qt.TextSelectableByKeyboard)
+            value.setMinimumWidth(0);form.addRow(label,value);self.attribute_labels[key]=label;self.attribute_values[key]=value
+        info_scroll=QScrollArea();info_scroll.setWidgetResizable(True);info_scroll.setWidget(self.info)
+        info_group=QGroupBox('选中物料的历史属性');QVBoxLayout(info_group).addWidget(info_scroll)
+        self.references_group=QGroupBox('包含当前物料历史版本的SKU BOM');reference_layout=QVBoxLayout(self.references_group)
+        self.reference_label=QLabel();self.reference_label.setWordWrap(True);self.reference_label.setTextFormat(Qt.PlainText);reference_layout.addWidget(self.reference_label)
+        self.references=QTableWidget(0,3);self.references.setHorizontalHeaderLabels(['SKU编码','SKU名称','SKU历史版本'])
+        self.references.setEditTriggers(QAbstractItemView.NoEditTriggers);self.references.setSelectionBehavior(QAbstractItemView.SelectRows);self.references.setWordWrap(True)
+        self.references.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.references.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);reference_layout.addWidget(self.references,1)
+        panels=QSplitter();panels.addWidget(info_group);panels.addWidget(self.references_group);panels.setSizes([530,570]);panels.setMinimumHeight(200)
+        self.tree=QTreeWidget();self.tree.setHeaderLabels(['物料编码','物料名称','物料历史版本','数量','单位','位置','备注','替代料']);self.tree.setWordWrap(True)
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        def append(parent,material_id,revision,edge=None,ancestors=frozenset()):
-            key=(material_id,revision)
-            if key in ancestors:raise ValueError('物料历史数据存在循环引用')
-            snapshot=history.read(service,material_id,revision);data=snapshot['attributes'];edge=edge or {}
-            alternatives=[]
-            for alt in edge.get('alternates',[]):
-                a=history.read(service,alt['material_id'],alt['history_version'])['attributes'];alternatives.append(a['base_code']+a['version']+' '+a['name'])
-            item=QTreeWidgetItem(parent,[data['base_code']+data['version'],data['name'],str(revision),format_quantity(edge.get('quantity',1)),data['unit'],edge.get('position',''),edge.get('remark',''),'\n'.join(alternatives)])
-            item.setData(0,Qt.UserRole,snapshot)
-            for child in snapshot['children']:append(item,child['material_id'],child['history_version'],child,ancestors|{key})
-            return item
-        root=append(self.tree,mid,version)
-        self.tree.currentItemChanged.connect(self.show_info);self.tree.setCurrentItem(root);self.tree.expandToDepth(1)
-        for column in range(self.tree.columnCount()):self.tree.resizeColumnToContents(column);self.tree.setColumnWidth(column,min(300,self.tree.columnWidth(column)))
+        vertical=QSplitter(Qt.Vertical);vertical.addWidget(panels);vertical.addWidget(self.tree);vertical.setSizes([340,340]);layout.addWidget(vertical,1)
+        self.tree.currentItemChanged.connect(self.show_info)
+        index=self.version_combo.findData(version)
+        if index<0:raise ValueError('物料历史版本不存在')
+        self.version_combo.setCurrentIndex(index);self.load_version(version)
+        self.version_combo.currentIndexChanged.connect(lambda _:self.load_version(self.version_combo.currentData()))
         buttons=QDialogButtonBox(QDialogButtonBox.Close);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
+
+    def load_version(self,version):
+        if version is None:return
+        service=self.service;mid=self.material_id;cache={}
+        def read(material_id,revision):
+            key=(material_id,revision)
+            if key not in cache:cache[key]=history.read(service,material_id,revision)
+            return cache[key]
+        record=read(mid,version);attrs=record['attributes']
+        label=attrs['base_code']+attrs['version']+' '+attrs['name']
+        self.root_label.setText(label);self.setWindowTitle(label+' 物料历史版本'+str(version)+'（只读）')
+        self.tree.blockSignals(True)
+        try:
+            self.tree.clear()
+            def append(parent,material_id,revision,edge=None,ancestors=frozenset()):
+                key=(material_id,revision)
+                if key in ancestors:raise ValueError('物料历史数据存在循环引用')
+                snapshot=read(material_id,revision);data=snapshot['attributes'];edge=edge or {};alternatives=[]
+                for alt in edge.get('alternates',[]):
+                    a=read(alt['material_id'],alt['history_version'])['attributes'];alternatives.append(a['base_code']+a['version']+' '+a['name'])
+                item=QTreeWidgetItem(parent,[data['base_code']+data['version'],data['name'],str(revision),format_quantity(edge.get('quantity',1)),data['unit'],edge.get('position',''),edge.get('remark',''),'\n'.join(alternatives)])
+                item.setData(0,Qt.UserRole,snapshot)
+                for child in snapshot['children']:append(item,child['material_id'],child['history_version'],child,ancestors|{key})
+                return item
+            root=append(self.tree,mid,version);self.tree.setCurrentItem(root);self.tree.expandToDepth(1)
+        finally:self.tree.blockSignals(False)
+        self.show_info(root)
+        from ui.table_layout import fit_columns
+        fit_columns(self.tree)
+
     def show_info(self,item,previous=None):
         if item is None:return
-        record=item.data(0,Qt.UserRole);a=record['attributes']
-        self.info.setText('\n'.join(title+'：'+str(a.get(key,'') or '（空）') for key,title in [('base_code','基础编码'),('version','物料版本号'),('name','名称'),('description','规格描述'),('unit','单位'),('grade','物料等级'),('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P')])+'\n物料历史版本：'+str(record['history_version'])+'　记录时间：'+record['created_at'].split('.')[0])
-        contexts=a.get('alternate_contexts',{})
-        if contexts:self.info.setText(self.info.text()+'\n此物料的替代料（按父项关系保存）：\n'+'\n'.join('、'.join(v['base_code']+v['version']+' '+v['name'] for v in values) for values in contexts.values()))
+        record=item.data(0,Qt.UserRole);a=record['attributes'];contexts=a.get('alternate_contexts',{})
+        values=dict(a,history_version=record['history_version'],created_at=record['created_at'].split('.')[0],
+                    alternates='\n'.join('、'.join(v['base_code']+v['version']+' '+v['name'] for v in rows) for rows in contexts.values()))
+        for key,_ in self.FIELDS:self.attribute_values[key].setText(str(values.get(key,'') or '（空）'))
+        references=history.sku_references(self.service,record['material_id'],record['history_version'])
+        title=a['base_code']+a['version']+' '+a['name']+' / 物料历史版本'+str(record['history_version'])
+        self.reference_label.setText(title+('\n共计'+str(len(references))+'个SKU BOM（包含旧SKU历史版本）' if references else '\n此物料历史版本未被任何SKU BOM引用'))
+        self.references.setRowCount(len(references))
+        for row,sku in enumerate(references):
+            for col,text in enumerate((sku['base_code']+sku['version'],sku['name'],sku['mirror_version'])):
+                cell=QTableWidgetItem(str(text));cell.setData(Qt.UserRole,sku['id']);cell.setTextAlignment(Qt.AlignCenter if col==2 else Qt.AlignLeft|Qt.AlignVCenter);self.references.setItem(row,col,cell)
+        from ui.table_layout import fit_columns
+        fit_columns(self.references,apply=False)
+        columns=self.references._proportional_columns
+        columns.widths[1]=min(columns.widths[1],15*self.references.fontMetrics().horizontalAdvance('中'))
+        columns.apply()
 
 
 def update_library_material(owner,mid,data):

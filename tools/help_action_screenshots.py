@@ -143,7 +143,10 @@ def generate(out,main,materials,bom,svc):
         match=next((m for m in definitions(candidate) if affected(candidate,[m])),None)
         if match is not None:choice_service=candidate;choice_mid=match;break
     choice=dialog(MaterialHistoryChoiceDialog(choice_service,choice_mid,'编辑此物料',bom));snap('material_history_choose',choice,choice.fork);choice.hide()
-    viewer=dialog(MaterialHistoryDialog(svc,mid,versions(svc,mid)[0]['history_version'],materials));snap('material_history_view',viewer,viewer.tree);viewer.hide()
+    sample=svc.db.conn.execute('SELECT b.material_id,b.history_version,COUNT(*) n FROM material_history_bindings b WHERE b.material_id IN (SELECT material_id FROM material_histories GROUP BY material_id HAVING COUNT(*)>1) GROUP BY b.material_id,b.history_version ORDER BY n DESC LIMIT 1').fetchone()
+    view_mid=sample['material_id'] if sample else mid;view_version=sample['history_version'] if sample else versions(svc,mid)[0]['history_version']
+    viewer=dialog(MaterialHistoryDialog(svc,view_mid,view_version,materials));snap('material_history_view',viewer,viewer.tree)
+    snap('material_history_switch',viewer,viewer.version_combo);snap('material_history_references',viewer,viewer.references_group);viewer.hide()
     from help_more_screenshots import generate as generate_more
     generate_more(locals())
     for w in dialogs:w.close();w.deleteLater()

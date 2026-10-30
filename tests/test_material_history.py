@@ -161,6 +161,48 @@ class MaterialHistoryTests(unittest.TestCase):
   for service in (self.s,self.new,self.other):
    logs=[dict(r) for r in service.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' AND object_id=? AND action='update'",(self.c,))]
    self.assertEqual(len(logs),1);self.assertIn('物料名称：C → 记录详细变化',logs[0]['detail']);self.assertIn('父项：P101 P',logs[0]['detail'])
+ def test_viewer_switches_structure_and_exact_history_references(self):
+  from ui.material_history import MaterialHistoryDialog
+  rows=self.rows();rows[-1]['alternate_material_ids']=[self.a];h.save(self.new,self.r,rows,{},'fork')
+  self.assertEqual({s['id'] for s in h.sku_references(self.s,self.p,100)},{self.sid,self.tid})
+  self.assertEqual({s['id'] for s in h.sku_references(self.s,self.p,101)},{self.newid})
+  self.assertEqual({s['id'] for s in h.sku_references(self.s,self.a,100)},{self.newid})
+  before=self.db.conn.total_changes;viewer=MaterialHistoryDialog(self.s,self.p,100)
+  try:
+   self.assertEqual(viewer.version_combo.currentData(),100)
+   self.assertEqual(viewer.references.rowCount(),2)
+   self.assertEqual(viewer.tree.topLevelItem(0).child(0).text(7),'')
+   for _ in range(3):
+    viewer.version_combo.setCurrentIndex(viewer.version_combo.findData(101))
+    self.assertEqual(viewer.references.rowCount(),1)
+    self.assertEqual(viewer.references.item(0,2).text(),'101')
+    self.assertEqual(viewer.references.item(0,0).data(Qt.UserRole),self.newid)
+    self.assertEqual(viewer.attribute_values['history_version'].text(),'101')
+    self.assertIn('A100 A',viewer.tree.topLevelItem(0).child(0).text(7))
+    viewer.version_combo.setCurrentIndex(viewer.version_combo.findData(100))
+    self.assertEqual(viewer.references.rowCount(),2);self.assertEqual(viewer.tree.topLevelItemCount(),1)
+   for key,_ in viewer.FIELDS:
+    self.assertTrue(viewer.attribute_labels[key].alignment() & Qt.AlignRight)
+    self.assertTrue(viewer.attribute_values[key].alignment() & Qt.AlignLeft)
+    self.assertTrue(viewer.attribute_values[key].textInteractionFlags() & Qt.TextSelectableByMouse)
+   self.assertEqual(self.db.conn.total_changes,before)
+  finally:viewer.close()
+ def test_viewer_switches_metadata_and_shows_unreferenced_state(self):
+  from ui.material_history import MaterialHistoryDialog
+  h.save(self.new,self.r,self.rows(),{self.c:{**self.new.material_snapshot(self.c),'name':'new child','description':'long description '*80}},'fork',{self.p:'101'})
+  viewer=MaterialHistoryDialog(self.s,self.c,101)
+  try:
+   self.assertEqual(viewer.attribute_values['name'].text(),'new child')
+   viewer.version_combo.setCurrentIndex(viewer.version_combo.findData(100))
+   self.assertEqual(viewer.attribute_values['name'].text(),'C');self.assertEqual(viewer.attribute_values['description'].text(),'（空）')
+   self.assertNotIn('new child',viewer.windowTitle())
+  finally:viewer.close()
+  standalone=self.s.create_material(dict(base_code='FREE',version='1',name='unused',unit='pcs'))
+  viewer=MaterialHistoryDialog(self.s,standalone,100)
+  try:
+   self.assertEqual(viewer.references.rowCount(),0);self.assertIn('未被任何SKU BOM引用',viewer.reference_label.text())
+   self.assertEqual(viewer.version_combo.count(),1)
+  finally:viewer.close()
 
 
 if __name__=='__main__':unittest.main()

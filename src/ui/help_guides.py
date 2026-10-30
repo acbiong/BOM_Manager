@@ -168,7 +168,9 @@ GUIDES.insert(next(i for i,g in enumerate(GUIDES) if g['title'].startswith('BOM�
  title='物料库：物料历史版本',before='物料历史版本与编码版本号分别管理。默认100，保存真实变更后递增；旧SKU历史版本的物料资料和子BOM不随最新同步改写。',steps=[
  step('material_history_column','查看物料历史版本列','打开物料库，在基础资料后的物料历史版本列查看最新状态的版本号。存在多个历史状态时数字加粗。'),
  step('material_history_choose','选择修改范围','在BOM树点击编辑此物料，或者新增、删除替代料时，立即选择同步全部受影响SKU的最新BOM，或创建仅当前BOM使用的新物料历史版本。表格列出受影响的使用方；旧SKU历史版本不在同步范围。取消不写数据库。'),
- step('material_history_view','查看历史资料及子BOM','物料库右键展开物料历史版本，点击需要查看的编号。独立只读窗口显示当时的物料属性及子BOM，选择树节点查看详细资料。该窗口不会改变当前编辑草稿。'),
+ step('material_history_view','查看历史资料及子BOM','物料库右键展开物料历史版本，点击需要查看的编号。独立只读窗口按标签右对齐、属性值左对齐展示资料；较长属性可滚动查看。选择树节点查看该节点的历史属性，不会改变当前编辑草稿。'),
+ step('material_history_switch','下拉切换物料历史版本','在窗口顶部“查看物料历史版本”下拉框选择编号。窗口原地更新物料属性、子BOM及引用清单，并选中根节点；不必关闭后重新打开，也不会保存或修改数据。'),
+ step('material_history_references','核对SKU BOM引用清单','右上方列表按精确物料历史版本列出SKU编码、SKU名称及SKU历史版本，包含旧的SKU历史版本。同一个SKU BOM多处引用只列一次。点击子BOM树节点后，右上方标题及清单跟随选中物料，避免与顶部根物料版本混淆；无引用时会显示明确提示。'),
  step('bom_save','核对并保存','物料属性修改和删除替代料需检查普通父项编码升版；单纯新增替代料不要求父项编码升版。确认仅暂存，点击保存后才记录历史及同步BOM。保存前再次检查使用方和锁定状态，失败则保留草稿。')]))
 
 GUIDE_KEYS=list(dict.fromkeys(s['key'] for g in GUIDES for s in g['steps']))
