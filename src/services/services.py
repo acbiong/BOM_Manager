@@ -505,6 +505,10 @@ class Services:
    if sheet_name not in wb.sheetnames:raise ValueError('所选工作表不存在')
    ws=wb[sheet_name]; headers=[str(x if x is not None else '').strip() for x in next(ws.iter_rows(values_only=True),())]
    mapping=header_mapping or {field:field for field in self.BOM_HEADERS}
+   level_name=mapping.get('层级') or next((name for name in ('层级','BOM层级','Level') if name in headers),None)
+   level_index=headers.index(level_name) if level_name in headers else None
+   remark_name=mapping.get('备注') or '备注';remark_index=headers.index(remark_name) if remark_name in headers else None
+   root_level=None
    missing=[field for field in self.BOM_HEADERS if not mapping.get(field) or not str(mapping[field]).strip() or mapping[field] not in headers]
    if missing:raise MaterialHeaderError(headers,missing)
    if len(set(mapping[field] for field in self.BOM_HEADERS))!=len(self.BOM_HEADERS):raise ValueError('表头映射重复')
@@ -529,11 +533,18 @@ class Services:
     if no==1:continue
     data={field:str(values[i] if i<len(values) and values[i] is not None else '').strip() for field,i in index.items()}
     if not any(data.values()):continue
+    if level_index is not None:
+     try:
+      level=float(values[level_index])
+      if not (math.isfinite(level) and level>=0 and level.is_integer()):raise ValueError('层级无效')
+      data['_import_level']=int(level)
+     except (ValueError,TypeError):issues.append(f'第{no}行层级必须为非负整数');data['_import_level']=-1
+    data['_import_remark']=str(values[remark_index] or '').strip() if remark_index is not None else ''
     is_root=[data[field].casefold()=='root' for field in ('父项物料编码','父项版本号')]
     if any(is_root):
      if not all(is_root):issues.append(f'第{no}行根节点标记不完整：父项物料编码和父项版本号必须同时为ROOT/root')
      if root_row is not None:issues.append(f'第{no}行存在重复根节点声明，BOM只能有一个ROOT根节点')
-     root_row=no; key=(data['物料基础编码'],data['物料版本号'])
+     root_row=no;root_level=data.get('_import_level'); key=(data['物料基础编码'],data['物料版本号'])
      if current:
       if key!=(current['base_code'],current['version']):
        issues.append(f"BOM选择错误：第{no}行ROOT物料为{key[0]}{key[1]}，当前BOM为{current['base_code']}{current['version']}，禁止导入")
@@ -571,11 +582,10 @@ class Services:
      alternate_ids.append(alternate['id'])
     if parent is None or child is None:continue
     pid=parent['id']; mid=child['id']
-    if (pid,mid) in pairs:issues.append(f'第{no}行同一父级重复包含相同物料（首次出现于第{edge_lines[pid,mid]}行）')
     if pid==mid:issues.append(f'第{no}行物料不能包含自身')
     pairs.add((pid,mid));edge_lines.setdefault((pid,mid),no);parents.add(pid);child_ids.add(mid)
     if mid not in children.setdefault(pid,[]):children[pid].append(mid)
-    if len(issues)==start_errors:rows.append(dict(parent_material_id=pid,material_id=mid,quantity=quantity,unit=child['unit'],position=data['位置'],alternate_material_ids=alternate_ids))
+    if len(issues)==start_errors:rows.append(dict(parent_material_id=pid,material_id=mid,quantity=quantity,unit=child['unit'],position=data['位置'],remark=data['_import_remark'],alternate_material_ids=alternate_ids,_import_line=no,_import_level=data.get('_import_level',1)))
    if not rows and root_row is None and not issues:issues.append('所选工作表没有可导入的BOM数据')
    if root is None:
     roots=parents-child_ids
@@ -597,6 +607,9 @@ class Services:
      lines=sorted({no for (parent,child),no in edge_lines.items() if parent in unreachable or child in unreachable})
      issues.append('第'+ '、'.join(map(str,lines))+'行存在不属于当前根物料的孤立分支，请检查父项编码和版本号')
    for mid in sorted(parents|child_ids):walk(mid)
+   from services.import_bom_branches import normalize_branches
+   if root is not None:
+    rows=normalize_branches(rows,root,{r['id']:r for r in materials.values()},issues,hierarchical=level_index is not None,root_level=root_level)
    if issues:raise BomImportError(issues)
    imported_count=len(rows)
    rows=self.resolve_import_bom_conflicts(root,rows,conflict_resolver)
