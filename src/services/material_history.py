@@ -234,6 +234,7 @@ def finish_save(service, changed_parents, edits=None, mode='sync', mapping=None,
                 pending.extend(r['material_id'] for r in graph[mid] if r['material_id'] in sync_ids or r['material_id'] not in target_bound)
             target._catalog_sync = True; target._history_defer = True
             target_edits={mid: value for mid, value in edits.items() if mid in shared}
+            target_before={mid:target.material_snapshot(mid) for mid in target_edits}
             target._history_edits=target_edits;target._history_revision_approved=set(mapping.values())
             target_rows=rows_for(graph,sku['material_id'])
             for row in target_rows:
@@ -247,6 +248,7 @@ def finish_save(service, changed_parents, edits=None, mode='sync', mapping=None,
                 target_mapping=save_with_revisions(target,sku['material_id'],target_rows,{mid:versions_map[mid] for mid in required},required=conflicts)
             else:target.save_bom(sku['material_id'],target_rows)
             capture(target,target_edits)
+            for mid,before in target_before.items():log_metadata_edit(target,mid,before)
             if target_mapping:
                 target_graph=groups(target)
                 write_public(primary,{mid:target_graph.get(mid,[]) for mid in target_mapping.values()})
@@ -288,6 +290,7 @@ def save(service, root, rows, edits, mode, versions_map=None):
     service._history_edits = edits; service._history_defer = True
     try:
         with service.db.transaction():
+            before_metadata={mid:service.material_snapshot(mid) for mid in edits}
             from services.current_catalog import groups
             old_graph = groups(service)
             before = {mid: version['history_version'] for mid, version in definitions(service).items()}
@@ -312,8 +315,11 @@ def save(service, root, rows, edits, mode, versions_map=None):
                 mode = dict(mode)
                 for old, new in mapping.items():mode[new] = mode.get(old, 'fork')
             finish_save(service, direct | set(mapping), remapped_edits, mode, mapping,versions_map)
-            for mid in changes:
-                service.log('material', mid, 'history_version', '物料历史版本：'+str(before.get(mid, '新建'))+' → '+str(changes[mid]))
+            for old_mid,attributes in before_metadata.items():
+                mid=mapping.get(old_mid,old_mid)
+                detail=log_metadata_edit(service,mid,attributes)
+                primary=getattr(service,'primary',service)
+                if detail and primary is not service:primary.log('material',mid,'update',detail,snapshot=service.material_snapshot(mid))
             if changes and getattr(service,'sku_id',None):
                 connection(service).execute('UPDATE skus SET updated_at=? WHERE id=?',(datetime.now().isoformat(sep=' '),service.sku_id))
                 service.publish({'type':'bom_changed','root':root})
@@ -323,6 +329,19 @@ def save(service, root, rows, edits, mode, versions_map=None):
     finally:
         del service._history_edits
         del service._history_defer
+
+
+def log_metadata_edit(service,mid,before):
+    """One explicit edit log; ancestor snapshot bookkeeping is not an edit."""
+    after=service.material_snapshot(mid)
+    change=service.material_detail(before,after)
+    if not change:return ''
+    parents=[]
+    for row in service.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items WHERE child_material_id=?',(mid,)):
+        parent=service.material_snapshot(row[0]);parents.append(parent['base_code']+parent['version']+' '+parent['name'])
+    detail='修改物料；'+change+'；父项：'+('、'.join(parents) or 'SKU根节点 / 未被引用物料')+'；物料历史版本：'+str(before.get('history_version',100))+' → '+str(after.get('history_version',100))
+    service.log('material',mid,'update',detail,snapshot=after)
+    return detail
 
 
 def catalog_source(service,mid):

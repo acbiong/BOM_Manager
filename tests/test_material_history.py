@@ -151,6 +151,16 @@ class MaterialHistoryTests(unittest.TestCase):
   before=list(self.db.conn.execute('SELECT * FROM material_histories'))
   h.save(self.new,self.r,self.rows(),{},'fork')
   self.assertEqual(before,list(self.db.conn.execute('SELECT * FROM material_histories')))
+ def test_logs_describe_metadata_once_without_ancestor_bookkeeping(self):
+  before=self.new.db.conn.execute('SELECT COALESCE(MAX(id),0) FROM change_logs').fetchone()[0]
+  rows=self.rows();rows[-1]['alternate_material_ids']=[self.a];h.save(self.new,self.r,rows,{},'fork')
+  logs=list(self.new.db.conn.execute('SELECT * FROM change_logs WHERE id>?',(before,)))
+  self.assertEqual(len(logs),1);self.assertIn('新增替代料',logs[0]['detail'])
+  edits={self.c:{**self.new.material_snapshot(self.c),'name':'记录详细变化'}}
+  h.save(self.new,self.r,self.rows(),edits,'sync',{self.p:'101'})
+  for service in (self.s,self.new,self.other):
+   logs=[dict(r) for r in service.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' AND object_id=? AND action='update'",(self.c,))]
+   self.assertEqual(len(logs),1);self.assertIn('物料名称：C → 记录详细变化',logs[0]['detail']);self.assertIn('父项：P101 P',logs[0]['detail'])
 
 
 if __name__=='__main__':unittest.main()
