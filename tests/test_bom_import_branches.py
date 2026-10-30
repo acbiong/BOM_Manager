@@ -45,7 +45,9 @@ class BranchImportTests(unittest.TestCase):
     rows=self.rows();rows[8][field]=value;self.write(rows);resolver=Mock(return_value='incoming');before=list(self.db.conn.iterdump())
     with self.assertRaises(BomImportError) as error:self.preview(resolver)
     text=str(error.exception);self.assertIn('子BOM不一致',text);self.assertIn(label,text);self.assertIn('第5行 / 第10行',text)
-    self.assertIn('A1',text);self.assertIn('B1',text);resolver.assert_not_called();self.assertEqual(list(self.db.conn.iterdump()),before)
+    self.assertIn('A1',text);self.assertIn('B1',text)
+    comparison=error.exception.comparisons[0];self.assertEqual(comparison['field'],label);self.assertEqual((comparison['left_line'],comparison['right_line']),(5,10))
+    resolver.assert_not_called();self.assertEqual(list(self.db.conn.iterdump()),before)
  def test_nested_missing_extra_and_empty_subtrees_are_not_union_merged(self):
   for remove in ([9],[8,9],[8,9,10]):
    rows=[row for index,row in enumerate(self.rows()) if index not in remove];self.write(rows)

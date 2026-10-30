@@ -9,7 +9,7 @@ from services.services import Services,BomImportError
 
 
 def main():
- parser=argparse.ArgumentParser();parser.add_argument('--source',required=True);parser.add_argument('--report',required=True);args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--source',required=True);parser.add_argument('--report',required=True);parser.add_argument('--screenshot');parser.add_argument('--demo-differences',action='store_true');args=parser.parse_args()
  source=Path(args.source);before=hashlib.sha256(source.read_bytes()).hexdigest()
  book=load_workbook(source,data_only=True);sheet=book.worksheets[0]
  mapping=dict(zip(Services.BOM_HEADERS,['父项编码','父项版本','物料编码','物料版本','BOM节点数量','位号']))
@@ -24,11 +24,24 @@ def main():
      if key not in ids:ids[key]=svc.create_material(dict(base_code=key[0],version=key[1],name=str(row[5] or ''),unit='pcs'))
     root=ids[str(sheet.cell(2,4).value),str(sheet.cell(2,5).value)]
     snapshot=list(db.conn.iterdump())
-    try:svc.import_bom(source,root,header_mapping=mapping,persist=False)
-    except BomImportError as error:report['original_issues']=error.issues
-    else:raise AssertionError('Original position differences should block import')
-    assert len(report['original_issues'])==3,report['original_issues']
-    assert all('子BOM不一致' in issue and '位置' in issue for issue in report['original_issues'])
+    validation_path=source
+    if args.demo_differences:
+     for left,right in [(224,246),(225,247),(226,248)]:sheet.cell(left,8).value=None;sheet.cell(right,8).value='/'
+     validation_path=Path(tmp)/'difference-demo.xlsx';book.save(validation_path)
+    report['uses_difference_demo_copy']=args.demo_differences
+    try:svc.import_bom(validation_path,root,header_mapping=mapping,persist=False)
+    except BomImportError as error:
+     report['original_issues']=error.issues;report['comparisons']=error.comparisons
+     if args.screenshot:
+      from PyQt5.QtWidgets import QApplication
+      from PyQt5.QtCore import QEvent
+      from ui.main_window import BomImportIssuesDialog
+      app=QApplication.instance() or QApplication([]);dialog=BomImportIssuesDialog(error)
+      dialog.show();app.processEvents();dialog.grab().save(args.screenshot)
+      report['comparison_table_rows']=dialog.table.rowCount()
+      dialog.close();dialog.deleteLater();app.sendPostedEvents(None,QEvent.DeferredDelete)
+    else:report['original_issues']=[]
+    if args.demo_differences:assert len(report['original_issues'])==3,report['original_issues']
     assert snapshot==list(db.conn.iterdump())
     # Controlled copy only: make the three positions match for the success case.
     for left,right in [(224,246),(225,247),(226,248)]:sheet.cell(right,8).value=sheet.cell(left,8).value

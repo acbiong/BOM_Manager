@@ -4,7 +4,8 @@ from infrastructure.operation_progress import checkpoint
 from domain.quantity import format_quantity
 
 
-def normalize_branches(rows, root, materials, issues, hierarchical=False, root_level=None):
+def normalize_branches(rows, root, materials, issues, hierarchical=False, root_level=None, comparisons=None):
+    comparisons = comparisons if comparisons is not None else []
     repeated = len({(r['parent_material_id'], r['material_id']) for r in rows}) != len(rows)
     def clean(row):return {k:v for k,v in row.items() if not k.startswith('_import_')}
     if not hierarchical and not repeated:return [clean(r) for r in rows]
@@ -55,10 +56,15 @@ def normalize_branches(rows, root, materials, issues, hierarchical=False, root_l
                 a=old.get(child);b=new.get(child)
                 prefix=(f"子BOM不一致，禁止导入：{label(mid)}；分支一（第{first['line']}行）：{first['path']}；"
                         f"分支二（第{other['line']}行）：{other['path']}；子物料：{label(child)}；")
+                context=dict(parent=label(mid),material=label(child),left_path=first['path'],right_path=other['path'],
+                             left_line=a['line'] if a else None,right_line=b['line'] if b else None)
                 if a is None or b is None:
+                    comparisons.append(dict(context,field='子物料存在性',left='不存在' if a is None else '存在',right='不存在' if b is None else '存在'))
                     issues.append(prefix+('分支一缺少子物料，分支二第'+str(b['line'])+'行存在' if a is None else '分支二缺少子物料，分支一第'+str(a['line'])+'行存在'))
                     continue
                 sa,sb=signature(a),signature(b)
+                for i,field in enumerate(('数量','位置','备注','替代料')):
+                    if sa[i]!=sb[i]:comparisons.append(dict(context,field=field,left=value(sa,i),right=value(sb,i)))
                 differences=[f'{field}：{value(sa,i)} → {value(sb,i)}' for i,field in enumerate(('数量','位置','备注','替代料')) if sa[i]!=sb[i]]
                 if differences:issues.append(prefix+f"第{a['line']}行 / 第{b['line']}行："+'；'.join(differences))
     # Stable first occurrence order; store each shared definition once. Preview

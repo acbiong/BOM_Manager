@@ -123,4 +123,10 @@ def generate(e):
     for i,field in enumerate(fields):
         mapping.mapping_table.scrollToItem(mapping.mapping_table.item(0,i));QApplication.processEvents();snap('bom_mapping_'+str(i),mapping,mapping.combos[field])
     add=next(b for b in mapping.findChildren(QPushButton) if b.text()=='新增替代料');snap('bom_mapping_alt',mapping,add);ok('bom_mapping_ok',mapping);path.unlink()
+    from ui.main_window import BomImportIssuesDialog
+    from services.services import BomImportError
+    parent=bom.root_item.text(0);child=target['base_code']+target['version']+' '+target['name']
+    comparison=dict(parent=parent,material=child,field='位置',left_path=parent+' / 示例分支一',right_path=parent+' / 示例分支二',left_line=12,right_line=34,left='（空）',right='/')
+    mismatch=dialog(BomImportIssuesDialog(BomImportError(['示例：两个分支的子BOM位置不一致，禁止导入'],[comparison]),bom))
+    snap('bom_import_differences',mismatch,mismatch.table);mismatch.hide()
     bom.dirty=False;bom.load()

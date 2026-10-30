@@ -872,7 +872,28 @@ class BomImportIssuesDialog(QDialog):
   self.resize(800,520); self.setMaximumHeight(640)
   layout=QVBoxLayout(self)
   summary=QLabel(f'扫描完成，共发现{len(error.issues)}个问题。未导入，原有编辑和数据库保持不变。'); summary.setWordWrap(True); layout.addWidget(summary)
-  self.details=QTextBrowser(); self.details.setPlainText('\n\n'.join(error.issues)); layout.addWidget(self.details)
+  self.details=QTextBrowser(); self.details.setPlainText('\n\n'.join(error.issues))
+  comparisons=getattr(error,'comparisons',[])
+  if comparisons:
+   self.setWindowTitle('子BOM不一致：左右对比');self.resize(1200,600)
+   tabs=QTabWidget();layout.addWidget(tabs)
+   self.table=QTableWidget(len(comparisons),7)
+   self.table.setHorizontalHeaderLabels(['父项物料','子项物料','不一致项','分支一：路径／Excel行号','分支一内容','分支二：路径／Excel行号','分支二内容'])
+   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setWordWrap(True)
+   self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+   for row,comparison in enumerate(comparisons):
+    values=[comparison['parent'],comparison['material'],comparison['field'],comparison['left_path']+'\n'+(f"第{comparison['left_line']}行" if comparison['left_line'] is not None else '无对应子项行'),comparison['left'],comparison['right_path']+'\n'+(f"第{comparison['right_line']}行" if comparison['right_line'] is not None else '无对应子项行'),comparison['right']]
+    for column,value in enumerate(values):
+     item=QTableWidgetItem(str(value));item.setToolTip(str(value));item.setTextAlignment(Qt.AlignLeft|Qt.AlignTop)
+     if column in (4,6):
+      item.setBackground(QColor('#fff0b3'));item.setForeground(QColor('#202020'));font=item.font();font.setBold(True);item.setFont(font)
+     self.table.setItem(row,column,item)
+   tabs.addTab(self.table,f'差异对比（{len(comparisons)}项）');tabs.addTab(self.details,'全部问题（文字）');fit_columns(self.table,apply=False)
+   char_width=self.table.fontMetrics().horizontalAdvance('中')
+   columns=self.table._proportional_columns
+   columns.widths={i:max(5*char_width,(self.width()-70)*(15,15,7,21,10,21,10)[i]//99) for i in columns.widths}
+   columns.apply()
+  else:layout.addWidget(self.details)
   buttons=QDialogButtonBox(QDialogButtonBox.Close); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
 
 class BomImportConflictDialog(QDialog):

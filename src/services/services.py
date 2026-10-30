@@ -8,8 +8,8 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from openpyxl import Workbook,load_workbook
 class BomImportError(ValueError):
- def __init__(self,issues):
-  self.issues=issues
+ def __init__(self,issues,comparisons=None):
+  self.issues=issues;self.comparisons=list(comparisons or [])
   super().__init__(f'BOM扫描完成，共发现{len(issues)}个问题，未导入：\n'+'\n'.join(issues))
 
 class MaterialHeaderError(ValueError):
@@ -608,9 +608,10 @@ class Services:
      issues.append('第'+ '、'.join(map(str,lines))+'行存在不属于当前根物料的孤立分支，请检查父项编码和版本号')
    for mid in sorted(parents|child_ids):walk(mid)
    from services.import_bom_branches import normalize_branches
+   comparisons=[]
    if root is not None:
-    rows=normalize_branches(rows,root,{r['id']:r for r in materials.values()},issues,hierarchical=level_index is not None,root_level=root_level)
-   if issues:raise BomImportError(issues)
+    rows=normalize_branches(rows,root,{r['id']:r for r in materials.values()},issues,hierarchical=level_index is not None,root_level=root_level,comparisons=comparisons)
+   if issues:raise BomImportError(issues,comparisons)
    imported_count=len(rows)
    rows=self.resolve_import_bom_conflicts(root,rows,conflict_resolver)
    try:preview_tree=self.save_bom(root,rows,preview=True)

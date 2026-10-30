@@ -1766,5 +1766,18 @@
       1000,
       620
     ]
+  },
+  "action_bom_import_differences": {
+    "window": "子BOM不一致：左右对比",
+    "target": [
+      11,
+      77,
+      1178,
+      473
+    ],
+    "size": [
+      1200,
+      600
+    ]
   }
 }
