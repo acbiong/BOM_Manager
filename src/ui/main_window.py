@@ -1596,7 +1596,7 @@ class BomWindow(QMainWindow):
   import json
   self._expansion_state={key:item.isExpanded() for key,item in self.expansion_nodes()}
   self._expansion_settings.setValue(self._expansion_key,json.dumps(self._expansion_state));self._expansion_settings.sync()
- def render_tree(self,nodes):
+ def render_tree(self,nodes,fit=True):
   if hasattr(self,'root_item'):self.remember_expansion()
   self._rendering_tree=True
   self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
@@ -1614,7 +1614,8 @@ class BomWindow(QMainWindow):
    checkpoint()
    if key in self._expansion_state:item.setExpanded(self._expansion_state[key])
   self._rendering_tree=False
-  fit_columns(self.tree); self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
+  if fit:fit_columns(self.tree)
+  self.tree.setCurrentItem(self.root_item); self.show_item_info(self.root_item)
  def snapshot_map(self,nodes,path=()):
   result={}
   for node in nodes:
@@ -1862,7 +1863,7 @@ class BomWindow(QMainWindow):
      data=deleted['data']; self._deleted_relations.add((parent,data['material_id'],data.get('position','') or ''))
   compare(baseline,nodes,self.root)
   self._baseline_tree=deepcopy(baseline)
-  self.render_tree(nodes); self.mark_dirty()
+  self.render_tree(nodes,fit=False); self.mark_dirty()
   self.notice.clear(); self.refresh_action.setEnabled(False); self.statusBar().clearMessage()
  @operation('导出采购BOM')
  def export_purchase_bom(self):

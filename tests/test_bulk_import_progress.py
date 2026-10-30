@@ -85,3 +85,22 @@ class BulkImportProgressTests(unittest.TestCase):
     table.item(0,0).setText('更长文字'*80);fit_columns(table)
     self.assertEqual(resize.call_count,2)
   finally:table.deleteLater();self.app.sendPostedEvents(None,QEvent.DeferredDelete)
+
+ def test_root_bom_import_adjusts_tree_only_after_final_styles(self):
+  from ui.main_window import BomWindow
+  from ui.table_layout import fit_columns
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));svc=Services(db)
+   root=svc.create_material(dict(base_code='R',version='1',name='根节点',unit='pcs'))
+   child=svc.create_material(dict(base_code='C',version='1',name='子物料',unit='pcs'))
+   svc.create_sku(root);svc.save_bom(root,[dict(material_id=child,quantity=1,unit='pcs')])
+   window=BomWindow(svc,root);adjusted=[]
+   def fit(widget,*args,**kwargs):
+    if widget is window.tree:adjusted.append(widget)
+    return fit_columns(widget,*args,**kwargs)
+   try:
+    with patch('ui.main_window.fit_columns',fit):window.stage_import([])
+    self.assertEqual(len(adjusted),1);self.assertTrue(window.dirty)
+   finally:
+    window.dirty=False;window.close();window.deleteLater()
+    self.app.sendPostedEvents(None,QEvent.DeferredDelete);db.close()

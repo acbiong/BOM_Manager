@@ -415,3 +415,6 @@ Windows测试入口按`tests/test_*.py`逐文件启用独立Python/Qt进程，�
 ### 新BOM保存性能验证
 
 `python3 tools/benchmark_bom_save.py --source /path/to/project.db --report test_reports/bom_save.json --max-ms 300` 以只读连接备份源数据库，在`.tmp`隔离副本上创建相当于最大最新SKU的新BOM，并测量提交和窗口刷新总耗时。源数据库不写入，前后校验SHA256；保存后校验结构、替代料及其他SKU时间戳。可加`--profile`输出性能分析，此模式额外耗时不宜直接用于300ms验收。Qt采用offscreen；不包含用户关闭提示框等待时间。
+
+
+帮助截图增量生成：构建时校验 `src/ui`、显示相关的 `src/domain`、截图工具及静态资源的指纹，同时校验已有PNG的内容哈希。无相关变化且图片完整时复用 `.tmp/help_screenshots`，不重新打开示例窗口；只升版本或无关业务代码变化不触发重拍。缺失、损坏或UI/截图脚本变化时重新生成。需要更换示例数据时，使用 `BOM_HELP_FORCE=1 python3 tools/generate_help_screenshots.py` 强制更新；可同时设置 `BOM_HELP_CONFIG` 指定数据配置。删除 `.tmp/help_screenshots` 也会在下次构建重建。
