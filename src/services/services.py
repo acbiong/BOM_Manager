@@ -854,6 +854,10 @@ class Services:
   finally:wb.close()
  def export_database(self,path):
   from collections import Counter
+  from copy import copy
+  from openpyxl.worksheet.hyperlink import Hyperlink
+  from openpyxl.utils import quote_sheetname
+  import re
   skus=list(self.skus());counts=Counter(r['material_id'] for r in skus)
   sheet_count=len(skus)+3;total=sheet_count+1
   wb=Workbook()
@@ -865,9 +869,17 @@ class Services:
    with progress_stage(f'正在生成工作表 3/{sheet_count}：变更记录',2,total):
     self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
    for index,r in enumerate(skus,3):
-    title=(r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if counts[r['material_id']]>1 else ''))[:31]
+    name=r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if counts[r['material_id']]>1 else '')
+    base=re.sub(r'[\\/*?:\[\]]','_',name).strip().strip("'")[:31] or 'BOM'
+    title=base;number=2;used={value.casefold() for value in wb.sheetnames}
+    while title.casefold() in used:
+     suffix=f' ({number})';title=base[:31-len(suffix)]+suffix;number+=1
     with progress_stage(f'正在生成工作表 {index+1}/{sheet_count}：{title}',index,total):
-     self.for_sku(r['id']).write_bom_sheet(wb.create_sheet(title),r['material_id'])
+     bom_sheet=wb.create_sheet(title)
+     self.for_sku(r['id']).write_bom_sheet(bom_sheet,r['material_id'])
+     cell=wb['SKU清单'].cell(index-1,2)
+     cell.hyperlink=Hyperlink(ref=cell.coordinate,location=quote_sheetname(bom_sheet.title)+'!A1',tooltip='跳转到 '+name)
+     font=copy(cell.font);font.color='0563C1';font.underline='single';cell.font=font
    with progress_stage(f'{sheet_count}张工作表已生成，正在写入Excel文件…',sheet_count,total):
     file_work(wb.save,path)
    checkpoint('资料库导出完成',total,total)
