@@ -955,7 +955,7 @@ class BomTreeWidget(QTreeWidget):
 class BomWindow(QMainWindow):
  closed=pyqtSignal()
  def __init__(self,svc,root,parent=None):
-  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
+  super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self._material_edits={}; self._history_choices={}; self._history_parent_versions={}; self._history_decision_tokens={}; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
   self.tree=BomTreeWidget(); self.tree.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
   self.delete_action=QAction('删除物料',self.tree);self.delete_action.setShortcut('Delete');self.delete_action.setShortcutContext(Qt.WidgetWithChildrenShortcut);self.delete_action.setAutoRepeat(False);self.delete_action.triggered.connect(lambda:self.confirm_delete(self.tree.currentItem()));self.tree.addAction(self.delete_action)
   import hashlib
@@ -1146,6 +1146,7 @@ class BomWindow(QMainWindow):
   if not material:
    QMessageBox.warning(self,'物料不存在','目标物料已不存在，请刷新BOM后重试。');return
   MaterialUsageDialog(material,service.material_usage(material_id),self).exec_()
+ @undoable
  def edit_tree_material(self,item):
   if self.is_locked():return False
   data=item.data(0,Qt.UserRole) or {}
@@ -1154,10 +1155,25 @@ class BomWindow(QMainWindow):
   material=self.svc.material_snapshot(material_id)
   if not material:
    QMessageBox.warning(self,'物料不存在','目标物料已不存在，请刷新BOM后重试。');return
+  from services.material_history import enabled as history_enabled
+  choice=self.choose_material_history(material_id,'编辑此物料') if history_enabled(self.svc) else None
+  if history_enabled(self.svc) and choice is None:return
+  material.update(self._material_edits.get(material_id,{}))
   dialog=MaterialDialog(self,material,readonly_keys={'base_code','version'})
   dialog.setWindowTitle('编辑此物料')
   if dialog.exec_()!=QDialog.Accepted:return
-  try:self.svc.update_material(material_id,dialog.data())
+  try:
+   if history_enabled(self.svc):
+    edits=dict(self._material_edits);edits[material_id]=dialog.data()
+    if not self.check_history_rules(edits=edits,mode=choice):return
+    self._material_edits=edits;self._history_choices[material_id]=choice
+    for mid in self._history_parent_versions:self._history_choices[mid]=choice
+    for _,node in self.expansion_nodes():
+     data=dict(node.data(0,Qt.UserRole) or {})
+     if data.get('material_id')==material_id:
+      data.update(dialog.data());node.setData(0,Qt.UserRole,data);node.setText(0,data['base_code']+data['version']+' '+data['name']);node.setText(2,data['unit'])
+    self.mark_dirty();self.show_item_info(item)
+   else:self.svc.update_material(material_id,dialog.data())
   except Exception as error:show_operation_error(self,'保存失败',error)
  def replacement_blocked_materials(self,item,child=False):
   # Reverse reachability computes all cyclic candidates in one graph traversal.
@@ -1608,7 +1624,7 @@ class BomWindow(QMainWindow):
   if self.is_locked():self.load();self.notice.clear();self.apply_lock_state();return
   from copy import deepcopy
   fresh=self.database_tree(); conflicts=[]
-  root=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone())
+  root=self.svc.material_snapshot(self.root)
   if any(root.get(k)!=self._root_baseline.get(k) for k in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag')):self._external_paths.add(())
   self._root_baseline=root
   self.mark_external_differences(self._baseline_tree,fresh)
@@ -1633,7 +1649,7 @@ class BomWindow(QMainWindow):
   self._root_color_dirty=False
   self.update_mirror_title()
   from copy import deepcopy
-  fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=dict(self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
+  fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=self.svc.material_snapshot(self.root); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
   self.save_action.setEnabled(False); self.refresh_action.setEnabled(False); self.export_action.setEnabled(True)
   if hasattr(self,'history'):self.history.clear()
  def expansion_nodes(self):
@@ -1651,7 +1667,7 @@ class BomWindow(QMainWindow):
  def render_tree(self,nodes,fit=True):
   if hasattr(self,'root_item'):self.remember_expansion()
   self._rendering_tree=True
-  self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone()
+  self.current_item=None; self.tree.clear(); self.by={}; root=self.svc.material_snapshot(self.root)
   self.setWindowTitle(f"{root['base_code']}{root['version']} {root['name']}");self.update_mirror_title()
   if self.is_locked():self.setWindowTitle(self.windowTitle()+' — BOM浏览')
   self.root_item=QTreeWidgetItem(self.tree,[f"{root['base_code']}{root['version']} {root['name']}",'','','','']); self.root_item.setData(0,Qt.UserRole,{'material_id':self.root,'root':True,'row_color':__import__('services.bom_colors',fromlist=['colors']).colors(self.svc).get((0,self.root),'')}); self.root_item.setExpanded(True)
@@ -1744,11 +1760,14 @@ class BomWindow(QMainWindow):
   self.current_item=item
   d=item.data(0,Qt.UserRole) or {}
   if d.get('root'):
-   r=self.svc.db.conn.execute('SELECT * FROM materials WHERE id=?',(self.root,)).fetchone(); d=dict(r) if r else d
+   r=self.svc.material_snapshot(self.root); d=dict(r) if r else d
   self._loading_fields=True
   editable=not ((item.data(0,Qt.UserRole) or {}).get('root') or (item.data(0,Qt.UserRole) or {}).get('_deleted'))
   for field in ('quantity','position','remark'):self.fields[field].setEnabled(editable and not self.is_locked())
-  latest=self.svc.material_snapshot(d.get('material_id',self.root if item is self.root_item else None))
+  mid=d.get('material_id',self.root if item is self.root_item else None)
+  latest=self.svc.material_snapshot(mid)
+  if mid in self._material_edits:
+   d={**d,**latest};latest={**latest,**self._material_edits[mid]}
   for k in self.fields:
    checkpoint()
    value=str(d.get(k,'') or '')
@@ -1791,7 +1810,7 @@ class BomWindow(QMainWindow):
   if self.is_locked():return False
   from services.current_catalog import enabled as catalog_enabled,selection_tree
   current_catalog=catalog_enabled(self.svc)
-  r=self.svc.material_snapshot(r['id'])
+  r=getattr(self.svc,'primary',self.svc).material_snapshot(r['id'])
   latest_children=selection_tree(self.svc,r['id']) if current_catalog else None
   if not current_catalog and hasattr(self.svc,'ensure_material_bom'):self.svc.ensure_material_bom(r['id'])
   parent=target.data(0,Qt.UserRole) or {}
@@ -1830,12 +1849,16 @@ class BomWindow(QMainWindow):
   item=self.tree.currentItem()
   if item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   existing=self.alternate_ids(item); data=item.data(0,Qt.UserRole) or {}
+  from services.material_history import enabled as history_enabled
+  history_choice=self.choose_material_history(data['material_id'],'新增替代料',impact_mid=(item.parent().data(0,Qt.UserRole) or {})['material_id']) if history_enabled(self.svc) else None
+  if history_enabled(self.svc) and history_choice is None:return
   rows=[row for row in self.svc.db.conn.execute('SELECT id,base_code,version,name FROM materials ORDER BY base_code,version') if row['id']!=data.get('material_id') and row['id'] not in existing]
   if not rows: QMessageBox.information(self,'新增替代料','没有可选替代料'); return
   choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
   choice,ok=MaterialSelectionDialog.getItem(self,'新增替代料','选择物料',choices,0,False)
   if not ok:return
   self._alternate_edits[self.alternate_key(item)]=existing+[rows[choices.index(choice)]['id']]
+  if history_enabled(self.svc):self._history_choices[(item.parent().data(0,Qt.UserRole) or {})['material_id']]=history_choice
   self.mark_dirty(); self.show_item_info(item)
  @undoable
  def alternate_menu(self,pos):
@@ -1852,7 +1875,13 @@ class BomWindow(QMainWindow):
   if action!=remove:return
   if QMessageBox.question(self,'确认','删除当前替代料？')!=QMessageBox.Yes:return
   material_id=self.alt_table.item(row,0).data(Qt.UserRole)
-  self._alternate_edits[self.alternate_key(item)]=[mid for mid in self.alternate_ids(item) if mid!=material_id]
+  from services.material_history import enabled as history_enabled
+  choice=self.choose_material_history((item.data(0,Qt.UserRole) or {})['material_id'],'删除替代料',impact_mid=(item.parent().data(0,Qt.UserRole) or {})['material_id']) if history_enabled(self.svc) else None
+  if history_enabled(self.svc) and choice is None:return
+  proposed=[mid for mid in self.alternate_ids(item) if mid!=material_id]
+  if history_enabled(self.svc) and not self.check_history_rules(alternate=(item,proposed)):return
+  self._alternate_edits[self.alternate_key(item)]=proposed
+  if history_enabled(self.svc):self._history_choices[(item.parent().data(0,Qt.UserRole) or {})['material_id']]=choice
   self.mark_dirty(); self.show_item_info(item)
  def promote_alternate(self,item,material_id):
   if self.is_locked():return False
@@ -1962,6 +1991,70 @@ class BomWindow(QMainWindow):
    if not any(r['material_id']==row['material_id'] and r.get('position','')==row.get('position','') for r in children):children.append(row)
   graph.update(updates)
   return sku['material_id'],rows_for(graph,sku['material_id'])
+ def history_rows(self):
+  rows=[]
+  def walk(item,parent):
+   data=dict(item.data(0,Qt.UserRole) or {})
+   if data.get('_deleted'):return
+   data.update(parent_material_id=parent,replace_children=True,alternate_material_ids=self.alternate_ids(item))
+   rows.append(data)
+   for j in range(item.childCount()):walk(item.child(j),data['material_id'])
+  for j in range(self.root_item.childCount()):walk(self.root_item.child(j),self.root)
+  return rows
+ def choose_material_history(self,mid,title,impact_mid=None):
+  from ui.material_history import MaterialHistoryChoiceDialog
+  dialog=MaterialHistoryChoiceDialog(self.svc,mid,title,self,impact_mid)
+  if dialog.exec_()!=QDialog.Accepted:return None
+  from services.material_history import decision_token
+  target=mid if impact_mid is None else impact_mid
+  self._history_decision_tokens[target]=decision_token(self.svc,target)
+  return dialog.mode()
+ def check_history_rules(self,edits=None,alternate=None,rows=None,root=None,mode=None):
+  from services.material_history import collect_conflicts
+  from ui.parent_revision import ParentRevisionDialog
+  rows=self.history_rows() if rows is None else rows
+  if alternate:
+   item,ids=alternate;data=item.data(0,Qt.UserRole) or {}
+   for row in rows:
+    if row.get('id')==data.get('id'):row['alternate_material_ids']=ids
+  conflicts=collect_conflicts(self.svc,root or self.root,rows,self._material_edits if edits is None else edits,self._history_choices if mode is None else mode)
+  missing=[c for c in conflicts if c['material_id'] not in self._history_parent_versions]
+  if missing:
+   dialog=ParentRevisionDialog(self.svc,missing,self)
+   if dialog.exec_()!=QDialog.Accepted:return False
+   self._history_parent_versions.update(dialog.versions())
+  return True
+ def save_material_history(self,root,rows):
+  from services.material_history import save,FIELDS
+  for row in rows:
+   if row.get('_added'):
+    mid=row['material_id'];before=self.svc.material_snapshot(mid)
+    values={key:row.get(key,before.get(key,'')) for key in FIELDS}
+    if any(values[key]!=before.get(key,'') for key in FIELDS):self._material_edits.setdefault(mid,values)
+  from services.current_catalog import groups
+  # Operations with an immediate decision keep that decision; other structural
+  # edits are confirmed at save. One choice is retained per affected definition.
+  old=groups(self.svc);desired={root:[]};seen=set()
+  previous={r['id']:r for values in old.values() for r in values}
+  for row in rows:
+   row.setdefault('alternate_material_ids',previous.get(row.get('id'),{}).get('alternate_material_ids',[]))
+   key=(row['parent_material_id'],row['material_id'],row.get('position') or '')
+   if key not in seen:desired.setdefault(row['parent_material_id'],[]).append(row);seen.add(key)
+   desired.setdefault(row['material_id'],[])
+  def payload(values):return [(r['material_id'],float(r['quantity']),r.get('unit'),r.get('position') or '',r.get('remark') or '',r.get('alternate_material_ids',[])) for r in values]
+  changed={mid for mid in desired if payload(old.get(mid,[]))!=payload(desired[mid])}
+  from services.material_history import decision_token,affected
+  for mid in sorted(changed|set(self._material_edits)):
+   if mid not in self._history_choices or (mid in self._history_decision_tokens and self._history_decision_tokens[mid]!=decision_token(self.svc,mid)):
+    if not affected(self.svc,[mid]):self._history_choices[mid]='fork';continue
+    choice=self.choose_material_history(mid,'保存子BOM变更')
+    if choice is None:return None
+    self._history_choices[mid]=choice
+  if not self.check_history_rules(rows=rows,root=root):return None
+  from services.material_history import collect_conflicts
+  required={c['material_id'] for c in collect_conflicts(self.svc,root,rows,self._material_edits,self._history_choices)}
+  versions={mid:value for mid,value in self._history_parent_versions.items() if mid in required}
+  return save(self.svc,root,rows,self._material_edits,self._history_choices,versions)
  @operation('保存BOM')
  def save(self):
   if self.is_locked():return False
@@ -1980,32 +2073,39 @@ class BomWindow(QMainWindow):
     for j in range(it.childCount()): walk(it.child(j),d['material_id'])
    for j in range(self.root_item.childCount()): walk(self.root_item.child(j),self.root)
    save_root,rows=self.save_context(rows)
-   from services.snapshot_bom import revision_conflicts,save_with_revisions
-   from services.current_catalog import synchronization_plan,save_confirmed
-   plan=synchronization_plan(self.svc,save_root,rows);selections={};versions={}
-   if plan:
-    from ui.bom_sync_confirmation import BomSyncConfirmationDialog
-    confirmation=BomSyncConfirmationDialog(plan,self)
-    if confirmation.exec_()!=QDialog.Accepted:return False
-    selections=confirmation.selections()
-   partial=[p for p in plan if selections.get(p['material_id'],set())!={s['id'] for s in p['other_skus']}]
-   if any(self.svc.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(p['material_id'],)).fetchone() for p in partial):
-    QMessageBox.warning(self,'SKU版本需手动更新','未全部同步的父物料属于SKU，请先通过SKU版本变更手动升版，再保存此变更。编辑缓存已保留。');return False
-   approved={p['material_id'] for p in plan if p not in partial}
-   violations={v['material_id']:v for v in revision_conflicts(self.svc,save_root,rows) if v['material_id'] not in approved}
-   violations.update({p['material_id']:p for p in partial})
-   if violations:
-    from ui.parent_revision import ParentRevisionDialog
-    chooser=ParentRevisionDialog(self.svc,list(violations.values()),self)
-    if chooser.exec_()!=QDialog.Accepted:return False
-    versions=chooser.versions()
-   callback=lambda n,text:report(int(n*0.85),text)
+   from services.material_history import enabled as history_enabled
+   if history_enabled(self.svc):
+    revisions=self.save_material_history(save_root,rows)
+    if revisions is None:return False
+   else:
+    from services.snapshot_bom import revision_conflicts,save_with_revisions
+    from services.current_catalog import synchronization_plan,save_confirmed
+    plan=synchronization_plan(self.svc,save_root,rows);selections={};versions={}
+    if plan:
+     from ui.bom_sync_confirmation import BomSyncConfirmationDialog
+     confirmation=BomSyncConfirmationDialog(plan,self)
+     if confirmation.exec_()!=QDialog.Accepted:return False
+     selections=confirmation.selections()
+    partial=[p for p in plan if selections.get(p['material_id'],set())!={s['id'] for s in p['other_skus']}]
+    if any(self.svc.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(p['material_id'],)).fetchone() for p in partial):
+     QMessageBox.warning(self,'SKU版本需手动更新','未全部同步的父物料属于SKU，请先通过SKU版本变更手动升版，再保存此变更。编辑缓存已保留。');return False
+    approved={p['material_id'] for p in plan if p not in partial}
+    violations={v['material_id']:v for v in revision_conflicts(self.svc,save_root,rows) if v['material_id'] not in approved}
+    violations.update({p['material_id']:p for p in partial})
+    if violations:
+     from ui.parent_revision import ParentRevisionDialog
+     chooser=ParentRevisionDialog(self.svc,list(violations.values()),self)
+     if chooser.exec_()!=QDialog.Accepted:return False
+     versions=chooser.versions()
+    callback=lambda n,text:report(int(n*0.85),text)
+    with self.svc.db.transaction():
+     if plan:revisions=save_confirmed(self.svc,save_root,rows,plan,selections,versions,callback)
+     elif violations:revisions=save_with_revisions(self.svc,save_root,rows,versions,progress=callback)
+     else:self.svc.save_bom(save_root,rows,progress=callback);revisions={}
    with self.svc.db.transaction():
-    if plan:revisions=save_confirmed(self.svc,save_root,rows,plan,selections,versions,callback)
-    elif violations:revisions=save_with_revisions(self.svc,save_root,rows,versions,progress=callback)
-    else:self.svc.save_bom(save_root,rows,progress=callback);revisions={}
     from services.bom_colors import save as save_colors
     save_colors(self.svc,[(0,revisions.get(self.root,self.root),(self.root_item.data(0,Qt.UserRole) or {}).get('row_color',''))])
+   self._material_edits.clear();self._history_choices.clear();self._history_parent_versions.clear();self._history_decision_tokens.clear()
    self.root=revisions.get(self.root,self.root)
    report(90,'正在刷新BOM显示…')
    self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
@@ -2050,6 +2150,8 @@ class MaterialWindow(QMainWindow):
   self._column_labels=[self.t.horizontalHeaderItem(i).text() for i in range(self.t.columnCount())]
   from services.snapshot_bom import enabled
   if enabled(self.svc.db):self._column_labels.append('是否被最新历史版本使用')
+  from services.material_history import enabled as history_enabled
+  if history_enabled(self.svc):self._column_labels.append('物料历史版本')
   self._base_column_labels=list(self._column_labels);self._sku_column_ids=[];self._hidden_skus=set()
   self._column_config=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
   self._selected_skus=self._column_config.sku_columns(self.svc.db.path)
@@ -2112,12 +2214,18 @@ class MaterialWindow(QMainWindow):
    item=self.t.horizontalHeaderItem(column); item.setText(label+(' [筛选] ▾' if column in self._filters else ' ▾')); item.setToolTip((label+'\n' if column>=len(self._base_column_labels) else '')+'点击筛选；多列条件同时生效')
   self.t.sync_frozen()
   self.statusBar().showMessage(f'显示 {visible} / {self.t.rowCount()} 个物料')
+ def update_material_history(self,mid,data):
+  from services.material_history import enabled
+  if enabled(self.svc):
+   from ui.material_history import update_library_material
+   return update_library_material(self,mid,data)
+  return self.svc.update_material(mid,data)
  def edit_current(self,row,column):
   rs=self.svc.materials();
   if row<0 or row>=len(rs): return
   r=rs[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
   if dlg.exec_():
-   try:self.svc.update_material(r['id'],dlg.data()); self.refresh()
+   try:self.update_material_history(r['id'],dlg.data()); self.refresh()
    except Exception as e: show_operation_error(self,'保存失败',e)
  def menu(self,pos):
   row=self.t.rowAt(pos.y())
@@ -2126,7 +2234,14 @@ class MaterialWindow(QMainWindow):
   rows=sorted(index.row() for index in self.t.selectionModel().selectedRows() if not self.t.isRowHidden(index.row()))
   materials=self.svc.materials();selected=[materials[index] for index in rows]
   material=materials[row]; rid=material['id']
-  m=QMenu(self);e=m.addAction('编辑物料');v=m.addAction('物料版本变更');v.setEnabled(not any(sku['material_id']==rid for sku in self.svc.skus()))
+  m=QMenu(self);history_actions={}
+  from services.material_history import versions
+  history_rows=versions(self.svc,rid)
+  if history_rows:
+   submenu=m.addMenu('物料历史版本')
+   for record in history_rows:history_actions[submenu.addAction(str(record['history_version']))]=record['history_version']
+   m.addSeparator()
+  e=m.addAction('编辑物料');v=m.addAction('物料版本变更');v.setEnabled(not any(sku['material_id']==rid for sku in self.svc.skus()))
   if material['has_bom']=='Y' or material['idle']=='N':m.addSeparator()
   edit_bom=m.addAction('编辑物料BOM结构') if material['has_bom']=='Y' else None
   export=m.addAction('导出BOM结构') if material['has_bom']=='Y' else None
@@ -2139,6 +2254,9 @@ class MaterialWindow(QMainWindow):
     if action is not d and not action.isSeparator():action.setEnabled(False)
   a=m.exec_(self.t.viewport().mapToGlobal(pos))
   if a is None or not a.isEnabled():return
+  if a in history_actions:
+   from ui.material_history import MaterialHistoryDialog
+   dialog=MaterialHistoryDialog(self.svc,rid,history_actions[a],self);dialog.setAttribute(Qt.WA_DeleteOnClose);dialog.show();return
   if a in (copy_code,copy_name):
    QApplication.clipboard().setText(material['base_code']+material['version'] if a==copy_code else material['name']);return
   if a==similar:
@@ -2158,7 +2276,7 @@ class MaterialWindow(QMainWindow):
   elif a==e:
    r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
    if dlg.exec_():
-    try:self.svc.update_material(rid,dlg.data()); self.refresh()
+    try:self.update_material_history(rid,dlg.data()); self.refresh()
     except Exception as error:show_operation_error(self,'保存失败',error)
   elif a==d and d.isEnabled():self.delete_materials(selected)
  @operation('删除物料')
@@ -2235,7 +2353,7 @@ class MaterialWindow(QMainWindow):
    remember_export_path(p,self.svc)
    from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); file_work(w.save,p); w.close()
  def on_event(self,event):
-  if event.get('type') in ('material_changed','bom_changed','sku_changed','sku_order_changed'): WindowRefreshBus.refresh(self.refresh)
+  if event.get('type') in ('material_changed','material_history_changed','bom_changed','sku_changed','sku_order_changed'): WindowRefreshBus.refresh(self.refresh)
  def closeEvent(self,event):
   for window in list(self._local_bom_windows.values()):
    checkpoint()
@@ -2267,13 +2385,14 @@ class MaterialWindow(QMainWindow):
   rs=self.svc.materials(); self.t.setRowCount(len(rs))
   for i,r in enumerate(rs):
    checkpoint()
-   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+([r['latest_used']] if 'latest_used' in r.keys() else [])+[format_quantity(quantities[sku['id']][r['id']]) if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
+   for j,v in enumerate([r['base_code'],r['version'],r['name'],r['description'],r['unit'],r['grade'],r['manufacturer'],r['mpn'],r['mp_flag'],r['has_bom'],r['idle']]+([r['latest_used']] if 'latest_used' in r.keys() else [])+([r.get('history_version',100)] if '物料历史版本' in self._base_column_labels else [])+[format_quantity(quantities[sku['id']][r['id']]) if r['id'] in quantities[sku['id']] else 'NA' for sku in skus]):
     checkpoint()
     text=str(v or '');item=self.t.item(i,j)
-    centered=j>=base or self._column_labels[j] in ('版本号','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用')
+    centered=j>=base or self._column_labels[j] in ('版本号','物料历史版本','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用')
     style=(centered,r['idle']=='Y',j>=base,v=='NA' if j>=base else False)
     if item is None:
      item=QTableWidgetItem();self.t.setItem(i,j,item)
+    font=item.font();font.setBold(self._column_labels[j]=='物料历史版本' and r.get('history_count',1)>1);item.setFont(font)
     if item.text()!=text:item.setText(text)
     if item.data(Qt.UserRole)!=r['id']:item.setData(Qt.UserRole,r['id'])
     if item.data(Qt.UserRole+2)!=style:

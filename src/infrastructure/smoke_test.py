@@ -71,6 +71,16 @@ def run_smoke_test(report_path):
             app.processEvents()
             from infrastructure.ui_smoke import exercise_windows
             ui_checks=exercise_windows(svc,windows[1],windows[2])
+            from services import material_history as material_history
+            material_history.initialize(db)
+            history_id=svc.copy_sku_bom(sid);history_scope=svc.for_sku(history_id)
+            previous=svc.for_sku(sid).material_snapshot(child)['name']
+            material_history.save(history_scope,root,history_scope.bom(root),{child:{**history_scope.material_snapshot(child),'name':'物料历史冒烟验证'}},'fork')
+            assert svc.for_sku(sid).material_snapshot(child)['name']==previous
+            assert history_scope.material_snapshot(child)['name']=='物料历史冒烟验证'
+            from ui.material_history import MaterialHistoryDialog
+            history_view=MaterialHistoryDialog(svc,child,material_history.versions(svc,child)[0]['history_version']);history_view.show();app.processEvents();history_view.close()
+            ui_checks.extend(['material_history_migration','material_history_metadata_isolation','material_history_readonly_window'])
             report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None

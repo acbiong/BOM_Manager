@@ -102,9 +102,9 @@ def generate(out,main,materials,bom,svc):
     bom.apply_lock_state();bom.tree.expandToDepth(1);node=bom.root_item.child(0);bom.tree.setCurrentItem(node);bom.show_item_info(node)
     r=bom.tree.visualItemRect(node);r.translate(bom.tree.viewport().mapTo(bom,QPoint()));snap('bom_select',bom,rect=r)
     changed=svc.material_snapshot(node.data(0,Qt.UserRole)['material_id'])
-    svc.update_material(changed['id'],{**changed,'name':changed['name']+'（新版名称）'})
+    bom._material_edits[changed['id']]={**changed,'name':changed['name']+'（新版名称）'};bom.show_item_info(node)
     snap('bom_material_pending',bom,bom.fields['name'])
-    svc.update_material(changed['id'],changed);bom.show_item_info(node)
+    bom._material_edits.clear();bom.show_item_info(node)
     for field in ('quantity','position','remark'):
         bom.info_scroll.ensureWidgetVisible(bom.fields[field]);QApplication.processEvents();snap('bom_'+field,bom,bom.fields[field])
     bom.fields['remark'].setText('帮助示例：核对装配位置');QApplication.processEvents()
@@ -128,6 +128,22 @@ def generate(out,main,materials,bom,svc):
     with patch.object(QMenu,'exec_',menu_capture):main.sku_context_menu(pos)
     svc.set_sku_locked(sid,True)
     with patch.object(QMenu,'exec_',menu_capture):main.sku_context_menu(pos)
+    from ui.material_history import MaterialHistoryDialog,MaterialHistoryChoiceDialog
+    from services.material_history import versions
+    column=materials._base_column_labels.index('物料历史版本')
+    materials.t.scrollToItem(materials.t.item(0,column));QApplication.processEvents()
+    rect=materials.t.visualItemRect(materials.t.item(0,column));rect.translate(materials.t.viewport().mapTo(materials,QPoint()))
+    snap('material_history_column',materials,rect=rect)
+    mid=bom.root_item.child(0).data(0,Qt.UserRole)['material_id']
+    from services.current_catalog import latest_skus
+    from services.material_history import definitions,affected
+    choice_service=bom.svc;choice_mid=mid
+    for sku in latest_skus(svc):
+        candidate=svc.for_sku(sku['id'])
+        match=next((m for m in definitions(candidate) if affected(candidate,[m])),None)
+        if match is not None:choice_service=candidate;choice_mid=match;break
+    choice=dialog(MaterialHistoryChoiceDialog(choice_service,choice_mid,'编辑此物料',bom));snap('material_history_choose',choice,choice.fork);choice.hide()
+    viewer=dialog(MaterialHistoryDialog(svc,mid,versions(svc,mid)[0]['history_version'],materials));snap('material_history_view',viewer,viewer.tree);viewer.hide()
     from help_more_screenshots import generate as generate_more
     generate_more(locals())
     for w in dialogs:w.close();w.deleteLater()

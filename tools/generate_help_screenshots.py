@@ -63,6 +63,10 @@ def main():
         try:source.backup(target)
         finally:target.close();source.close()
         cfg=ConfigService(tmp); db=Database(str(demo_db_path)); svc=Services(db,cfg)
+        from services.snapshot_bom import migrate
+        from services.current_catalog import initialize as catalog_initialize
+        from services.material_history import initialize as history_initialize
+        migrate(db);catalog_initialize(db);history_initialize(db)
         from ui.main_window import MainWindow,MaterialDialog,NewSkuDialog,MaterialHeaderMappingDialog
         from ui.material_search import MaterialSearchDialog
         app=QApplication.instance() or QApplication([])

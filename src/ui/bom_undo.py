@@ -51,13 +51,13 @@ class BomUndo(QObject):
             while item is not None and item.parent() is not None:
                 result.insert(0,item.parent().indexOfChild(item));item=item.parent()
             return tuple(result)
-        state={name:deepcopy(getattr(w,name,None)) for name in ('_deleted_relations','_alternate_edits','_draft_baselines','_external_paths','_baseline_tree','_root_baseline','_root_color_dirty')}
+        state={name:deepcopy(getattr(w,name,None)) for name in ('_history_decision_tokens','_material_edits','_history_choices','_history_parent_versions','_deleted_relations','_alternate_edits','_draft_baselines','_external_paths','_baseline_tree','_root_baseline','_root_color_dirty')}
         state.update(tree=deepcopy(w.capture_tree()),root=deepcopy(w.root_item.data(0,Qt.UserRole)),dirty=w.dirty,save=w.save_action.isEnabled(),export=w.export_action.isEnabled())
         state['external_info']=(getattr(w,'_undo_external_epoch',0),w.notice.text(),w.refresh_action.isEnabled())
         state['view']=(path(w.tree.currentItem()),[path(item) for item in w.tree.selectedItems()],[(path(item),item.isExpanded()) for _,item in w.expansion_nodes()],w.tree.verticalScrollBar().value(),w.tree.horizontalScrollBar().value())
         return state
     def record(self,before,after,key):
-        if {k:v for k,v in before.items() if k not in ('view','external_info')}=={k:v for k,v in after.items() if k not in ('view','external_info')}:return
+        if {k:v for k,v in before.items() if k not in ('view','external_info','_history_decision_tokens')}=={k:v for k,v in after.items() if k not in ('view','external_info','_history_decision_tokens')}:return
         now=monotonic()
         if key is not None and key==self.last_key and now-self.last_time<0.8 and self.undo_stack and not self.redo_stack:
             self.undo_stack[-1]=(self.undo_stack[-1][0],after)

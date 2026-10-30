@@ -158,7 +158,7 @@ class BomCompareDialog(QDialog):
         if window is None or not window.dirty:return snapshot(self.service,sku)
         material_cache={};alternate_cache={}
         def material(mid):
-            if mid not in material_cache:material_cache[mid]=window.svc.material_snapshot(mid)
+            if mid not in material_cache:material_cache[mid]={**window.svc.material_snapshot(mid),**getattr(window,'_material_edits',{}).get(mid,{})}
             return material_cache[mid]
         def node(item,parent=None,path=()):
             data=dict(item.data(0,Qt.UserRole) or {})
@@ -194,6 +194,13 @@ class BomCompareDialog(QDialog):
         if action==edit:self.open_editor(side,index.row())
         elif action==material_edit:self.edit_material(side,index.row())
     def edit_material(self,side,row):
+        from services.material_history import enabled
+        if enabled(self.service):
+            self.open_editor(side,row)
+            sid=(self.left,self.right)[side].currentData()
+            window=getattr(self.parent(),'_bom_windows',{}).get(sid)
+            if window is not None:window.edit_tree_material(window.tree.currentItem())
+            return
         from ui.main_window import MaterialDialog
         if row<0 or row>=len(self._rows):return
         node=self._rows[row].left if side==0 else self._rows[row].right

@@ -29,6 +29,8 @@ class MirrorDatabase:
 
 def create_namespace(database,sid,source):
     conn=database.conn
+    from services.material_history import copy_bindings
+    copy_bindings(source,sid)
     root=conn.execute('SELECT material_id FROM skus WHERE id=?',(sid,)).fetchone()[0]
     nodes=source.bom(root);relation_ids={row['id'] for row in nodes}
     captured={root}|{row['material_id'] for row in nodes}
@@ -54,6 +56,8 @@ def create_namespace(database,sid,source):
     conn.execute(f'CREATE INDEX {table_name(sid,"alternates")}_relation ON {table_name(sid,"alternates")}(bom_item_id,sort_no)')
 
 def drop_namespace(database,sid):
+    from services.material_history import enabled
+    if enabled(database):database.conn.execute('DELETE FROM material_history_bindings WHERE sku_id=?',(sid,))
     database.conn.execute('DELETE FROM bom_row_colors WHERE scope_id=?',(sid,))
     for table in TABLES:database.conn.execute(f'DROP TABLE IF EXISTS {table_name(sid,table)}')
     database.conn.execute('DELETE FROM mirror_material_usage WHERE sku_id=?',(sid,))

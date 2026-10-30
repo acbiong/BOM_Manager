@@ -1,6 +1,6 @@
 {
   "action_project_menu": {
-    "window": "Mobius Foot 智能踝关节 BOM管理系统",
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
       52,
       2,
@@ -117,7 +117,7 @@
     ]
   },
   "action_library_open": {
-    "window": "Mobius Foot 智能踝关节 BOM管理系统",
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
       100,
       2,
@@ -130,7 +130,7 @@
     ]
   },
   "action_material_new": {
-    "window": "Mobius Foot 智能踝关节 物料库",
+    "window": "Mobius FDA 智能仿生腿 物料库",
     "target": [
       4,
       2,
@@ -286,7 +286,7 @@
     ]
   },
   "action_import_open": {
-    "window": "Mobius Foot 智能踝关节 物料库",
+    "window": "Mobius FDA 智能仿生腿 物料库",
     "target": [
       86,
       2,
@@ -355,8 +355,8 @@
     "target": [
       102,
       86,
-      155,
-      50
+      152,
+      47
     ],
     "size": [
       1000,
@@ -368,8 +368,8 @@
     "target": [
       254,
       86,
-      136,
-      47
+      139,
+      50
     ],
     "size": [
       1000,
@@ -381,8 +381,8 @@
     "target": [
       390,
       86,
-      136,
-      47
+      139,
+      50
     ],
     "size": [
       1000,
@@ -394,8 +394,8 @@
     "target": [
       468,
       86,
-      152,
-      47
+      155,
+      50
     ],
     "size": [
       1000,
@@ -407,8 +407,8 @@
     "target": [
       476,
       86,
-      136,
-      47
+      139,
+      50
     ],
     "size": [
       1000,
@@ -420,8 +420,8 @@
     "target": [
       476,
       86,
-      136,
-      47
+      139,
+      50
     ],
     "size": [
       1000,
@@ -433,8 +433,8 @@
     "target": [
       578,
       86,
-      136,
-      47
+      139,
+      50
     ],
     "size": [
       1000,
@@ -446,8 +446,8 @@
     "target": [
       714,
       86,
-      136,
-      47
+      139,
+      50
     ],
     "size": [
       1000,
@@ -459,8 +459,8 @@
     "target": [
       850,
       86,
-      136,
-      47
+      139,
+      50
     ],
     "size": [
       1000,
@@ -585,11 +585,11 @@
     ]
   },
   "action_bom_open": {
-    "window": "Mobius Foot 智能踝关节 BOM管理系统",
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
-      164,
+      168,
       59,
-      142,
+      149,
       37
     ],
     "size": [
@@ -598,7 +598,7 @@
     ]
   },
   "action_bom_select": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       48,
       102,
@@ -611,7 +611,7 @@
     ]
   },
   "action_bom_material_pending": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       530,
       159,
@@ -624,7 +624,7 @@
     ]
   },
   "action_bom_quantity": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       530,
       246,
@@ -637,7 +637,7 @@
     ]
   },
   "action_bom_position": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       530,
       347,
@@ -650,7 +650,7 @@
     ]
   },
   "action_bom_remark": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       530,
       479,
@@ -663,7 +663,7 @@
     ]
   },
   "action_bom_save": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       11,
       2,
@@ -676,7 +676,7 @@
     ]
   },
   "action_bom_undo": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       62,
       2,
@@ -689,7 +689,7 @@
     ]
   },
   "action_bom_redo": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       113,
       2,
@@ -702,7 +702,7 @@
     ]
   },
   "action_export_bom": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       215,
       2,
@@ -715,7 +715,7 @@
     ]
   },
   "action_export_purchase": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       304,
       2,
@@ -754,7 +754,7 @@
     ]
   },
   "action_search_open": {
-    "window": "Mobius Foot 智能踝关节 物料库",
+    "window": "Mobius FDA 智能仿生腿 物料库",
     "target": [
       349,
       2,
@@ -808,9 +808,9 @@
   "action_search_result": {
     "window": "查找物料",
     "target": [
-      138,
+      114,
       304,
-      181,
+      142,
       32
     ],
     "size": [
@@ -819,11 +819,11 @@
     ]
   },
   "action_sku_context": {
-    "window": "Mobius Foot 智能踝关节 BOM管理系统",
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
-      164,
+      168,
       59,
-      142,
+      149,
       37
     ],
     "size": [
@@ -841,7 +841,7 @@
     ],
     "size": [
       175,
-      340
+      400
     ]
   },
   "action_sku_lock": {
@@ -854,7 +854,7 @@
     ],
     "size": [
       175,
-      340
+      400
     ]
   },
   "action_sku_unlock": {
@@ -867,11 +867,50 @@
     ],
     "size": [
       175,
-      340
+      400
+    ]
+  },
+  "action_material_history_column": {
+    "window": "Mobius FDA 智能仿生腿 物料库",
+    "target": [
+      864,
+      97,
+      122,
+      32
+    ],
+    "size": [
+      1000,
+      600
+    ]
+  },
+  "action_material_history_choose": {
+    "window": "编辑此物料 — 物料历史版本",
+    "target": [
+      9,
+      102,
+      832,
+      35
+    ],
+    "size": [
+      850,
+      480
+    ]
+  },
+  "action_material_history_view": {
+    "window": "BC8-2000536100 Mobius智能假肢成品/BR3B/深空灰 物料历史版本100（只读）",
+    "target": [
+      9,
+      267,
+      1032,
+      335
+    ],
+    "size": [
+      1050,
+      650
     ]
   },
   "action_db_import_menu": {
-    "window": "Mobius Foot 智能踝关节 BOM管理系统",
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
       4,
       2,
@@ -927,11 +966,11 @@
     "target": [
       2,
       2,
-      266,
+      262,
       29
     ],
     "size": [
-      270,
+      266,
       33
     ]
   },
@@ -939,29 +978,16 @@
     "window": "",
     "target": [
       2,
-      68,
+      92,
       121,
       26
     ],
     "size": [
       125,
-      138
+      208
     ]
   },
   "action_revision_menu": {
-    "window": "",
-    "target": [
-      2,
-      20,
-      121,
-      26
-    ],
-    "size": [
-      125,
-      138
-    ]
-  },
-  "action_reverse_menu": {
     "window": "",
     "target": [
       2,
@@ -971,7 +997,20 @@
     ],
     "size": [
       125,
-      138
+      208
+    ]
+  },
+  "action_reverse_menu": {
+    "window": "",
+    "target": [
+      2,
+      68,
+      121,
+      26
+    ],
+    "size": [
+      125,
+      208
     ]
   },
   "action_similar_code": {
@@ -1095,13 +1134,13 @@
     "window": "",
     "target": [
       2,
-      206,
+      252,
       121,
       22
     ],
     "size": [
       125,
-      230
+      276
     ]
   },
   "action_delete_sku_confirm": {
@@ -1121,13 +1160,13 @@
     "window": "",
     "target": [
       2,
-      90,
+      160,
       121,
       22
     ],
     "size": [
       125,
-      114
+      184
     ]
   },
   "action_material_delete_confirm": {
@@ -1212,13 +1251,13 @@
     "window": "确认删除",
     "target": [
       221,
-      96,
+      121,
       84,
       37
     ],
     "size": [
       400,
-      142
+      167
     ]
   },
   "action_delete_node_restore": {
@@ -1365,11 +1404,11 @@
     ]
   },
   "action_alternate_select": {
-    "window": "BC3-0000533080 Mobius Foot包装出货成品/MFH1/22码/左脚 历史版本100",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       438,
       375,
-      115,
+      114,
       32
     ],
     "size": [
@@ -1420,13 +1459,13 @@
     "window": "",
     "target": [
       2,
-      294,
+      318,
       121,
       26
     ],
     "size": [
       125,
-      364
+      388
     ]
   },
   "action_move_down": {
@@ -1521,7 +1560,7 @@
     ]
   },
   "action_compare_menu": {
-    "window": "Mobius Foot 智能踝关节 BOM管理系统",
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
       213,
       2,
@@ -1668,8 +1707,8 @@
     "target": [
       102,
       125,
-      152,
-      47
+      161,
+      50
     ],
     "size": [
       1000,

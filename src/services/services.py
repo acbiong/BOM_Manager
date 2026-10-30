@@ -27,7 +27,13 @@ class Services:
  MATERIAL_FIELDS=[('base_code','基础编码'),('version','版本号'),('name','物料名称'),('description','规格描述'),('unit','单位'),('grade','物料等级'),('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P')]
  def material_snapshot(self,i):
   row=self.db.conn.execute('SELECT * FROM materials WHERE id=?',(i,)).fetchone()
-  return dict(row) if row else {}
+  result=dict(row) if row else {}
+  from services.material_history import enabled
+  if result and enabled(self) and getattr(self,'sku_id',None):
+   import json
+   record=self.db.conn.execute('SELECT h.attributes,h.history_version FROM material_history_bindings b JOIN material_histories h ON h.material_id=b.material_id AND h.history_version=b.history_version WHERE b.sku_id=? AND b.material_id=?',(self.sku_id,i)).fetchone()
+   if record:result.update(json.loads(record[0]),history_version=record[1])
+  return result
  def material_detail(self,before,after):
   def text(value):return '（空）' if value is None or value=='' else str(value)
   return '；'.join(f'{label}：{text(before.get(key))} → {text(after.get(key))}' for key,label in self.MATERIAL_FIELDS if before.get(key)!=after.get(key))
@@ -104,6 +110,11 @@ class Services:
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；SKU、有效BOM主料或替代料引用均为非呆滞。
   q=f'%{query}%'; rows=self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id WHERE u.parent_id=m.id AND u.role="main") THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
+  from services.material_history import enabled as histories_enabled
+  if histories_enabled(self):
+   counts={r[0]:(r[1],r[2]) for r in self.db.conn.execute('SELECT material_id,MAX(history_version),COUNT(*) FROM material_histories GROUP BY material_id')}
+   history_bom={r[0]:('Y' if r[1] else 'N') for r in self.db.conn.execute('SELECT h.material_id,json_array_length(h.children) FROM material_histories h WHERE h.history_version=(SELECT MAX(h2.history_version) FROM material_histories h2 WHERE h2.material_id=h.material_id)')}
+   rows=[dict(r,history_version=counts.get(r['id'],(100,1))[0],history_count=counts.get(r['id'],(100,1))[1],history_has_bom=history_bom.get(r['id'],'N')) for r in rows]
   from services.snapshot_bom import enabled,latest_usage
   if enabled(self.db):
    used=latest_usage(self)
@@ -116,20 +127,25 @@ class Services:
      checkpoint()
      if sources[0]['children']:parents.add(mid)
      else:parents.discard(mid)
-    return [dict(row,latest_used='Y' if row['id'] in used else 'N',has_bom='Y' if row['id'] in parents else 'N') for row in rows]
+    return [dict(row,latest_used='Y' if row['id'] in used else 'N',has_bom=row.get('history_has_bom','Y' if row['id'] in parents else 'N') if isinstance(row,dict) else ('Y' if row['id'] in parents else 'N')) for row in rows]
    return [dict(row,latest_used='Y' if row['id'] in used else 'N') for row in rows]
   return rows
  def create_material(self,d):
   if not all(d.get(k) for k in ('base_code','version','name')): raise ValueError('基础编码、版本号、名称为必填')
   if d.get('unit','pcs') not in self.UNITS: raise ValueError('单位不合规')
   with self.db.transaction():
-   c=self.db.conn.execute('INSERT INTO materials(base_code,version,name,description,unit,grade,manufacturer,mpn,mp_flag) VALUES(?,?,?,?,?,?,?,?,?)',(d['base_code'],d['version'],d['name'],d.get('description',''),d.get('unit','pcs'),d.get('grade',''),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'))); i=c.lastrowid; self.log('material',i,'create','新建物料；'+self.material_detail({},self.material_snapshot(i)))
+   from services.material_history import next_material_id
+   c=self.db.conn.execute('INSERT INTO materials(id,base_code,version,name,description,unit,grade,manufacturer,mpn,mp_flag) VALUES(?,?,?,?,?,?,?,?,?,?)',(next_material_id(self),d['base_code'],d['version'],d['name'],d.get('description',''),d.get('unit','pcs'),d.get('grade',''),d.get('manufacturer',''),d.get('mpn',''),d.get('mp_flag','M'))); i=c.lastrowid; self.log('material',i,'create','新建物料；'+self.material_detail({},self.material_snapshot(i)))
+   from services.material_history import enabled,record,connection
+   if enabled(self):record(connection(self),i,self.material_snapshot(i),[])
   try:
    from infrastructure.events import WindowRefreshBus; self.publish({'type':'material_changed','id':i})
   except Exception: pass
   return i
  def update_material(self,i,d):
   if d.get('unit') not in self.UNITS:raise ValueError('单位不合规，允许：'+ '、'.join(self.UNITS))
+  from services.material_history import enabled as history_enabled,update_catalog_material
+  if history_enabled(self):return update_catalog_material(self,i,d)
   before=self.material_snapshot(i)
   if not before:raise ValueError('物料不存在')
   with self.db.transaction():
@@ -145,7 +161,13 @@ class Services:
   if self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=?',(i,)).fetchone():raise ValueError('物料仍被BOM作为替代料引用，请先删除引用')
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.db.conn.execute('DELETE FROM bom_row_colors WHERE parent_id=? OR material_id=?',(i,i)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
- def skus(self): return self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,s.change_description,s.locked,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+ def skus(self):
+  rows=self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,s.change_description,s.locked,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+  from services.material_history import enabled
+  if not enabled(self):return rows
+  import json
+  roots={r['sku_id']:json.loads(r['attributes']) for r in self.db.conn.execute('SELECT b.sku_id,h.attributes FROM material_history_bindings b JOIN skus s ON s.id=b.sku_id AND s.material_id=b.material_id JOIN material_histories h ON h.material_id=b.material_id AND h.history_version=b.history_version')}
+  return [dict(r,**roots.get(r['id'],{})) for r in rows]
  def sku_material_quantities(self,skus=None):
   """每个SKU数量为1；仅累计主BOM，Decimal保留路径连乘精度。"""
   from decimal import Decimal
@@ -181,6 +203,8 @@ class Services:
     create_namespace(self.db,sid,self)
     self.db.conn.execute('UPDATE skus SET scope_id=? WHERE id=?',(sid,sid))
     scoped=self.for_sku(sid);scoped.refresh_usage();record_definitions(scoped,mid)
+    from services.material_history import enabled as history_enabled,capture
+    if history_enabled(self):capture(scoped)
   from infrastructure.events import WindowRefreshBus
   self.publish({'type':'sku_changed','id':sid})
   return sid
@@ -225,6 +249,8 @@ class Services:
   from services.bom_colors import colors
   row_colors=colors(self)
   result=[];children={}
+  from services.material_history import definitions
+  historical=definitions(self)
   # Operation-local snapshot: each reachable edge is fetched once even when
   # shared subassemblies appear on many paths. UNION terminates cyclic data.
   for row in self.db.conn.execute('WITH RECURSIVE reachable(mid) AS (SELECT ? UNION SELECT b.child_material_id FROM material_bom_items b JOIN reachable r ON b.parent_material_id=r.mid) SELECT b.*,m.base_code,m.version,m.name,m.description,m.unit AS material_unit,m.grade,m.manufacturer,m.mpn,m.mp_flag FROM material_bom_items b JOIN reachable r ON r.mid=b.parent_material_id JOIN materials m ON m.id=b.child_material_id ORDER BY b.sort_no,b.id',(root,)):
@@ -239,6 +265,7 @@ class Services:
     if r['child_material_id'] in ancestors:continue
     node_id=f"{parent_node_id or ''}/{r['id']}"
     d=dict(r); d.update(row_color=row_colors.get((parent_id,r['child_material_id']),''),material_id=r['child_material_id'],unit=r['material_unit'],level_no=level,parent_item_id=parent_item_id,bom_root_id=root,node_id=node_id,parent_node_id=parent_node_id)
+    d.update(historical.get(r['child_material_id'],{}))
     result.append(d); walk(r['child_material_id'],level+1,r['id'],node_id,ancestors)
   walk(root,1,None,None,set()); return result
  def save_bom(self,root,items,preview=False,progress=None):
@@ -322,6 +349,8 @@ class Services:
    relations={key:payload(row) for key,row in old.items() if key[0] not in parents}
    relations.update(desired)
    groups={}; materials={r['id']:dict(r) for r in self.materials()}
+   from services.material_history import definitions
+   for mid,attrs in definitions(self).items():materials[mid].update(attrs)
    for number,(key,values) in enumerate(relations.items(),1):
     checkpoint()
     parent,child,position=key; quantity,unit,remark=values
@@ -468,7 +497,10 @@ class Services:
    if catalog_enabled(self):prune_snapshot(self)
    if getattr(self,'scope_id',0):self.refresh_usage()
    if enabled(self.db):record_definitions(self,root)
-   synchronize(self,changed_parents)
+   from services.material_history import enabled as histories_enabled,finish_save
+   if histories_enabled(self):
+    if not getattr(self,'_history_defer',False):finish_save(self,changed_parents)
+   else:synchronize(self,changed_parents)
   from infrastructure.events import WindowRefreshBus
   report(90,'正在通知相关BOM窗口…')
   for parent in changed_parents: self.publish({'type':'bom_changed','root':parent})
@@ -743,6 +775,8 @@ class Services:
    else:
     columns=['base_code','name','description','unit','grade','manufacturer','mpn','mp_flag','has_bom']
     values=[old[k] for k in columns]
+    from services.material_history import next_material_id
+    columns.insert(0,'id');values.insert(0,next_material_id(self))
     new_id=self.db.conn.execute('INSERT INTO materials('+','.join(columns)+',version) VALUES('+','.join('?' for _ in range(len(columns)+1))+')',values+[new_version]).lastrowid
     # 新版本继承原物料自己的下阶结构和替代料，新旧版本后续可独立维护。
     for child in self.db.conn.execute('SELECT * FROM material_bom_items WHERE parent_material_id=?',(i,)).fetchall():
@@ -763,6 +797,19 @@ class Services:
        cloned_mirrors.add(sid)
       connection.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,int(parent_id),i));service.refresh_usage()
      else:self.db.conn.execute('UPDATE material_bom_items SET child_material_id=?,updated_at=CURRENT_TIMESTAMP WHERE parent_material_id=? AND child_material_id=?',(new_id,parent,i))
+   from services.material_history import enabled as history_enabled,capture,versions,read,record
+   if history_enabled(self):
+    raw=dict(self.db.conn.execute('SELECT * FROM materials WHERE id=?',(new_id,)).fetchone())
+    if new_id==i:
+     from services.current_catalog import latest_skus
+     for sku in latest_skus(self):
+      target=self.for_sku(sku['id'])
+      if self.db.conn.execute('SELECT 1 FROM material_history_bindings WHERE sku_id=? AND material_id=?',(sku['id'],i)).fetchone():capture(target,{i:raw})
+    else:
+     for sid in cloned_mirrors:capture(self.for_sku(int(sid)))
+    if not versions(self,new_id):
+     old_versions=versions(self,i);children=read(self,i,old_versions[0]['history_version'])['children'] if old_versions else []
+     record(self.db.conn,new_id,raw,children)
    self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={[str(parent) if isinstance(parent,str) else str(self.material_snapshot(parent).get('base_code',''))+str(self.material_snapshot(parent).get('version',''))+' '+str(self.material_snapshot(parent).get('name','')) for parent in sorted(selected,key=str)]}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
   from infrastructure.events import WindowRefreshBus
   self.publish({'type':'material_changed','id':new_id})
@@ -780,8 +827,10 @@ class Services:
    checkpoint()
    batch=ids[offset:offset+500]
    for row in self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id IN ('+','.join('?' for _ in batch)+') ORDER BY a.sort_no,a.id',batch):result[row['bom_item_id']].append(row)
-  return result
- def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
+  from services.material_history import definitions
+  historical=definitions(self,{row['material_id'] for rows in result.values() for row in rows})
+  return {rid:[dict(row,**historical.get(row['material_id'],{})) for row in rows] for rid,rows in result.items()}
+ def alternates(self,bom_item_id):return self.alternate_groups([bom_item_id])[bom_item_id]
  def remove_alternate(self,aid):
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
  @WindowRefreshBus.batch()
@@ -981,6 +1030,8 @@ class Services:
   headers=headers[:-1]+alternate_headers+['备注']
   sheet.append(headers)
   materials={row['id']:row for row in self.db.conn.execute('SELECT * FROM materials')}
+  from services.material_history import definitions
+  materials.update({mid:{**materials[mid],**attrs} for mid,attrs in definitions(self).items()})
   # 根SKU也属于导出的BOM：ROOT标记便于导入时核对根物料身份。
   material=materials[root]
   sheet.append(['1',0,'ROOT','ROOT',material['base_code'],material['version'],material['name'],material['description'],'',1.0,material['unit'],material['grade'],material['mp_flag'],material['manufacturer'],material['mpn']]+['']*(count*5)+[''])

@@ -176,6 +176,10 @@ def catalog_edges(service):
 
 def selection_tree(service,root):
     """Read public metadata and descendants without mutating editor snapshots."""
+    from services.material_history import enabled as history_enabled,selection_tree as history_tree
+    if history_enabled(service):
+        tree=history_tree(service,root)
+        if tree is not None:return tree
     source=material_structure_source(service,root)
     from services.services import Services
     nodes={};roots=[]
@@ -219,6 +223,8 @@ def prune_public(primary):
     conn.execute('UPDATE materials SET has_bom=EXISTS(SELECT 1 FROM material_bom_items WHERE parent_material_id=materials.id)')
 
 def refresh_latest_from_catalog(primary):
+    from services.material_history import enabled as history_enabled
+    if history_enabled(primary):return
     if not enabled(primary):return
     graph=groups(primary)
     sku_materials={r[0] for r in primary.db.conn.execute('SELECT material_id FROM skus')}

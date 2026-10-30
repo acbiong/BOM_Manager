@@ -148,7 +148,10 @@ def revision_conflicts(service,root,items):
         if known and known[0]!=codes:
             material=service.material_snapshot(mid)
             conflicts.append(dict(material_id=mid,label=material['base_code']+material['version']+' '+material['name'],before=json.loads(known[0]),after=json.loads(codes),other_skus=other_sku_usages(service,mid)))
-    return conflicts
+    from services.material_history import attribute_conflicts
+    combined={p['material_id']:p for p in conflicts}
+    combined.update({p['material_id']:p for p in attribute_conflicts(service,root,items)})
+    return list(combined.values())
 
 def record_definitions(service,root):
     conn=getattr(service.db.conn,'raw',service.db.conn)
@@ -177,6 +180,8 @@ def save_with_revisions(service,root,items,versions,progress=None,required=None)
             else:
                 fields=['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']
                 values=[version if f=='version' else old[f] for f in fields]
+                from services.material_history import next_material_id
+                fields.insert(0,'id');values.insert(0,next_material_id(service))
                 new_id=service.db.conn.execute('INSERT INTO materials('+','.join(fields)+') VALUES('+','.join('?' for _ in fields)+')',values).lastrowid
                 getattr(service,'primary',service).log('material',new_id,'create','')
             known=service.db.conn.execute('SELECT child_codes FROM bom_revision_definitions WHERE material_id=?',(new_id,)).fetchone()
@@ -191,7 +196,12 @@ def save_with_revisions(service,root,items,versions,progress=None,required=None)
             row['material_id']=mapping.get(row['material_id'],row['material_id'])
             if row.get('parent_material_id') is not None:row['parent_material_id']=mapping.get(row['parent_material_id'],row['parent_material_id'])
             rows.append(row)
-        service.save_bom(mapping.get(root,root),rows,progress=progress)
+        previous_approved=getattr(service,'_history_revision_approved',None)
+        service._history_revision_approved=set(mapping.values())|set(previous_approved or ())
+        try:service.save_bom(mapping.get(root,root),rows,progress=progress)
+        finally:
+            if previous_approved is None:del service._history_revision_approved
+            else:service._history_revision_approved=previous_approved
     service.publish({'type':'material_changed','ids':list(mapping.values())})
     return mapping
 

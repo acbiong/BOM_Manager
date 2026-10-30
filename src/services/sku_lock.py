@@ -11,8 +11,14 @@ def locked_snapshots(conn,ids=None):
  if not rows:return {}
  fields=('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag')
  materials={r['id']:tuple(r[k] for k in fields) for r in conn.execute('SELECT * FROM materials')}
+ history_enabled=bool(conn.execute('SELECT 1 FROM app_metadata WHERE key=?',('material_history_v1',)).fetchone())
  result={}
  for sku in rows:
+  scoped_materials=dict(materials)
+  if history_enabled:
+   import json
+   for h in conn.execute('SELECT b.material_id,h.attributes FROM material_history_bindings b JOIN material_histories h ON h.material_id=b.material_id AND h.history_version=b.history_version WHERE b.sku_id=?',(sku['id'],)):
+    attrs=json.loads(h['attributes']);scoped_materials[h['material_id']]=tuple(attrs[k] for k in fields)
   prefix=f"mirror_{sku['scope_id']}_" if sku['scope_id'] else ''
   graph=defaultdict(list);alts=defaultdict(list)
   for a in conn.execute('SELECT * FROM '+prefix+'alternates ORDER BY sort_no,id'):alts[a['bom_item_id']].append((a['material_id'],a['sort_no']))
@@ -21,7 +27,7 @@ def locked_snapshots(conn,ids=None):
   while pending:
    parent=pending.pop()
    if parent in seen:continue
-   seen.add(parent);used[parent]=materials.get(parent)
+   seen.add(parent);used[parent]=scoped_materials.get(parent)
    for rank,r in enumerate(sorted(graph[parent],key=lambda r:(r['sort_no'],r['id']))):
     child=r['child_material_id'];alternates=tuple((mid,index) for index,(mid,_) in enumerate(alts[r['id']]));key=(parent,child)
     edges.setdefault(key,[]).append((r['quantity'],r['unit'],r['position'],r['remark'],rank,alternates))

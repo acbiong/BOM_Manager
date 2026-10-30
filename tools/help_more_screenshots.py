@@ -89,7 +89,9 @@ def generate(e):
     if not bom.material_versions(version_node):
         data=svc.material_snapshot(version_node.data(0,Qt.UserRole)['material_id']);svc.create_material({**data,'version':data['version']+'-HELP'})
     tree_menu(version_node,[('物料版本更新','bom_revision_menu')]);choose_shots(lambda:bom.update_material_version(version_node),'bom_revision_choice','bom_revision_ok')
-    select_node(node);choose_shots(bom.add_alternate,'alternate_choice','alternate_ok')
+    from ui.material_history import MaterialHistoryChoiceDialog
+    with patch.object(MaterialHistoryChoiceDialog,'exec_',return_value=1):
+        select_node(node);choose_shots(bom.add_alternate,'alternate_choice','alternate_ok')
     alt=next(r for r in svc.materials() if r['id'] not in bom.replacement_blocked_materials(node) and r['id'] not in bom.alternate_ids(node))
     bom._alternate_edits[bom.alternate_key(node)]=bom.alternate_ids(node)+[alt['id']];bom.mark_dirty();bom.show_item_info(node)
     table=bom.alt_table;row=table.rowCount()-1;shown(bom);bom.info_scroll.ensureWidgetVisible(table);QApplication.processEvents();snap('alternate_select',bom,rect=table_rect(bom,table,row))
