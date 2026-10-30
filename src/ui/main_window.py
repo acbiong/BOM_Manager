@@ -895,6 +895,17 @@ class BomImportConflictDialog(QDialog):
   layout.addWidget(buttons)
  def finish(self,choice):self.choice=choice;self.accept() if choice!='stop' else self.reject()
 
+def confirm_material_deletion(owner,labels,description):
+ if len(labels)==1:
+  return QMessageBox.question(owner,'确认删除',description+'\n'+labels[0],QMessageBox.Yes|QMessageBox.No,QMessageBox.Yes)==QMessageBox.Yes
+ box=QMessageBox(owner);box.setWindowTitle('确认批量删除');box.setIcon(QMessageBox.Warning)
+ box.setText(f'将删除选中的 {len(labels)} 个物料。'+description)
+ box.setInformativeText('请展开“显示详细信息”核对完整物料清单。')
+ box.setDetailedText('\n'.join(f'{index}. {label}' for index,label in enumerate(labels,1)))
+ box.setStandardButtons(QMessageBox.Yes|QMessageBox.No);box.setDefaultButton(QMessageBox.Yes)
+ return box.exec_()==QMessageBox.Yes
+
+
 class BomTreeWidget(QTreeWidget):
  def __init__(self,*args):
   super().__init__(*args);self.setSelectionMode(QAbstractItemView.ExtendedSelection);self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1008,7 +1019,13 @@ class BomWindow(QMainWindow):
   d=it.data(0,Qt.UserRole) or {}
   menu=QMenu(self)
   if len(self.selected_copy_items(it))>1:
-   actions=self.clipboard_actions(menu,it);self.add_color_menu(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos));self.handle_clipboard_action(chosen,actions,it);return
+   actions=self.clipboard_actions(menu,it);self.add_color_menu(menu,it)
+   menu.addSeparator();delete=menu.addAction('删除物料')
+   delete.setEnabled(not self.is_locked() and any(node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted') for node in self.selected_copy_items(it)))
+   chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
+   if chosen==delete and delete.isEnabled():self.confirm_delete(it)
+   else:self.handle_clipboard_action(chosen,actions,it)
+   return
   if self.is_locked():
    reverse=menu.addAction('物料反查');copy=menu.addAction('复制物料');export=self.subtree_export_action(menu,it);chosen=menu.exec_(self.tree.viewport().mapToGlobal(pos))
    if chosen==reverse:self.reverse_tree_material(it)
@@ -1085,8 +1102,22 @@ class BomWindow(QMainWindow):
   if not self.export_action.isEnabled() or self.dirty or not item.childCount() or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
   export_material_structure(self,self.svc,(item.data(0,Qt.UserRole) or {})['material_id'],root_color=(item.data(0,Qt.UserRole) or {}).get('row_color',''))
  def confirm_delete(self,item):
-  if self.is_locked() or item is None or item is self.root_item or (item.data(0,Qt.UserRole) or {}).get('_deleted'):return
-  if QMessageBox.question(self,'确认删除','是否删除选定的物料及其子物料？\n'+item.text(0),QMessageBox.Yes|QMessageBox.No,QMessageBox.Yes)==QMessageBox.Yes:self.remove_relation(item)
+  if self.is_locked():return
+  nodes=[node for node in self.selected_copy_items(item) if node is not self.root_item and not (node.data(0,Qt.UserRole) or {}).get('_deleted')]
+  if not nodes:return
+  if not confirm_material_deletion(self,[node.text(0) for node in nodes],'是否删除选定的物料及其子物料？保存BOM后生效。'):return
+  from PyQt5 import sip
+  if self.is_locked() or any(sip.isdeleted(node) for node in nodes):return
+  self.remove_selected_relations(nodes,item if item in nodes else nodes[0])
+ @undoable
+ @preserve_bom_view
+ def remove_selected_relations(self,nodes,anchor):
+  if self.is_locked():return False
+  for node in nodes:
+   if not (node.data(0,Qt.UserRole) or {}).get('_deleted'):self.remove_relation(node,finalize=False)
+  self.mark_dirty();self.tree.setCurrentItem(anchor)
+  for node in nodes:node.setSelected(True)
+  self.show_item_info(anchor)
  def reverse_tree_material(self,item):
   material_id=(item.data(0,Qt.UserRole) or {}).get('material_id',self.root if item is self.root_item else None)
   service=getattr(self.svc,'primary',self.svc)
@@ -1375,7 +1406,7 @@ class BomWindow(QMainWindow):
   return (parent_data.get('material_id'),data.get('material_id'),item.text(3))
  @undoable
  @preserve_bom_view
- def remove_relation(self,item):
+ def remove_relation(self,item,finalize=True):
   if self.is_locked():return False
   """将共享关系的所有显示副本标记为待删除，保存前保留可见。"""
   if item is self.root_item:return
@@ -1405,7 +1436,7 @@ class BomWindow(QMainWindow):
     removed_data['_delete_stack']=list(removed_data.get('_delete_stack',[]))+[deletion_token]
     removed_data['_deleted']=True; removed.setData(0,Qt.UserRole,removed_data)
     pending.extend(removed.child(i) for i in range(removed.childCount()))
-  self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  if finalize:self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
  @undoable
  @preserve_bom_view
  def restore_relation(self,item):
@@ -2070,7 +2101,10 @@ class MaterialWindow(QMainWindow):
  def menu(self,pos):
   row=self.t.rowAt(pos.y())
   if row<0:return
-  material=self.svc.materials()[row]; rid=material['id']
+  if not self.t.selectionModel().isRowSelected(row):self.t.clearSelection();self.t.selectRow(row)
+  rows=sorted(index.row() for index in self.t.selectionModel().selectedRows() if not self.t.isRowHidden(index.row()))
+  materials=self.svc.materials();selected=[materials[index] for index in rows]
+  material=materials[row]; rid=material['id']
   m=QMenu(self);e=m.addAction('编辑物料');v=m.addAction('物料版本变更');v.setEnabled(not any(sku['material_id']==rid for sku in self.svc.skus()))
   if material['has_bom']=='Y' or material['idle']=='N':m.addSeparator()
   edit_bom=m.addAction('编辑物料BOM结构') if material['has_bom']=='Y' else None
@@ -2078,8 +2112,12 @@ class MaterialWindow(QMainWindow):
   reverse=m.addAction('物料反查') if material['idle']=='N' else None
   m.addSeparator();similar=m.addAction('类似新增物料');copy=m.addAction('复制物料')
   m.addSeparator();copy_code=m.addAction('复制物料编码');copy_name=m.addAction('复制物料名称')
-  m.addSeparator();d=m.addAction('删除物料');d.setEnabled(material['idle']=='Y')
+  m.addSeparator();d=m.addAction('删除物料');d.setEnabled(all(record['idle']=='Y' for record in selected))
+  if len(selected)>1:
+   for action in m.actions():
+    if action is not d and not action.isSeparator():action.setEnabled(False)
   a=m.exec_(self.t.viewport().mapToGlobal(pos))
+  if a is None or not a.isEnabled():return
   if a in (copy_code,copy_name):
    QApplication.clipboard().setText(material['base_code']+material['version'] if a==copy_code else material['name']);return
   if a==similar:
@@ -2101,9 +2139,21 @@ class MaterialWindow(QMainWindow):
    if dlg.exec_():
     try:self.svc.update_material(rid,dlg.data()); self.refresh()
     except Exception as error:show_operation_error(self,'保存失败',error)
-  elif a==d and d.isEnabled() and QMessageBox.question(self,'确认','删除物料？')==QMessageBox.Yes:
-   try:self.svc.delete_material(rid); self.refresh()
-   except Exception as ex: show_operation_error(self,'无法删除',ex)
+  elif a==d and d.isEnabled():self.delete_materials(selected)
+ @operation('删除物料')
+ def delete_materials(self,materials):
+  labels=[r['base_code']+r['version']+' '+r['name'] for r in materials]
+  if not confirm_material_deletion(self,labels,'是否从物料库删除？此操作不可撤销。'):return
+  ids=[r['id'] for r in materials]
+  try:
+   current={r['id']:r for r in self.svc.materials()}
+   if any(i not in current or current[i]['idle']!='Y' for i in ids):raise ValueError('物料已发生变化或被BOM引用，请重新选择。')
+   with WindowRefreshBus.batch(),self.svc.db.transaction():
+    for index,mid in enumerate(ids):
+     checkpoint('正在删除物料…',index,len(ids))
+     self.svc.delete_material(mid)
+     self.svc.publish({'type':'material_changed','id':mid})
+  except Exception as error:show_operation_error(self,'无法删除',error)
  @operation('打开物料BOM')
  def open_material_bom(self,material_id):
   main=self.parent()

@@ -11,6 +11,7 @@ class FrozenMaterialTable(QTableWidget):
   self.setHorizontalHeader(ScrollingSkuHeader(self))
   self.frozen=QTableView(self);self.frozen.setModel(self.model());self.frozen.setSelectionModel(self.selectionModel())
   self.setSelectionBehavior(QAbstractItemView.SelectRows);self.frozen.setSelectionBehavior(QAbstractItemView.SelectRows)
+  self.setSelectionMode(QAbstractItemView.ExtendedSelection);self.frozen.setSelectionMode(QAbstractItemView.ExtendedSelection)
   self.frozen.setFrameShape(QFrame.NoFrame);self.frozen.setFocusPolicy(Qt.NoFocus);self.frozen.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.frozen.setWordWrap(True);self.frozen.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.frozen.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
   self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel);self.frozen.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -24,10 +25,15 @@ class FrozenMaterialTable(QTableWidget):
   self.frozen.setContextMenuPolicy(Qt.CustomContextMenu)
   self.frozen.customContextMenuRequested.connect(lambda pos:self.customContextMenuRequested.emit(self.viewport().mapFromGlobal(self.frozen.viewport().mapToGlobal(pos))))
   self.frozen.horizontalHeader().sectionClicked.connect(self.horizontalHeader().sectionClicked.emit)
-  self.viewport().installEventFilter(self)
+  self.viewport().installEventFilter(self);self.frozen.viewport().installEventFilter(self)
   self.model().columnsInserted.connect(self.sync_frozen);self.model().columnsRemoved.connect(self.sync_frozen)
   self.frozen.show()
  def eventFilter(self,obj,event):
+  if event.type()==QEvent.MouseButtonPress and event.button()==Qt.RightButton:
+   view=self.frozen if obj is self.frozen.viewport() else self
+   index=view.indexAt(event.pos())
+   if index.isValid() and self.selectionModel().isRowSelected(index.row()):
+    event.accept();return True
   if event.type() in (QEvent.Resize,QEvent.Show):QTimer.singleShot(0,self.sync_frozen)
   return super().eventFilter(obj,event)
  def sync_frozen(self,*args):
