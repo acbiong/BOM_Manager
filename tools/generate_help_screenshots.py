@@ -37,8 +37,13 @@ def main():
     for record in records:
         try:
             p=source_config.resolve_path(record.get('path',''))
-            if p.is_file() and p.stat().st_size: dbpath=p;break
-        except (OSError,ValueError): pass
+            if p.is_file() and p.stat().st_size:
+                probe=sqlite3.connect(p.resolve().as_uri()+'?mode=ro',uri=True)
+                try:
+                    populated=probe.execute('SELECT EXISTS(SELECT 1 FROM skus), EXISTS(SELECT 1 FROM material_bom_items)').fetchone()
+                finally:probe.close()
+                if all(populated):dbpath=p;break
+        except (OSError,ValueError,sqlite3.DatabaseError): pass
     if dbpath is None: raise SystemExit('帮助截图配置中没有可用数据库')
     OUT.mkdir(parents=True,exist_ok=True)
     for old in OUT.glob('*.png'):old.unlink()
@@ -55,7 +60,9 @@ def main():
         main=MainWindow(svc,get_version());main.show();QApplication.processEvents()
         capture(main,OUT/'sku_overview.png')
         main.show_materials();materials=main._materials;capture(materials,OUT/'material_library.png')
-        row=svc.db.conn.execute('SELECT id FROM skus ORDER BY id LIMIT 1').fetchone()
+        # The first SKU may be an intentionally empty draft; tutorials require a real subtree.
+        row=next((sku for sku in svc.skus() if svc.for_sku(sku['id']).bom(sku['material_id'])),None)
+        if row is None:raise RuntimeError('截图数据库中没有包含子物料的SKU BOM')
         bom=main.open_bom_id(row['id']) if row else None
         capture(bom or main,OUT/'bom_window.png')
         capture(main.menuBar(),OUT/'menu_theme.png')

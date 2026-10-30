@@ -90,7 +90,9 @@ def generate(out,main,materials,bom,svc):
     sku.combo.setCurrentIndex(candidate);snap('sku_input',sku,sku.combo)
     sku.combo.showPopup();QApplication.processEvents();view=sku.combo.view();view.scrollTo(view.model().index(candidate,0),QAbstractItemView.PositionAtCenter);QApplication.processEvents()
     popup=view.window();r=view.visualRect(view.model().index(candidate,0));r.translate(view.viewport().mapTo(popup,QPoint()));snap('sku_pick',popup,rect=r);sku.combo.hidePopup();ok('sku_ok',sku)
-    row=0;main.table.selectRow(row);rect=main.table.visualItemRect(main.table.item(row,1));rect.translate(main.table.viewport().mapTo(main,QPoint()));snap('bom_open',main,rect=rect)
+    sid=next((key for key,value in main._bom_windows.items() if value is bom),None)
+    row=next((i for i in range(main.table.rowCount()) if int(main.table.item(i,6).text())==sid),0)
+    main.table.selectRow(row);rect=main.table.visualItemRect(main.table.item(row,1));rect.translate(main.table.viewport().mapTo(main,QPoint()));snap('bom_open',main,rect=rect)
     if bom is None or bom.root_item.childCount()==0:raise RuntimeError('截图BOM必须包含子物料')
     # All edits below affect only the SQLite backup and in-memory demo.
     sid=getattr(bom.svc,'sku_id',None)
