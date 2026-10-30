@@ -28,6 +28,57 @@ class MaterialHistoryTests(unittest.TestCase):
  def rows(self,service=None):
   service=service or self.new
   return [dict(r,alternate_material_ids=[a['material_id'] for a in service.alternates(r['id'])],replace_children=True) for r in service.bom(self.r)]
+ def test_reuse_older_identical_content_and_current_pointer(self):
+  conn=self.db.conn
+  original=h.read(self.s,self.c,100)['attributes']
+  with self.db.transaction():
+   self.assertEqual(h.record(conn,self.c,{**original,'name':'changed'},[],previous=100),101)
+   self.assertEqual(h.record(conn,self.c,original,[],previous=100),100)
+   self.assertEqual(h.current_version(conn,self.c),101)
+   self.assertEqual(h.record(conn,self.c,original,[],previous=101),100)
+  self.assertEqual(h.current_version(conn,self.c),100)
+  self.assertEqual(next(m for m in self.s.materials() if m['id']==self.c)['history_version'],100)
+  self.assertEqual(len(h.versions(self.s,self.c)),2)
+ def test_repair_duplicate_contexts_and_recursive_references(self):
+  from services.history_identity import plan,apply
+  conn=self.db.conn
+  before=[tuple(r) for r in conn.execute('SELECT * FROM material_bom_items')]
+  c=h.read(self.s,self.c,100);p=h.read(self.s,self.p,100)
+  with self.db.transaction():
+   attrs={**c['attributes'],'alternate_contexts':{'123':[{'name':'context only'}]}}
+   conn.execute('INSERT INTO material_histories VALUES(?,?,?,?,?,?)',(self.c,101,h.encode(attrs),h.encode(c['children']),c['created_at'],self.tid))
+   edges=p['children'];edges[0]['history_version']=101
+   conn.execute('INSERT INTO material_histories VALUES(?,?,?,?,?,?)',(self.p,101,h.encode(p['attributes']),h.encode(edges),p['created_at'],self.tid))
+   conn.execute('UPDATE material_history_bindings SET history_version=101 WHERE material_id IN (?,?)',(self.p,self.c))
+   conn.execute('UPDATE material_history_current SET history_version=101 WHERE material_id IN (?,?)',(self.p,self.c))
+   result=plan(conn);self.assertEqual(result['mapping'][(self.c,101)],(self.c,100));self.assertEqual(result['mapping'][(self.p,101)],(self.p,100))
+   apply(conn,result)
+  self.assertEqual(before,[tuple(r) for r in conn.execute('SELECT * FROM material_bom_items')])
+  self.assertTrue(all(a==b for a,b in plan(conn)['mapping'].items()))
+  self.assertEqual(h.current_version(conn,self.p),100)
+  self.assertEqual(h.read(self.s,self.p,100)['children'][0]['history_version'],100)
+ def test_repair_preserves_real_edge_differences_and_current(self):
+  from services.history_identity import plan,apply
+  import copy
+  conn=self.db.conn;record=h.read(self.s,self.p,100)
+  with self.db.transaction():
+   for index,field in enumerate(('quantity','position','remark','alternates'),101):
+    children=copy.deepcopy(record['children'])
+    children[0][field]={'quantity':3.5,'position':'other','remark':'note','alternates':[dict(material_id=self.a,history_version=100)]}[field]
+    self.assertEqual(h.record(conn,self.p,record['attributes'],children),index)
+   result=plan(conn)
+   self.assertTrue(all(a==b for a,b in result['mapping'].items()))
+   apply(conn,result)
+  self.assertEqual(h.current_version(conn,self.p),104)
+  self.assertEqual(len(h.versions(self.s,self.p)),5)
+ def test_repair_rejects_missing_reference_without_writes(self):
+  from services.history_identity import plan
+  with self.db.transaction():
+   conn=self.db.conn
+   conn.execute('UPDATE material_histories SET children=? WHERE material_id=?',(h.encode([dict(material_id=9999,history_version=100)]),self.p))
+   before=list(conn.execute('SELECT * FROM material_histories'))
+   with self.assertRaises(ValueError):plan(conn)
+   self.assertEqual(before,list(conn.execute('SELECT * FROM material_histories')))
  def test_migration_initial_copy_and_noop(self):
   self.assertTrue(list(Path(self.temp.name).glob('*.pre-material-history-*')))
   self.assertEqual(h.versions(self.s,self.c)[0]['history_version'],100)
@@ -61,7 +112,7 @@ class MaterialHistoryTests(unittest.TestCase):
   h.save(self.new,self.r,rows,{},'fork')
   self.assertEqual(self.new.bom(self.r)[0]['material_id'],self.p)
   self.assertEqual(h.versions(self.s,self.p)[0]['history_version'],101)
-  self.assertEqual(h.versions(self.s,self.c)[0]['history_version'],101)
+  self.assertEqual(h.versions(self.s,self.c)[0]['history_version'],100)
   self.assertFalse(self.other.alternates(self.other.bom(self.t)[-1]['id']))
   rows=self.rows();rows[-1]['alternate_material_ids']=[]
   self.assertEqual(revision_conflicts(self.new,self.r,rows)[0]['material_id'],self.p)

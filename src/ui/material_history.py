@@ -101,9 +101,9 @@ class MaterialHistoryDialog(QDialog):
 
     def show_info(self,item,previous=None):
         if item is None:return
-        record=item.data(0,Qt.UserRole);a=record['attributes'];contexts=a.get('alternate_contexts',{})
+        record=item.data(0,Qt.UserRole);a=record['attributes']
         values=dict(a,history_version=record['history_version'],created_at=record['created_at'].split('.')[0],
-                    alternates='\n'.join('、'.join(v['base_code']+v['version']+' '+v['name'] for v in rows) for rows in contexts.values()))
+                    alternates=item.text(7))
         for key,_ in self.FIELDS:self.attribute_values[key].setText(str(values.get(key,'') or '（空）'))
         references=history.sku_references(self.service,record['material_id'],record['history_version'])
         title=a['base_code']+a['version']+' '+a['name']+' / 物料历史版本'+str(record['history_version'])

@@ -80,20 +80,24 @@ def read(service, mid, version):
 
 def record(conn, mid, attributes, children, sid=None, previous=None):
     values={k: attributes.get(k, '') for k in FIELDS}
-    values['alternate_contexts']=attributes.get('alternate_contexts',{})
     attrs, edges = encode(values), encode(children)
-    # Saving an unchanged historical definition must not create another revision.
-    if previous is not None:
-        old = conn.execute('SELECT attributes,children FROM material_histories WHERE material_id=? AND history_version=?', (mid, previous)).fetchone()
-        if old and tuple(old) == (attrs, edges):
-            return previous
-    latest = conn.execute('SELECT * FROM material_histories WHERE material_id=? ORDER BY history_version DESC LIMIT 1', (mid,)).fetchone()
-    if latest and (latest['attributes'], latest['children']) == (attrs, edges):
-        return latest['history_version']
-    version = latest['history_version'] + 1 if latest else 100
-    conn.execute('INSERT INTO material_histories VALUES(?,?,?,?,?,?)',
-                 (mid, version, attrs, edges, datetime.now().isoformat(sep=' ', timespec='microseconds'), sid))
+    old = conn.execute('SELECT history_version FROM material_histories WHERE material_id=? AND attributes=? AND children=? ORDER BY history_version LIMIT 1', (mid, attrs, edges)).fetchone()
+    if old:
+        version = old[0]
+    else:
+        latest = conn.execute('SELECT MAX(history_version) FROM material_histories WHERE material_id=?',(mid,)).fetchone()[0]
+        version = latest + 1 if latest is not None else 100
+        conn.execute('INSERT INTO material_histories VALUES(?,?,?,?,?,?)',
+                     (mid, version, attrs, edges, datetime.now().isoformat(sep=' ', timespec='microseconds'), sid))
+    # A reused definition can be older numerically than the current definition.
+    if previous != version or current_version(conn, mid) is None:
+        conn.execute('INSERT OR REPLACE INTO material_history_current VALUES(?,?)',(mid,version))
     return version
+
+
+def current_version(conn, mid):
+    row=conn.execute('SELECT history_version FROM material_history_current WHERE material_id=?',(mid,)).fetchone()
+    return row[0] if row else None
 
 
 def capture(service, edits=None):
@@ -121,12 +125,9 @@ def capture(service, edits=None):
             raise ValueError('物料历史结构存在循环引用')
         active.add(mid)
         attributes = dict(materials[mid]); attributes.update(bound.get(mid, {})); attributes.update(edits.get(mid, {}))
-        if mid in main_used:
-            attributes['alternate_contexts']={str(parent):[{k:({**materials[aid],**bound.get(aid,{}),**edits.get(aid,{})}).get(k,'') for k in FIELDS} for aid in row['alternate_material_ids']]
-                for parent in main_used for row in graph.get(parent,[]) if row['material_id']==mid and row['alternate_material_ids']}
         if mid not in main_used:
             previous=bound.get(mid,{}).get('history_version')
-            if previous is None:previous=conn.execute('SELECT MAX(history_version) FROM material_histories WHERE material_id=?',(mid,)).fetchone()[0]
+            if previous is None:previous=current_version(conn,mid)
             children=read(service,mid,previous)['children'] if previous is not None else []
             done[mid]=record(conn,mid,attributes,children,sid,previous);active.remove(mid);return done[mid]
         children = []
@@ -140,7 +141,7 @@ def capture(service, edits=None):
                 av = bound.get(aid, {}).get('history_version')
                 if aid not in main_used:av=visit(aid)
                 elif av is None:
-                    latest = conn.execute('SELECT MAX(history_version) FROM material_histories WHERE material_id=?', (aid,)).fetchone()[0]
+                    latest = current_version(conn,aid)
                     av = latest if latest is not None else record(conn, aid, alt_attrs, [], sid)
                 if aid in edits:
                     av=record(conn,aid,alt_attrs,read(service,aid,av)['children'],sid,av)
@@ -162,6 +163,8 @@ def capture(service, edits=None):
 
 def initialize(db):
     if enabled(db):
+        from services.history_identity import upgrade
+        upgrade(db)
         return
     from services.services import Services
     conn = db.conn
@@ -175,6 +178,7 @@ def initialize(db):
     with db.transaction():
         conn.execute('CREATE TABLE IF NOT EXISTS material_histories(material_id INTEGER NOT NULL,history_version INTEGER NOT NULL,attributes TEXT NOT NULL,children TEXT NOT NULL,created_at TEXT NOT NULL,source_sku_id INTEGER,PRIMARY KEY(material_id,history_version))')
         conn.execute('CREATE TABLE IF NOT EXISTS material_history_bindings(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,history_version INTEGER NOT NULL,PRIMARY KEY(sku_id,material_id))')
+        conn.execute('CREATE TABLE IF NOT EXISTS material_history_current(material_id INTEGER PRIMARY KEY,history_version INTEGER NOT NULL)')
         conn.execute('CREATE INDEX IF NOT EXISTS material_history_usage ON material_history_bindings(material_id,history_version,sku_id)')
         conn.execute('INSERT INTO app_metadata VALUES(?,?)', (MARKER, '1'))
         service = Services(db)
@@ -185,6 +189,7 @@ def initialize(db):
         for material in conn.execute('SELECT * FROM materials').fetchall():
             if not versions(service, material['id']):
                 record(conn, material['id'], dict(material), [])
+        conn.execute('INSERT OR REPLACE INTO app_metadata VALUES(?,?)',('material_history_content_identity_v2','1'))
 
 
 def copy_bindings(source, sid):
@@ -267,7 +272,7 @@ def finish_save(service, changed_parents, edits=None, mode='sync', mapping=None,
             target.publish({'type': 'bom_changed', 'root': sku['material_id']})
     # The library presents the newest recorded state; never rewrite history rows.
     for mid in changed:
-        attrs = read(service, mid, max(v['history_version'] for v in versions(service, mid)))['attributes']
+        attrs = read(service, mid, current_version(conn,mid))['attributes']
         keys = [k for k in FIELDS if k not in ('base_code', 'version')]
         conn.execute('UPDATE materials SET ' + ','.join(k+'=?' for k in keys) + ',updated_at=? WHERE id=?',
                      tuple(attrs[k] for k in keys) + (datetime.now().isoformat(sep=' '), mid))
@@ -393,7 +398,7 @@ def update_catalog_material(service,mid,data):
         before=primary.material_snapshot(mid)
         if not before:raise ValueError('物料不存在')
         latest=versions(service,mid)
-        children=read(service,mid,latest[0]['history_version'])['children'] if latest else []
+        children=read(service,mid,current_version(conn,mid))['children'] if latest else []
         attrs={**before,**data}
         if attrs['unit'] not in service.UNITS:raise ValueError('单位不合规')
         record(conn,mid,attrs,children)
@@ -420,7 +425,7 @@ def selection_tree(service,root):
                       alternate_material_ids=[a['material_id'] for a in edge['alternates']])
             nodes.append(dict(data=data,children=expand(child,revision,path|{(mid,version)})))
         return nodes
-    return expand(root,latest[0]['history_version'],set())
+    return expand(root,current_version(connection(service),root),set())
 
 
 def attribute_conflicts(service, root, items):

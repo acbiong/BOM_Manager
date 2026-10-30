@@ -112,8 +112,8 @@ class Services:
   q=f'%{query}%'; rows=self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id WHERE u.parent_id=m.id AND u.role="main") THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
   from services.material_history import enabled as histories_enabled
   if histories_enabled(self):
-   counts={r[0]:(r[1],r[2]) for r in self.db.conn.execute('SELECT material_id,MAX(history_version),COUNT(*) FROM material_histories GROUP BY material_id')}
-   history_bom={r[0]:('Y' if r[1] else 'N') for r in self.db.conn.execute('SELECT h.material_id,json_array_length(h.children) FROM material_histories h WHERE h.history_version=(SELECT MAX(h2.history_version) FROM material_histories h2 WHERE h2.material_id=h.material_id)')}
+   counts={r[0]:(r[1],r[2]) for r in self.db.conn.execute('SELECT h.material_id,c.history_version,COUNT(*) FROM material_histories h JOIN material_history_current c ON c.material_id=h.material_id GROUP BY h.material_id')}
+   history_bom={r[0]:('Y' if r[1] else 'N') for r in self.db.conn.execute('SELECT h.material_id,json_array_length(h.children) FROM material_histories h WHERE h.history_version=(SELECT c.history_version FROM material_history_current c WHERE c.material_id=h.material_id)')}
    rows=[dict(r,history_version=counts.get(r['id'],(100,1))[0],history_count=counts.get(r['id'],(100,1))[1],history_has_bom=history_bom.get(r['id'],'N')) for r in rows]
   from services.snapshot_bom import enabled,latest_usage
   if enabled(self.db):
@@ -808,7 +808,8 @@ class Services:
     else:
      for sid in cloned_mirrors:capture(self.for_sku(int(sid)))
     if not versions(self,new_id):
-     old_versions=versions(self,i);children=read(self,i,old_versions[0]['history_version'])['children'] if old_versions else []
+     from services.material_history import current_version
+     old_versions=versions(self,i);children=read(self,i,current_version(self.db.conn,i))['children'] if old_versions else []
      record(self.db.conn,new_id,raw,children)
    self.log('material',new_id,'version',f'{old["base_code"]}: {old["version"]}->{new_version}; 原物料={i}; 更新父级BOM={[str(parent) if isinstance(parent,str) else str(self.material_snapshot(parent).get('base_code',''))+str(self.material_snapshot(parent).get('version',''))+' '+str(self.material_snapshot(parent).get('name','')) for parent in sorted(selected,key=str)]}; '+('原位更新' if new_id==i else '保留旧版本并创建新物料'))
   from infrastructure.events import WindowRefreshBus
