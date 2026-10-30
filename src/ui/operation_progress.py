@@ -38,6 +38,7 @@ class OperationProgress:
         self.shown = False
         self.dispatching = False
         self.pending_operations = []
+        self.pending_refreshes = {}
 
     def update(self, message=None, current=None, total=None):
         if self.paused is not None:return
@@ -55,7 +56,16 @@ class OperationProgress:
             self.dialog.setMinimumDuration(2147483647)
             self.dialog.setAutoClose(False)
             self.dialog.setAutoReset(False)
-            self.dialog.resize(380, 100)
+            # Fixed geometry prevents long stage labels from moving the window.
+            from PyQt5.QtWidgets import QLabel
+            label = QLabel(self.message, self.dialog)
+            label.setWordWrap(True)
+            label.setAlignment(Qt.AlignCenter)
+            label.setMinimumWidth(0)
+            self.dialog.setLabel(label)
+            screen = self.owner.screen() if self.owner is not None else QApplication.primaryScreen()
+            width = min(520, screen.availableGeometry().width()-40) if screen else 520
+            self.dialog.setFixedSize(width, 120)
         dialog = self.dialog
         if sip.isdeleted(dialog):return
         if not dialog.isVisible():
@@ -64,13 +74,11 @@ class OperationProgress:
         dialog.setLabelText(self.message)
         if total is not None and total > 0 and current is not None:
             dialog.setRange(0, int(total));dialog.setValue(min(int(current), int(total)))
-        else:dialog.setRange(0, 0)
+        elif message is not None:dialog.setRange(0, 0)
         if not dialog.isVisible():
             screen = (self.owner.screen() if self.owner is not None else QApplication.primaryScreen())
             if screen is not None:dialog.move(screen.availableGeometry().center()-dialog.rect().center())
-            dialog.show();self.shown = True
-        screen = self.owner.screen() if self.owner is not None else QApplication.primaryScreen()
-        if screen is not None:dialog.move(dialog.pos()+screen.availableGeometry().center()-dialog.frameGeometry().center())
+            dialog.show();dialog.raise_();self.shown = True
         # Dispatch native map/expose events: repaint alone cannot expose a new native window.
         app = QApplication.instance()
         guard = _PaintGuard()
@@ -130,7 +138,12 @@ def operation(title, owner=None):
                 def later():
                     if args and isinstance(args[0], QWidget) and sip.isdeleted(args[0]):return
                     wrapped(*args, **kwargs)
-                active.pending_operations.append(later)
+                if title in ('刷新清单', '刷新BOM', '载入BOM'):
+                    # Coalesce layout/refresh notifications; finish them using
+                    # this operation's progress instead of opening new windows.
+                    key = (id(args[0]) if args else None, function)
+                    active.pending_refreshes[key] = later
+                else:active.pending_operations.append(later)
                 return None
             if app is None or QThread.currentThread() != app.thread() or _current.get() is not None:
                 return function(*args, **kwargs)
@@ -144,7 +157,16 @@ def operation(title, owner=None):
                 failed = True
                 raise
             finally:
-                _current.reset(token)
-                controller.close(failed)
+                try:
+                    if not failed:
+                        done = set()
+                        while controller.pending_refreshes:
+                            key, callback = controller.pending_refreshes.popitem()
+                            if key not in done:
+                                done.add(key)
+                                callback()
+                finally:
+                    _current.reset(token)
+                    controller.close(failed)
         return wrapped
     return decorate

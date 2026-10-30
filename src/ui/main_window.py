@@ -654,8 +654,6 @@ class MainWindow(ProjectManagement,QMainWindow):
       if mapping_dialog.exec_()!=QDialog.Accepted:
        QMessageBox.warning(owner,'导入失败','用户取消表头映射：未完成必需表头对应关系。'); return
       ok,fail=self.svc.import_materials(p,resolver,mapping_dialog.mapping(),update_progress,sheet_name=sheet_name)
-     self.refresh();
-     if self._materials is not None and self._materials.isVisible(): self._materials.refresh()
      MaterialImportResultDialog(ok,fail,owner).exec_()
     except Exception as e:
      show_operation_error(owner,'导入失败',e)
@@ -2152,7 +2150,7 @@ class MaterialWindow(QMainWindow):
      dialog=MaterialHeaderMappingDialog(p,error.headers,error.missing,self,sheet_name=sheet_name,config_service=config_service)
      if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消表头映射，未导入任何物料')
      ok,fail=self.svc.import_materials(p,header_mapping=dialog.mapping(),sheet_name=sheet_name)
-    self.refresh(); MaterialImportResultDialog(ok,fail,self).exec_()
+    MaterialImportResultDialog(ok,fail,self).exec_()
    except Exception as error:show_operation_error(self,'导入失败',error)
  @operation('导出物料库')
  def export_materials(self):
@@ -2211,7 +2209,7 @@ class MaterialWindow(QMainWindow):
      item.setBackground(QColor('red') if r['idle']=='Y' else QColor('#eeeeee' if v=='NA' else '#d9ead3') if j>=base else QBrush())
      item.setForeground(QColor('black') if r['idle']=='Y' or j>=base else QBrush())
      item.setData(Qt.UserRole+2,style)
-  self.apply_filters(); fit_columns(self.t)
+  self.apply_filters(); fit_columns(self.t,apply=False)
   # SKU名称不参与列宽；固定编码宽度，窗口变宽时只拉伸普通物料列。
   header=self.t.horizontalHeader();metrics=header.fontMetrics()
   for column in range(base,self.t.columnCount()):

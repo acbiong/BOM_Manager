@@ -1,5 +1,6 @@
 from domain.timestamps import seconds_timestamp
 from infrastructure.operation_progress import checkpoint, file_work, progress_stage
+from infrastructure.events import WindowRefreshBus
 from domain.quantity import format_quantity
 import math
 """业务服务层：物料、SKU、BOM、日志和Excel；UI不得直接访问数据库。编辑时间：2026-09-24。"""
@@ -769,6 +770,7 @@ class Services:
  def alternates(self,bom_item_id): return self.db.conn.execute('SELECT a.*,m.base_code,m.version,m.name,m.description,m.manufacturer,m.mpn FROM alternates a JOIN materials m ON m.id=a.material_id WHERE a.bom_item_id=? ORDER BY a.sort_no',(bom_item_id,)).fetchall()
  def remove_alternate(self,aid):
   with self.db.transaction(): self.db.conn.execute('DELETE FROM alternates WHERE id=?',(aid,))
+ @WindowRefreshBus.batch()
  def import_materials(self,path,conflict_resolver=None,header_mapping=None,progress_callback=None,sheet_name=None):
   required=[field for field in MATERIAL_IMPORT_HEADERS if field not in MATERIAL_IMPORT_DEFAULTS]
   # 配置中首个大小写变体为标准写法，先归一化再做重复判断和入库。
@@ -792,38 +794,39 @@ class Services:
    optional_indices={field:headers.index(header_mapping[field]) if header_mapping.get(field) else None for field in MATERIAL_IMPORT_DEFAULTS}
    if progress_callback: progress_callback(0,total)
    for no,row in enumerate(ws.iter_rows(min_row=2,values_only=True),2):
-    checkpoint()
-    d={k:str(row[i] if row[i] is not None else '').strip() for k,i in idx.items()};
-    for field,default in MATERIAL_IMPORT_DEFAULTS.items():
+    with progress_stage("正在导入物料…",no-2,total):
      checkpoint()
-     index=optional_indices[field]
-     d[field]=(str(row[index]).strip() if index is not None and index<len(row) and row[index] is not None else '') or default
-    d['M/P']=d['M/P'].upper()
-    if progress_callback: progress_callback(no-1,total)
-    if not d['物料基础编码'] and not d['物料名称']:continue
-    display_code=(d['物料基础编码'] or '（空基础编码）')+(d['物料版本号'] or '（空版本号）')
-    missing_fields=[field for field in ('物料基础编码','物料版本号','物料名称','单位','物料制造商') if not d[field]]
-    if missing_fields:
-     fail.append((no,display_code,d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue
-    canonical_unit=unit_spellings.get(d['单位'].casefold())
-    if canonical_unit is None: fail.append((no,display_code,d['物料名称'],'单位不合规：'+d['单位']+'；允许：'+'、'.join(self.UNITS))); continue
-    d['单位']=canonical_unit
-    if d['M/P'] not in self.MP:fail.append((no,display_code,d['物料名称'],'M/P不合规：'+d['M/P']+'；仅允许M或P')); continue
-    old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
-    if old:
-     for field,key in (('物料等级','grade'),('M/P','mp_flag')):
+     d={k:str(row[i] if row[i] is not None else '').strip() for k,i in idx.items()};
+     for field,default in MATERIAL_IMPORT_DEFAULTS.items():
       checkpoint()
-      if optional_indices[field] is None:d[field]=old[key]
-     same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('mp_flag','M/P'),('manufacturer','物料制造商'),('mpn','物料MPN')])
-     if same:
-      fail.append((no,display_code,d['物料名称'],'重复物料信息相同，自动跳过')); continue
-     choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
-     if choice=='cancel': return ok,fail+[(no,display_code,d['物料名称'],'用户取消')]
-     if choice=='overwrite':
-      self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'mp_flag':d['M/P'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
-     fail.append((no,display_code,d['物料名称'],'跳过重复物料')); continue
-    try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'mp_flag':d['M/P'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
-    except Exception as e: fail.append((no,display_code,d['物料名称'],str(e)))
+      index=optional_indices[field]
+      d[field]=(str(row[index]).strip() if index is not None and index<len(row) and row[index] is not None else '') or default
+     d['M/P']=d['M/P'].upper()
+     if progress_callback: progress_callback(no-1,total)
+     if not d['物料基础编码'] and not d['物料名称']:continue
+     display_code=(d['物料基础编码'] or '（空基础编码）')+(d['物料版本号'] or '（空版本号）')
+     missing_fields=[field for field in ('物料基础编码','物料版本号','物料名称','单位','物料制造商') if not d[field]]
+     if missing_fields:
+      fail.append((no,display_code,d.get('物料名称',''),'必填项缺失：'+ '、'.join(missing_fields))); continue
+     canonical_unit=unit_spellings.get(d['单位'].casefold())
+     if canonical_unit is None: fail.append((no,display_code,d['物料名称'],'单位不合规：'+d['单位']+'；允许：'+'、'.join(self.UNITS))); continue
+     d['单位']=canonical_unit
+     if d['M/P'] not in self.MP:fail.append((no,display_code,d['物料名称'],'M/P不合规：'+d['M/P']+'；仅允许M或P')); continue
+     old=self.db.conn.execute('SELECT * FROM materials WHERE base_code=? AND version=?',(d['物料基础编码'],d['物料版本号'])).fetchone()
+     if old:
+      for field,key in (('物料等级','grade'),('M/P','mp_flag')):
+       checkpoint()
+       if optional_indices[field] is None:d[field]=old[key]
+      same=all(str(old[k] or '')==str(d[key] or '') for k,key in [('name','物料名称'),('description','物料规格描述'),('unit','单位'),('grade','物料等级'),('mp_flag','M/P'),('manufacturer','物料制造商'),('mpn','物料MPN')])
+      if same:
+       fail.append((no,display_code,d['物料名称'],'重复物料信息相同，自动跳过')); continue
+      choice=conflict_resolver(d,old) if conflict_resolver else 'skip'
+      if choice=='cancel': return ok,fail+[(no,display_code,d['物料名称'],'用户取消')]
+      if choice=='overwrite':
+       self.update_material(old['id'],{'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'mp_flag':d['M/P'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码']); continue
+      fail.append((no,display_code,d['物料名称'],'跳过重复物料')); continue
+     try: self.create_material({'base_code':d['物料基础编码'],'version':d['物料版本号'],'name':d['物料名称'],'description':d['物料规格描述'],'unit':d['单位'],'grade':d['物料等级'],'mp_flag':d['M/P'],'manufacturer':d['物料制造商'],'mpn':d['物料MPN']}); ok.append(d['物料基础编码'])
+     except Exception as e: fail.append((no,display_code,d['物料名称'],str(e)))
    if progress_callback: progress_callback(total,total)
    return ok,fail
   finally:wb.close()

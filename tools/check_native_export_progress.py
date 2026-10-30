@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--source', required=True)
     parser.add_argument('--report', required=True)
     parser.add_argument('--legacy-paint', action='store_true')
+    parser.add_argument('--bulk-count', type=int, default=0)
     args = parser.parse_args()
     report = Path(args.report).resolve()
     source = Path(args.source).resolve()
@@ -37,6 +38,8 @@ def main():
         service = Services(db, ConfigService(tmp))
         window = MainWindow(service)
         window.show()
+        if args.bulk_count:window.show_materials()
+        bulk_controllers = set(); bulk_dialogs = set(); bulk_geometry = set()
         update = OperationProgress.update
         def observe(controller, message=None, current=None, total=None):
             if args.legacy_paint:
@@ -44,6 +47,10 @@ def main():
                     update(controller, message, current, total)
             else:update(controller, message, current, total)
             dialog = controller.dialog
+            if controller.title == '批量导入物料':
+                bulk_controllers.add(id(controller))
+                if dialog is not None:
+                    bulk_dialogs.add(id(dialog));bulk_geometry.add((dialog.x(),dialog.y(),dialog.width(),dialog.height()))
             if dialog is None or not dialog.isVisible():return
             if not args.legacy_paint and not dialog.windowHandle().isExposed():return
             if controller.title == '导出资料库' and (not total or current < total / 2):return
@@ -60,6 +67,23 @@ def main():
         OperationProgress.update = observe
         def run():
             try:
+                if args.bulk_count:
+                    from openpyxl import Workbook
+                    from services.services import MATERIAL_IMPORT_HEADERS
+                    from ui.operation_progress import RECENT_OPERATIONS
+                    book=Workbook();book.active.append(MATERIAL_IMPORT_HEADERS)
+                    for i in range(args.bulk_count):
+                        book.active.append([f'PROGRESS-TEST-{i}', '100', f'进度验证物料{i}', '自动换行规格'*8, 'pcs', '', 'M', '测试厂商', ''])
+                    path=Path(tmp)/'bulk.xlsx';book.save(path);book.close()
+                    RECENT_OPERATIONS.clear()
+                    ok,failed=operation('批量导入物料')(lambda:service.import_materials(path))()
+                    result['bulk']={'imported':len(ok),'failed':len(failed),'controllers':len(bulk_controllers),
+                                    'dialogs':len(bulk_dialogs),'geometry_count':len(bulk_geometry),
+                                    'operations':[r['operation'] for r in RECENT_OPERATIONS]}
+                    assert len(ok)==args.bulk_count and not failed
+                    assert len(bulk_controllers)==1 and len(bulk_dialogs)==1
+                    assert len(bulk_geometry)==1, bulk_geometry
+                    assert result['bulk']['operations']==['批量导入物料']
                 operation('导出资料库')(lambda:service.export_database(str(Path(tmp)/'export.xlsx')))()
                 if not args.legacy_paint:
                     for title, function in [('导出物料库', service.export_materials), ('导出SKU清单', service.export_sku_list)]:

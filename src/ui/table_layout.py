@@ -10,6 +10,7 @@ class ProportionalColumns(QObject):
         self.widget = widget
         self.header = widget.header() if hasattr(widget, 'header') else widget.horizontalHeader()
         self.widths = {}
+        self._row_layout = None
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.apply)
@@ -23,6 +24,7 @@ class ProportionalColumns(QObject):
         return False
 
     def apply(self):
+        self.timer.stop()
         visible = [i for i in self.widths if i < self.header.count() and not self.header.isSectionHidden(i)]
         if not visible:
             return
@@ -43,6 +45,9 @@ class ProportionalColumns(QObject):
             if self.header.sectionSize(i) != widths[i]:
                 self.header.resizeSection(i, widths[i])
         if hasattr(self.widget, 'resizeRowsToContents'):
+            signature = (self.widget.rowCount(), tuple((i, widths[i]) for i in visible))
+            if signature == self._row_layout:return
+            self._row_layout = signature
             if _current.get() is None:self.widget.resizeRowsToContents()
             else:
                 for row in range(self.widget.rowCount()):
@@ -50,7 +55,7 @@ class ProportionalColumns(QObject):
                     self.widget.resizeRowToContents(row)
 
 
-def fit_columns(widget):
+def fit_columns(widget, apply=True):
     widget.setWordWrap(True)
     header = widget.header() if hasattr(widget, 'header') else widget.horizontalHeader()
     char_width = max(widget.fontMetrics().horizontalAdvance('中'), 1)
@@ -71,4 +76,5 @@ def fit_columns(widget):
     if not hasattr(widget, '_proportional_columns'):
         widget._proportional_columns = ProportionalColumns(widget)
     widget._proportional_columns.widths = widths
-    widget._proportional_columns.apply()
+    widget._proportional_columns._row_layout = None
+    if apply:widget._proportional_columns.apply()

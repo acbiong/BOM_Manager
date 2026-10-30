@@ -16,6 +16,9 @@ class DatabaseExportProgressTests(unittest.TestCase):
  def test_real_export_preserves_scale_through_formats_and_file_write(self):
   with tempfile.TemporaryDirectory() as tmp:
    db=Database(str(Path(tmp)/'db'));svc=Services(db);events=[];original=OperationProgress.update
+   formatted=[];format_sheet=svc.format_export_sheet
+   def format_once(sheet,centered):
+    formatted.append(id(sheet));return format_sheet(sheet,centered)
    for i in range(2):svc.create_sku(svc.create_material(dict(base_code=str(i),version='1',name='SKU'+str(i),unit='pcs')))
    def observe(controller,message=None,current=None,total=None):
     original(controller,message,current,total)
@@ -24,8 +27,9 @@ class DatabaseExportProgressTests(unittest.TestCase):
    def write(book,path):
     self.assertNotEqual(events[-1][1],events[-1][2]);self.assertIn('正在写入',events[-1][0]);save(book,path)
    try:
-    with patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'paint_interval',0),patch.object(OperationProgress,'update',observe),patch.object(Workbook,'save',write):
+    with patch.object(svc,'format_export_sheet',format_once),patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'paint_interval',0),patch.object(OperationProgress,'update',observe),patch.object(Workbook,'save',write):
      operation('导出资料库')(lambda:svc.export_database(Path(tmp)/'out.xlsx'))()
+    self.assertEqual(len(formatted),5);self.assertEqual(len(set(formatted)),5)
     self.assertTrue(events);self.assertTrue(all(total==6 for _,_,total in events))
     values=[value for _,value,_ in events];self.assertEqual(values,sorted(values));self.assertEqual(values[-1],6)
     wb=load_workbook(Path(tmp)/'out.xlsx');self.assertEqual(len(wb.sheetnames),5);self.assertEqual(wb['SKU清单'].max_row,3);wb.close()
