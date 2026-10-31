@@ -2402,8 +2402,8 @@ class MaterialWindow(QMainWindow):
     text=str(v or '');item=self.t.item(i,j)
     centered=j>=base or self._column_labels[j] in ('版本号','物料历史版本','单位','M/P','是否存在BOM结构','是否为呆滞料','是否被最新历史版本使用')
     style=(centered,r['idle']=='Y',j>=base,v=='NA' if j>=base else False)
-    if item is None:
-     item=QTableWidgetItem();self.t.setItem(i,j,item)
+    new_item=item is None
+    if new_item:item=QTableWidgetItem()
     font=item.font();font.setBold(self._column_labels[j]=='物料历史版本' and r.get('history_count',1)>1);item.setFont(font)
     if item.text()!=text:item.setText(text)
     if item.data(Qt.UserRole)!=r['id']:item.setData(Qt.UserRole,r['id'])
@@ -2412,6 +2412,9 @@ class MaterialWindow(QMainWindow):
      item.setBackground(QColor('red') if r['idle']=='Y' else QColor('#eeeeee' if v=='NA' else '#d9ead3') if j>=base else QBrush())
      item.setForeground(QColor('black') if r['idle']=='Y' or j>=base else QBrush())
      item.setData(Qt.UserRole+2,style)
+    # Populate new cells before attaching them: one model notification instead
+    # of separate text/font/identity/color/alignment notifications for each cell.
+    if new_item:self.t.setItem(i,j,item)
   self.apply_filters(); fit_columns(self.t,apply=False)
   # SKU名称不参与列宽；固定编码宽度，窗口变宽时只拉伸普通物料列。
   header=self.t.horizontalHeader();metrics=header.fontMetrics()

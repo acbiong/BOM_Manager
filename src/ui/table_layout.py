@@ -10,17 +10,22 @@ def batch_table_update(attribute):
     def decorate(function):
         @wraps(function)
         def wrapped(owner,*args,**kwargs):
-            widget=getattr(owner,attribute);enabled=widget.updatesEnabled();muted=False
+            widget=getattr(owner,attribute);enabled=widget.updatesEnabled();muted=False;attached=True
             model=widget.model()
             signals=(model.dataChanged,model.headerDataChanged,model.rowsAboutToBeInserted,
                      model.rowsAboutToBeRemoved,model.columnsAboutToBeInserted,model.columnsAboutToBeRemoved,model.modelAboutToBeReset)
             def changing(*args):
-                nonlocal muted
+                nonlocal muted,attached
                 if enabled and not muted:widget.setUpdatesEnabled(False);muted=True
+                # The first change is sufficient. Keeping Python slots connected
+                # for every cell property costs more than the paint batching saves.
+                for signal in signals:signal.disconnect(changing)
+                attached=False
             for signal in signals:signal.connect(changing)
             try:return function(owner,*args,**kwargs)
             finally:
-                for signal in signals:signal.disconnect(changing)
+                if attached:
+                    for signal in signals:signal.disconnect(changing)
                 if muted:widget.setUpdatesEnabled(enabled)
         return wrapped
     return decorate

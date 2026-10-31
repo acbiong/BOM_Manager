@@ -72,6 +72,27 @@ class RefreshEfficiencyTests(unittest.TestCase):
    self.assertEqual(len(quantities),6)
    self.assertTrue(all(values[root]==1 and values[child]==2 for values in quantities.values()))
   finally:db.close()
+ def test_first_library_population_attaches_complete_cells_once(self):
+  from PyQt5.QtCore import Qt
+  from PyQt5.QtGui import QColor
+  from ui.frozen_table import FrozenMaterialTable
+  with tempfile.TemporaryDirectory() as temp:
+   db=Database(str(Path(temp)/'library.db'));svc=Services(db,ConfigService(temp));events=[]
+   for i in range(30):svc.create_material(dict(base_code=f'P{i:03}',version='1',name='物料',unit='pcs'))
+   def table(*args):
+    widget=FrozenMaterialTable(*args);widget.model().dataChanged.connect(lambda *args:events.append(args));return widget
+   try:
+    with patch('ui.main_window.FrozenMaterialTable',side_effect=table):library=MaterialWindow(svc)
+    try:
+     self.assertEqual(len(events),library.t.rowCount()*library.t.columnCount())
+     for row in range(library.t.rowCount()):
+      for col in range(library.t.columnCount()):
+       item=library.t.item(row,col)
+       self.assertEqual(item.data(Qt.UserRole),row+1)
+       self.assertEqual(item.background().color(),QColor('red'))
+     self.assertEqual(library.t.item(0,0).text(),'P000')
+    finally:library.close()
+   finally:db.close()
 
 
 if __name__=='__main__':unittest.main()
