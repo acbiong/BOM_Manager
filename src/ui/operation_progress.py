@@ -1,6 +1,7 @@
 """100ms delayed, nonmodal progress; native painting with guarded application operations."""
 import inspect
 import logging
+import os
 import time
 from collections import deque
 from functools import wraps
@@ -53,6 +54,14 @@ class OperationProgress:
             self.dialog = QProgressDialog(self.message, None, 0, 0, self.owner)
             self.dialog.setWindowTitle(self.title)
             self.dialog.setWindowFlags(self.dialog.windowFlags() & ~Qt.WindowCloseButtonHint)
+            if (QApplication.platformName() == 'xcb' and os.environ.get('WSL_DISTRO_NAME')
+                    and os.environ.get('WAYLAND_DISPLAY')):
+                # WSLg's XWayland/RAIL manager asynchronously relocates managed
+                # windows after their first expose. This noninteractive progress
+                # surface owns its position; leave ordinary dialogs managed.
+                self.dialog.setWindowFlags(self.dialog.windowFlags() | Qt.X11BypassWindowManagerHint
+                                           | Qt.WindowDoesNotAcceptFocus)
+                self.dialog.setAttribute(Qt.WA_ShowWithoutActivating, True)
             self.dialog.setMinimumDuration(2147483647)
             self.dialog.setAutoClose(False)
             self.dialog.setAutoReset(False)

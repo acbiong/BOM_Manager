@@ -80,3 +80,20 @@ class OperationProgressTests(unittest.TestCase):
   self.assertEqual(calls,['export done'])
   self.app.processEvents()
   self.assertEqual(calls,['export done','save'])
+
+ def test_only_wslg_xcb_progress_bypasses_window_manager_placement(self):
+  from PyQt5.QtCore import Qt,QEvent
+  cases=[('xcb',{'WSL_DISTRO_NAME':'Ubuntu-24.04','WAYLAND_DISPLAY':'wayland-0'},True),
+         ('xcb',{},False),('windows',{'WSL_DISTRO_NAME':'Ubuntu','WAYLAND_DISPLAY':'wayland-0'},False),
+         ('wayland',{'WSL_DISTRO_NAME':'Ubuntu','WAYLAND_DISPLAY':'wayland-0'},False)]
+  for platform,environment,expected in cases:
+   with self.subTest(platform=platform,environment=environment),patch.dict(os.environ,environment,clear=True),patch.object(QApplication,'platformName',return_value=platform):
+    controller=OperationProgress(None,'定位验证');controller.threshold=0
+    try:
+     controller.update('处理中',1,2);dialog=controller.dialog
+     self.assertEqual(bool(dialog.windowFlags() & Qt.X11BypassWindowManagerHint),expected)
+     self.assertEqual(bool(dialog.windowFlags() & Qt.WindowDoesNotAcceptFocus),expected)
+     self.assertEqual(dialog.testAttribute(Qt.WA_ShowWithoutActivating),expected)
+     self.assertEqual(dialog.windowModality(),Qt.NonModal)
+     self.assertTrue(dialog.isVisible());self.assertEqual(dialog.value(),1)
+    finally:controller.close();self.app.sendPostedEvents(None,QEvent.DeferredDelete)

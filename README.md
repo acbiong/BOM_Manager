@@ -418,3 +418,7 @@ Windows测试入口按`tests/test_*.py`逐文件启用独立Python/Qt进程，�
 
 
 帮助截图增量生成：构建时校验 `src/ui`、显示相关的 `src/domain`、截图工具及静态资源的指纹，同时校验已有PNG的内容哈希。无相关变化且图片完整时复用 `.tmp/help_screenshots`，不重新打开示例窗口；只升版本或无关业务代码变化不触发重拍。缺失、损坏或UI/截图脚本变化时重新生成。需要更换示例数据时，使用 `BOM_HELP_FORCE=1 python3 tools/generate_help_screenshots.py` 强制更新；可同时设置 `BOM_HELP_CONFIG` 指定数据配置。删除 `.tmp/help_screenshots` 也会在下次构建重建。
+
+### WSLg进度窗口定位验证
+
+WSLg的xcb进度提示窗由应用定位并禁止抢占焦点，以避免桥接窗口管理器在首次显示后重新分配位置。可在原生图形终端运行 `python tools/check_progress_geometry.py --report test_reports/progress_geometry.json`，检查首次显示、隐藏恢复及窗口记忆开关下的12组240次位置采样。使用临时配置，不读取业务数据库；离屏插件不适用于此检查。发布包冒烟也包含首次/恢复位置稳定性检查。

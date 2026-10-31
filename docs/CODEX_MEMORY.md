@@ -1252,3 +1252,13 @@ Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出�
 截图复核发现精简WSL Ubuntu缺少中文字库，虽窗口功能通过但中文显示为方框；本机补装fonts-noto-cjk，并补入README系统依赖。最终Linux截图需在字库安装后重新检查。AppImage使用目标机字体，其他精简Linux环境也需安装中文字体。
 
 收尾补充：旧test_bom_delete_confirmation同样依赖30ms后activeWindow，原生复跑错过确认框后等待；中止当次收尾且未提交。改为有限等待真实QMessageBox，再发送Enter并断言窗口关闭，回调错误正常报告，保留取消/输入框Delete隔离断言；专项delete_confirmation_fixed_20261031.log通过。
+
+## 2026-10-31：修复WSLg进度窗首次定位跳动
+
+- 用户要求修复上一轮遗留WSLg位置稳定性失败。基线0.6.76/13e7025、两端工作区干净。原代码在WSLg xcb实际采样从初始坐标变为(0,0)，随后又移至窗口管理器分配位置；提前winId或保留transient父关系仍复现。tools/check_progress_geometry.py对旧代码失败，报告test_reports/wslg_geometry_before.json/log。
+- 仅在Qt平台为xcb且同时存在WSL_DISTRO_NAME、WAYLAND_DISPLAY时，为无交互进度窗添加X11BypassWindowManagerHint、WindowDoesNotAcceptFocus和WA_ShowWithoutActivating，由应用在显示前确定位置，避免WSLg XWayland/RAIL异步重新定位。普通交互窗口、Windows原生、非WSL X11/Wayland继续原管理方式。不循环纠偏，不增加固定睡眠，不放宽稳定性断言。
+- 原1000条导入及导出检查WSLg通过：1控制器/1窗口/1种几何位置，原数据库SHA256不变。新增定位工具检查首次显示与隐藏恢复、窗口记忆关闭/开启、3轮重复及阶段文案变化，共12组240次采样；同时验证显示、进度值、非模态及居中。配合离屏平台分支回归、Windows原生检查和最终包内新增位置检查。
+- 发布冒烟新增ui_progress_initial_and_resume_geometry，使最终EXE/AppImage也检查位置稳定性；测试仍对原生崩溃和失败返回非零。报告test_reports/wslg_progress_fixed.json、wslg_geometry_fixed.json、windows_geometry_fixed.json及finish_wslg_progress.log。此前WSLg位置待修复项由本节取代，其他电脑人工桌面双击仍未执行。
+- 完成前核对最终VERSION/HEAD、两端全量回归/137条需求审计、包内51项检查、SHA256和Git干净状态；保留package业务数据，不启动常驻监控，不自动推送。
+
+进一步检查非WSL X11时发现窗口记忆center_dialog把固定520px进度窗的最大宽度放大，长阶段文字触发QProgressDialog扩宽到581px并重新居中。改为只收紧、不放宽已有最大宽度；新增真实Qt回归验证窗口记忆和长文字后固定尺寸约束不变，修复前失败、修复后通过。独立X11原生12组240次检查随后全部通过。首次收尾为处理该新发现中止，未提交；最终证据以finish_wslg_progress.log为准。

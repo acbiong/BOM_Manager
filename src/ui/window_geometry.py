@@ -73,7 +73,9 @@ class WindowGeometryMemory(QObject):
             if isinstance(window, QProgressDialog):
                 for label in window.findChildren(QLabel):
                     label.setWordWrap(True)
-                window.setMaximumWidth(max(200, available.width()-20))
+                # Keep an explicitly fixed progress width. Raising its maximum
+                # would let QProgressDialog resize on a later long stage label.
+                window.setMaximumWidth(min(window.maximumWidth(), max(200, available.width()-20)))
                 window.resize(min(window.width(), window.maximumWidth()), window.height())
             frame = window.frameGeometry()
             offset = available.center()-frame.center()

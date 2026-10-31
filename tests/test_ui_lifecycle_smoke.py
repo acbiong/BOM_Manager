@@ -39,5 +39,5 @@ with temporary() as directory:
    result=subprocess.run([sys.executable,'-X','faulthandler',str(root/'src/main.py'),'--smoke-test-report',str(report)],cwd=root,env=env,stdout=output,stderr=subprocess.STDOUT,timeout=90)
   self.assertEqual(result.returncode,0,log.read_text(errors='replace')[-6000:])
   data=json.loads(report.read_text());self.assertTrue(data['passed'],data)
-  for name in ('ui_save_three_times_with_real_prompt','ui_compare_live_after_save','ui_close_reopen_saved_bom','dialog_QFileDialog','dialog_MaterialHeaderMappingDialog','message_information','message_warning','message_critical'):
+  for name in ('ui_save_three_times_with_real_prompt','ui_compare_live_after_save','ui_close_reopen_saved_bom','dialog_QFileDialog','dialog_MaterialHeaderMappingDialog','message_information','message_warning','message_critical','ui_progress_initial_and_resume_geometry'):
    self.assertIn(name,data['checks'])

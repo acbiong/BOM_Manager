@@ -57,6 +57,25 @@ class BulkImportProgressTests(unittest.TestCase):
    controller.update('很长的工作表名称和路径'*30,3,10)
    self.assertEqual(dialog.geometry(),geometry);self.assertIs(controller.dialog,dialog)
   finally:controller.close();self.app.sendPostedEvents(None,QEvent.DeferredDelete)
+
+ def test_window_memory_preserves_fixed_progress_size_for_long_labels(self):
+  from config.config_service import ConfigService
+  from ui.window_geometry import WindowGeometryMemory
+  from PyQt5.QtTest import QTest
+  with tempfile.TemporaryDirectory() as tmp:
+   memory=WindowGeometryMemory(self.app,ConfigService(tmp))
+   controller=OperationProgress(None,'稳定尺寸');controller.threshold=0;controller.paint_interval=0
+   try:
+    controller.update('短说明',1,3);dialog=controller.dialog;size=dialog.size()
+    self.assertEqual(dialog.minimumSize(),dialog.maximumSize())
+    QTest.qWait(160)
+    controller.update('很长的阶段说明'*100,2,3);QTest.qWait(160)
+    self.assertEqual(dialog.size(),size)
+    self.assertEqual(dialog.minimumSize(),dialog.maximumSize())
+   finally:
+    controller.close();memory.timer.stop();memory.placement_timer.stop()
+    self.app.removeEventFilter(memory);self.app.aboutToQuit.disconnect(memory.save_visible);memory.deleteLater()
+    self.app.sendPostedEvents(None,QEvent.DeferredDelete)
  def test_repeated_queued_refreshes_share_original_operation(self):
   calls=[];controllers=[]
   @operation('刷新清单')

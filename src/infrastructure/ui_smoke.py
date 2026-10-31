@@ -157,6 +157,18 @@ def exercise_windows(service,main,library):
             assert len(images)==len(GUIDES[index]['steps']),'教程截图未完整加载'
         checks.extend(['ui_help_annotated_action_resources','ui_help_no_extra_windows'])
         help_window.close();help_window.deleteLater();opened.remove(help_window);drain()
+        from ui.operation_progress import OperationProgress
+        progress=OperationProgress(main,'进度位置验证');progress.threshold=0;progress.paint_interval=0
+        try:
+            for phase in ('initial','resume'):
+                if phase=='resume':progress.pause();drain();progress.resume()
+                positions=[]
+                for step in range(8):
+                    progress.update('正在验证进度窗口位置…',step+1,8)
+                    positions.append(progress.dialog.geometry().getRect());drain(50)
+                assert len(set(positions))==1,(phase,positions)
+            checks.append('ui_progress_initial_and_resume_geometry')
+        finally:progress.close();drain()
         return checks
     finally:
         messages.stop()
