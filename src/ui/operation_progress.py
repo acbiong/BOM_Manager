@@ -100,14 +100,19 @@ class OperationProgress:
             # X11 mapping is asynchronous. Give the first expose a bounded
             # opportunity to arrive before repainting the backing store.
             deadline = time.monotonic() + .030
-            while not dialog.windowHandle().isExposed() and time.monotonic() < deadline:
+            # Native/queued event delivery can destroy the owner and its child
+            # progress window. Recheck lifetime after every event pump.
+            while not sip.isdeleted(dialog) and time.monotonic() < deadline:
+                handle = dialog.windowHandle()
+                if handle is None or handle.isExposed():break
                 QThread.msleep(1)
                 QApplication.processEvents(flags)
         finally:
             self.dispatching = False
             app.removeEventFilter(guard)
-        QApplication.sendPostedEvents(dialog, QEvent.UpdateRequest)
-        dialog.repaint()
+        if not sip.isdeleted(dialog):
+            QApplication.sendPostedEvents(dialog, QEvent.UpdateRequest)
+            if not sip.isdeleted(dialog):dialog.repaint()
 
     def pause(self):
         self.paused = time.perf_counter()

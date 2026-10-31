@@ -435,3 +435,10 @@ WSLg的xcb进度提示窗由应用定位并禁止抢占焦点，以避免桥接�
 有限验证工具：`tools/check_project_compare.py --report test_reports/project_compare_process.json`（两个临时项目、两个实际软件进程）；`tools/benchmark_refresh.py --baseline c44aa3b --report test_reports/refresh_performance.json`（隔离合成数据、三轮对照）。不启动常驻监控。新增三张帮助截图采用明确命名的隔离示例项目实际窗口，其余随源码静态教程保留；有原示例库时完整截图工具亦支持新步骤。
 
 2026-11-01补充：物料库新单元格完整初始化后一次进入表格，避免逐属性重复通知；首次变化后解绑绘制批处理监听，已有单元格继续增量更新。隐藏SKU数据与所有显示语义保留。
+
+
+## 2026-11-01：进度窗事件处理期间的销毁保护
+
+0.6.79最终Linux全量测试发现：原生事件分发可能销毁父窗口和进度窗，随后读取窗口句柄会报“QProgressDialog has been deleted”。现每次事件处理后重新检查Qt对象生命周期，停止访问已删除窗口，并始终移除临时事件过滤器；不增加等待时长，不改变WSLg定位策略。导出进度测试显式创建独立父窗口，避免继承其他测试待销毁的活动窗口。
+
+新增真实Qt回归覆盖首次及后续事件分发期间删除父窗口，修复前两种情况均失败、修复后通过，同时验证后续更新/关闭安全且计时器正常投递。进度专项7项、导出专项3项通过；全量预期600项，需求审计137项。最终完整门禁、双平台同提交构建及原生窗口复验结果以test_reports/finish_progress_lifetime.log、project_refresh_linux_final.log、project_compare_refresh_summary.json为准；提交时仍待最终构建核验，不将预期当作通过。保持用户数据库及配置、未保存BOM逻辑，不启动常驻监控、不自动推送。

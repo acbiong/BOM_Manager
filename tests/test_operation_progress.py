@@ -50,6 +50,34 @@ class OperationProgressTests(unittest.TestCase):
   RECENT_OPERATIONS.clear();size=len(RECENT_OPERATIONS);self.assertEqual(outer(),42)
   self.assertEqual(len(RECENT_OPERATIONS),size+1);self.assertFalse(RECENT_OPERATIONS[-1]['progress_shown'])
 
+ def test_owner_deleted_during_native_event_delivery_releases_progress_safely(self):
+  from PyQt5 import sip
+  from PyQt5.QtCore import QEvent
+  from PyQt5.QtGui import QWindow
+  process_events=QApplication.processEvents
+  for delete_on in (1,2):
+   with self.subTest(delete_on=delete_on):
+    owner=QWidget();controller=OperationProgress(owner,'生命周期验证');controller.threshold=0
+    calls=[]
+    def dispatch(flags):
+     calls.append(flags)
+     if len(calls)==delete_on:
+      owner.deleteLater();QApplication.sendPostedEvents(owner,QEvent.DeferredDelete)
+     process_events(flags)
+    try:
+     with patch.object(QApplication,'processEvents',side_effect=dispatch),patch.object(QWindow,'isExposed',return_value=False):
+      controller.update('处理中',1,2)
+     self.assertTrue(sip.isdeleted(owner));self.assertTrue(sip.isdeleted(controller.dialog))
+     self.assertFalse(controller.dispatching)
+     controller.update('继续处理',2,2)
+     # The temporary event guard must be removed even after destruction.
+     from PyQt5.QtCore import QTimer
+     delivered=[];timer=QTimer();timer.setSingleShot(True);timer.timeout.connect(lambda:delivered.append(True));timer.start(0)
+     process_events();self.assertEqual(delivered,[True])
+    finally:
+     controller.close()
+     if not sip.isdeleted(owner):sip.delete(owner)
+
  def test_qt_signal_argument_and_no_event_reentry(self):
   from PyQt5.QtWidgets import QPushButton
   from PyQt5.QtCore import QTimer

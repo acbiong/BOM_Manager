@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 os.environ['QT_QPA_PLATFORM']='offscreen'
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication,QWidget
 from openpyxl import Workbook,load_workbook
 from database.database import Database
 from services.services import Services
@@ -16,6 +16,7 @@ class DatabaseExportProgressTests(unittest.TestCase):
  def test_real_export_preserves_scale_through_formats_and_file_write(self):
   with tempfile.TemporaryDirectory() as tmp:
    db=Database(str(Path(tmp)/'db'));svc=Services(db);events=[];original=OperationProgress.update
+   owner=QWidget()  # Do not inherit a previous test's active, closing window.
    formatted=[];format_sheet=svc.format_export_sheet
    def format_once(sheet,centered):
     formatted.append(id(sheet));return format_sheet(sheet,centered)
@@ -28,12 +29,14 @@ class DatabaseExportProgressTests(unittest.TestCase):
     self.assertNotEqual(events[-1][1],events[-1][2]);self.assertIn('正在写入',events[-1][0]);save(book,path)
    try:
     with patch.object(svc,'format_export_sheet',format_once),patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'paint_interval',0),patch.object(OperationProgress,'update',observe),patch.object(Workbook,'save',write):
-     operation('导出资料库')(lambda:svc.export_database(Path(tmp)/'out.xlsx'))()
+     operation('导出资料库',owner=lambda _:owner)(lambda:svc.export_database(Path(tmp)/'out.xlsx'))()
     self.assertEqual(len(formatted),5);self.assertEqual(len(set(formatted)),5)
     self.assertTrue(events);self.assertTrue(all(total==6 for _,_,total in events))
     values=[value for _,value,_ in events];self.assertEqual(values,sorted(values));self.assertEqual(values[-1],6)
     wb=load_workbook(Path(tmp)/'out.xlsx');self.assertEqual(len(wb.sheetnames),5);self.assertEqual(wb['SKU清单'].max_row,3);wb.close()
-   finally:db.close()
+   finally:
+    from PyQt5 import sip
+    sip.delete(owner);db.close()
  def test_write_error_never_reports_complete_and_releases_stage(self):
   class Recorder:
    def update(self,message,current,total):events.append((message,current,total))
