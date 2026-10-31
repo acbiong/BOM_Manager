@@ -68,7 +68,7 @@ class BomUndo(QObject):
         try:
             for name,value in state.items():
                 if name.startswith('_'):setattr(w,name,deepcopy(value))
-            w.render_tree(deepcopy(state['tree']));w.root_item.setData(0,Qt.UserRole,deepcopy(state['root']));w.dirty=state['dirty']
+            w.render_tree(deepcopy(state['tree']),fit=False);w.root_item.setData(0,Qt.UserRole,deepcopy(state['root']));w.dirty=state['dirty']
             current,selected,expanded,vertical,horizontal=state['view']
             def item_at(path):
                 item=w.root_item
@@ -84,7 +84,7 @@ class BomUndo(QObject):
             if epoch==getattr(w,'_undo_external_epoch',0):w.notice.setText(notice);w.refresh_action.setEnabled(refresh)
             w.save_action.setEnabled(state['save'] and not w.is_locked());w.export_action.setEnabled(state['export'] and not w.refresh_action.isEnabled())
         finally:self.restoring=False;w.tree.setUpdatesEnabled(True)
-        WindowRefreshBus.publish({'type':'bom_draft_changed'})
+        w.svc.publish({'type':'bom_draft_changed'})
     def undo(self):
         if not self.undo_stack or self.w.is_locked() or self.w._saving:return
         entry=self.undo_stack.pop();self.restore(entry[0]);self.redo_stack.append(entry);self.last_key=None;self.update()

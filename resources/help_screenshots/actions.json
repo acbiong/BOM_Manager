@@ -1844,5 +1844,44 @@
       1200,
       600
     ]
+  },
+  "action_compare_project_entry": {
+    "window": "",
+    "target": [
+      2,
+      60,
+      608,
+      18
+    ],
+    "size": [
+      612,
+      80
+    ]
+  },
+  "action_compare_project_choose": {
+    "window": "选择对比项目",
+    "target": [
+      11,
+      29,
+      593,
+      22
+    ],
+    "size": [
+      615,
+      88
+    ]
+  },
+  "action_compare_project_sku": {
+    "window": "选择项目SKU BOM",
+    "target": [
+      11,
+      29,
+      191,
+      22
+    ],
+    "size": [
+      213,
+      88
+    ]
   }
 }

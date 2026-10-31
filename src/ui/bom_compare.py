@@ -122,18 +122,33 @@ class BomCompareDialog(QDialog):
         self.live_timer=QTimer(self);self.live_timer.setSingleShot(True);self.live_timer.timeout.connect(self.live_refresh)
         self._rows=[];self._compared=False
         self._choices_dirty=False
-        self.external_sources={};self._chosen=[None,None]
+        self.external_sources={};self.project_sources={};self._chosen=[None,None]
+        self.project_timer=QTimer(self);self.project_timer.setInterval(350);self.project_timer.timeout.connect(self.poll_projects)
+        self._project_signatures={}
         for side,combo in enumerate((self.left,self.right)):
             checkpoint()
             combo.activated.connect(lambda index,s=side:self.choose_source(s))
         self.reload_choices()
     def showEvent(self,event):
-        super().showEvent(event);WindowRefreshBus.subscribe(self.on_change)
+        super().showEvent(event);WindowRefreshBus.subscribe(self.on_change);self.sync_project_watch()
     def closeEvent(self,event):
-        WindowRefreshBus.unsubscribe(self.on_change);self.live_timer.stop();self.clear_results();super().closeEvent(event)
+        WindowRefreshBus.unsubscribe(self.on_change);self.live_timer.stop();self.project_timer.stop();self.clear_results();super().closeEvent(event)
+    def sync_project_watch(self):
+        if self.isVisible() and any(c.currentData() in self.project_sources for c in (self.left,self.right)):self.project_timer.start()
+        else:self.project_timer.stop()
+    @silent_progress()
+    def poll_projects(self):
+        from infrastructure.live_project_cache import project_signature
+        paths={self.project_sources[c.currentData()]['path'] for c in (self.left,self.right) if c.currentData() in self.project_sources}
+        signatures={path:project_signature(path) for path in paths}
+        if signatures==self._project_signatures:return
+        self._project_signatures=signatures
+        if paths and all(c.currentData() is not None for c in (self.left,self.right)):
+            # Also recover after temporary source errors without waiting for a click.
+            self.compare(quiet=True)
     def on_change(self,event):
         if event.get('type')=='sku_order_changed':
-            self.reload_choices();return
+            self.reload_choices();self._choices_dirty=False;return
         if event.get('type') in ('bom_draft_changed','bom_changed','material_changed','sku_changed'):
             # Merge consecutive text edits; final state is compared after a short pause.
             if event.get('type') in ('material_changed','sku_changed'):self._choices_dirty=True
@@ -156,33 +171,8 @@ class BomCompareDialog(QDialog):
     def live_snapshot(self,sku):
         main=self.parent();window=getattr(main,'_bom_windows',{}).get(sku['id'])
         if window is None or not window.dirty:return snapshot(self.service,sku)
-        material_cache={};alternate_cache={}
-        def material(mid):
-            if mid not in material_cache:material_cache[mid]={**window.svc.material_snapshot(mid),**getattr(window,'_material_edits',{}).get(mid,{})}
-            return material_cache[mid]
-        def node(item,parent=None,path=()):
-            data=dict(item.data(0,Qt.UserRole) or {})
-            mid=data.get('material_id',window.root)
-            result=dict(data);result.update(material(mid))
-            for key in ('quantity','position','remark'):
-                checkpoint()
-                if key in data:result[key]=data[key]
-            if parent:
-                key=window.alternate_key(item)
-                if key not in alternate_cache:alternate_cache[key]=window.alternate_ids(item)
-                ids=alternate_cache[key]
-            else:ids=[]
-            alternatives=[material(i) for i in ids]
-            result.update(material_id=mid,children=[],alternate_ids=frozenset(ids),alternate_codes=frozenset((a['base_code'],a['version']) for a in alternatives),
-                alternates='\n'.join(sorted(' | '.join(str(a.get(k) or '') for k in ('base_code','version','name','description','manufacturer','mpn')) for a in alternatives)),
-                level=len(path),parent_code=(str(parent['base_code'])+str(parent['version'])) if parent else 'ROOT',_material_path=path)
-            if parent is None:result['quantity']=1
-            for i in range(item.childCount()):
-                checkpoint()
-                child=item.child(i);d=child.data(0,Qt.UserRole) or {}
-                if not d.get('_deleted'):result['children'].append(node(child,result,path+(d['material_id'],)))
-            return result
-        return node(window.root_item)
+        from ui.bom_snapshot import draft_snapshot
+        return draft_snapshot(window)
     def context_menu(self,table,index,global_pos):
         if not index.isValid() or index.row()>=len(self._rows):return
         side=self.tables.index(table);diff=self._rows[index.row()]
@@ -194,6 +184,9 @@ class BomCompareDialog(QDialog):
         if action==edit:self.open_editor(side,index.row())
         elif action==material_edit:self.edit_material(side,index.row())
     def edit_material(self,side,row):
+        if row<0 or row>=len(self._rows):return
+        node=self._rows[row].left if side==0 else self._rows[row].right
+        if node is None or node.get('_external'):return
         from services.material_history import enabled
         if enabled(self.service):
             self.open_editor(side,row)
@@ -272,17 +265,33 @@ class BomCompareDialog(QDialog):
                 checkpoint()
                 combo.addItem(f"{row['base_code']}{row['version']} {row['name']}  历史版本{row['mirror_version']}",row['id'])
             for key,source in self.external_sources.items():combo.addItem(source['label'],key)
+            for key,source in self.project_sources.items():combo.addItem(source['label'],key)
             combo.addItem('载入其他BOM','load_external')
+            combo.addItem('载入其他项目','load_project')
             chosen=combo.findData(previous[index])
             combo.setCurrentIndex(chosen if chosen>=0 else 0);combo.blockSignals(False)
         self.button.setEnabled(True)
     def source_changed(self,*args):
         combo=self.sender()
-        if combo.currentData()=='load_external':return
+        if combo.currentData() in ('load_external','load_project'):return
         if hasattr(self,'_chosen'):self._chosen[(self.left,self.right).index(combo)]=combo.currentData()
+        if hasattr(self,'project_timer'):self.sync_project_watch()
         self.clear_results()
 
-    def selected_snapshot(self,key):
+    def selected_snapshot(self,key,reuse=False):
+        if key in self.project_sources:
+            from services.project_bom_compare import read_project
+            from infrastructure.live_project_cache import project_signature
+            from copy import deepcopy
+            spec=self.project_sources[key]
+            signature=project_signature(spec['path'])
+            if reuse and signature==spec.get('snapshot_signature') and 'snapshot' in spec:return deepcopy(spec['snapshot'])
+            try:
+                tree=file_work(read_project,spec['path'],spec['sku_id'])
+                spec.update(snapshot=deepcopy(tree),snapshot_signature=signature)
+                return tree
+            except Exception as exc:
+                raise ValueError(f"其他项目BOM重新载入失败：{spec['label']}\n{exc}") from exc
         if key in self.external_sources:
             from services.external_bom import ExcelSource,build_external_bom
             spec=self.external_sources[key]
@@ -296,9 +305,10 @@ class BomCompareDialog(QDialog):
         sku=next((dict(row) for row in self.service.skus() if row['id']==key),None)
         if sku is None:raise ValueError('所选SKU不存在，请重新选择')
         return self.live_snapshot(sku)
-    @operation('载入外部BOM')
+    @operation('载入对比BOM')
     def choose_source(self,side):
         combo=(self.left,self.right)[side]
+        if combo.currentData()=='load_project':return self.choose_project_source(side)
         if combo.currentData()!='load_external':self._chosen[side]=combo.currentData();return
         previous=self._chosen[side];was_compared=self._compared
         try:
@@ -353,13 +363,61 @@ class BomCompareDialog(QDialog):
                 combo.setCurrentIndex(max(0,combo.findData(previous)))
                 if was_compared:self.compare()
 
+    def choose_project_source(self,side):
+        from pathlib import Path
+        from config.config_service import ConfigService
+        from config.project_registry import ProjectRegistry
+        from services.project_bom_compare import read_project
+        combo=(self.left,self.right)[side];previous=self._chosen[side]
+        try:
+            config=self.service.config_service or ConfigService(Path(self.service.db.path).parent)
+            current=Path(self.service.db.path).resolve()
+            records=[]
+            for record in ProjectRegistry(config).entries():
+                try:path=config.resolve_path(record['path']).resolve()
+                except (ValueError,KeyError):continue
+                if path!=current:records.append((record,path))
+            labels=[f"{i+1}. {r.get('project_code','')} {r.get('project_name','')} — {path}" for i,(r,path) in enumerate(records)]
+            browse='选择其他项目数据库…'
+            label,ok=QInputDialog.getItem(self,'选择对比项目','选择其他项目（优先使用打开窗口中的未保存BOM，变更时自动刷新）：',labels+[browse],0,False)
+            if not ok:return
+            if label==browse:
+                path,_=QFileDialog.getOpenFileName(self,'选择对比项目数据库',str(config.base),'SQLite (*.db *.sqlite *.sqlite3);;所有文件 (*)')
+                if not path:return
+                path=Path(path).expanduser().resolve()
+            else:path=records[labels.index(label)][1]
+            if path==current:raise ValueError('这是当前项目，请直接在BOM清单中选择，以保留未保存草稿参与对比。')
+            catalogue=file_work(read_project,path)
+            skus=catalogue['skus']
+            if not skus:raise ValueError('所选项目没有可对比的SKU BOM。')
+            names=[f"{i+1}. {s['base_code']}{s['version']} {s['name']} 历史版本{s['mirror_version']}" for i,s in enumerate(skus)]
+            name,ok=QInputDialog.getItem(self,'选择项目SKU BOM','选择需要对比的SKU及历史版本：',names,0,False)
+            if not ok:return
+            sku=skus[names.index(name)]
+            file_work(read_project,path,sku['id'])
+            project=catalogue['project'];title=' '.join(str(project.get(k) or '') for k in ('project_code','project_name')).strip() or path.stem
+            key=f"project:{path}:{sku['id']}"
+            self.project_sources[key]={'path':str(path),'sku_id':sku['id'],'label':f"项目：{title} / {names[skus.index(sku)].split('. ',1)[1]} — {path}"}
+            self.reload_choices();combo.setCurrentIndex(combo.findData(key));self._chosen[side]=key
+            self.compare()
+        except Exception as error:QMessageBox.warning(self,'其他项目BOM载入失败',str(error))
+        finally:
+            if combo.currentData()=='load_project':
+                # Cancel/failure must retain the existing comparison and draft.
+                combo.blockSignals(True);combo.setCurrentIndex(max(0,combo.findData(previous)));combo.blockSignals(False)
+
     @operation('BOM对比')
     def compare(self,quiet=False):
         self.live_timer.stop()
         if self._choices_dirty:self.reload_choices();self._choices_dirty=False
         if self.left.currentData() is None or self.right.currentData() is None:return
-        if 'load_external' in (self.left.currentData(),self.right.currentData()):return
-        try:rows=file_work(compare_trees,self.selected_snapshot(self.left.currentData()),self.selected_snapshot(self.right.currentData()))
+        if any(c.currentData() in ('load_external','load_project') for c in (self.left,self.right)):return
+        try:
+            from copy import deepcopy
+            left_key=self.left.currentData();right_key=self.right.currentData()
+            left=self.selected_snapshot(left_key,reuse=quiet)
+            right=deepcopy(left) if right_key==left_key else self.selected_snapshot(right_key,reuse=quiet)
+            rows=file_work(compare_trees,left,right)
         except Exception as exc:
             self.clear_results()
             if quiet:self.summary.setText('BOM对比暂未更新：'+str(exc))
@@ -406,6 +464,11 @@ class BomCompareDialog(QDialog):
         self.apply_difference_filter()
         counts={s:sum(d.status==s for d in rows) for s in names}
         self.summary.setText('；'.join(f'{names[s]}：{counts[s]}' for s in names)+'（含根节点，排序变化不作为内容差异）')
+        for side,node in (('左侧',rows[0].left if rows else None),('右侧',rows[0].right if rows else None)):
+            if node and node.get('_project_source'):
+                self.summary.setText(self.summary.text()+f"；{side}其他项目："+('未保存草稿' if node.get('_draft') else '已保存BOM'))
+        from infrastructure.live_project_cache import project_signature
+        self._project_signatures={spec['path']:project_signature(spec['path']) for key,spec in self.project_sources.items() if key in (self.left.currentData(),self.right.currentData())}
 
     def apply_difference_filter(self,*args):
         if not hasattr(self,'_rows'):return

@@ -18,7 +18,7 @@ def show_operation_error(parent,title,error,prefix=''):
   for col,key in enumerate(('sku','material','parent')):table.setItem(i,col,QTableWidgetItem(row[key]))
  layout.addWidget(table)
  from ui.table_layout import fit_columns
- fit_columns(table);table.resizeRowsToContents()
+ fit_columns(table)
  buttons=QDialogButtonBox(QDialogButtonBox.Ok);buttons.accepted.connect(dialog.accept);layout.addWidget(buttons)
  try:dialog.exec_()
  finally:

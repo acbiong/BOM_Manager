@@ -49,6 +49,7 @@ class Services:
   from infrastructure.events import WindowRefreshBus
   if event.get('type')=='bom_changed' and getattr(self,'scope_id',0):event=dict(event,scope_id=self.scope_id)
   database=getattr(self.db,'original',self.db)
+  event=dict(event,database=database)
   if getattr(database,'_transaction_depth',0):
    database._pending_events=getattr(database,'_pending_events',[])+[event]
   else:WindowRefreshBus.publish(event)
@@ -179,7 +180,7 @@ class Services:
   for sku in self.skus() if skus is None else skus:
    checkpoint()
    if sku['scope_id'] and sku['scope_id']!=getattr(self,'scope_id',0):
-    result.update(self.for_sku(sku['id']).sku_material_quantities());continue
+    result.update(self.for_sku(sku['id']).sku_material_quantities([sku]));continue
    root=sku['material_id'];totals={root:Decimal('1')}
    def walk(parent,quantity,ancestors):
     for child,usage in graph.get(parent,[]):
@@ -210,6 +211,7 @@ class Services:
   return sid
  def material_is_bom_referenced(self,mid):
   return bool(self.db.conn.execute('SELECT 1 FROM mirror_material_usage WHERE material_id=?',(mid,)).fetchone() or self.db.conn.execute('SELECT 1 FROM material_bom_items WHERE child_material_id=? LIMIT 1',(mid,)).fetchone() or self.db.conn.execute('SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=? LIMIT 1',(mid,)).fetchone())
+ @WindowRefreshBus.batch()
  def delete_sku(self,sid):
   row=self.db.conn.execute('SELECT * FROM skus WHERE id=?',(sid,)).fetchone()
   if row and row['scope_id']:
@@ -268,6 +270,7 @@ class Services:
     d.update(historical.get(r['child_material_id'],{}))
     result.append(d); walk(r['child_material_id'],level+1,r['id'],node_id,ancestors)
   walk(root,1,None,None,set()); return result
+ @WindowRefreshBus.batch()
  def save_bom(self,root,items,preview=False,progress=None):
   """把树中的重复子BOM归并为物料关系，在单个事务中保存。"""
   from services.sku_lock import assert_sku_unlocked
@@ -718,6 +721,7 @@ class Services:
   return resolved
  def update_project(self,d):
   with self.db.transaction(): self.db.conn.execute('UPDATE project SET project_name=?,project_code=?,product_name=?,product_model=? WHERE id=1',(d.get('project_name',''),d.get('project_code',''),d.get('product_name',''),d.get('product_model',''))); self.log('project',1,'update',d.get('project_name',''))
+  self.publish({'type':'project_changed'})
  def project(self): return self.db.conn.execute('SELECT * FROM project WHERE id=1').fetchone()
  def material_version_references(self,i):
   """以实际共享父级BOM为选择单位，列出所有受影响SKU。"""
@@ -756,6 +760,7 @@ class Services:
    checkpoint()
    if sku['material_id']==i: result.append({'sku_id':sku['id'],'sku':f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}",'parent':'SKU根节点（无父级）'})
   return result
+ @WindowRefreshBus.batch()
  def change_material_version(self,i,new_version,selected_parents=None,expected_parents=None):
   new_version=new_version.strip()
   if not new_version: raise ValueError('版本号不能为空')

@@ -110,6 +110,12 @@ def generate(e):
     from ui.bom_compare import BomCompareDialog
     bar('compare_menu',main,'BOM对比');compare=dialog(BomCompareDialog(svc,main));compare.left.setCurrentIndex(1);snap('compare_left',compare,compare.left)
     compare.right.setCurrentIndex(min(2,compare.right.count()-2));snap('compare_right',compare,compare.right);snap('compare_run',compare,compare.button);compare.compare();shown(compare)
+    compare.right.showPopup();view=compare.right.view();index=compare.right.model().index(compare.right.findData('load_project'),0);view.scrollTo(index);QApplication.processEvents()
+    snap('compare_project_entry',view,rect=view.visualRect(index));compare.right.hidePopup()
+    project=svc.project();picker=QInputDialog(compare);picker.setWindowTitle('选择对比项目');picker.setLabelText('选择其他项目（优先使用打开窗口中的未保存BOM，变更时自动刷新）：')
+    picker.setComboBoxItems(['1. '+project['project_code']+' '+project['project_name'],'选择其他项目数据库…']);dialog(picker);snap('compare_project_choose',picker,picker.findChild(QComboBox));picker.hide()
+    picker=QInputDialog(compare);picker.setWindowTitle('选择项目SKU BOM');picker.setLabelText('选择需要对比的SKU及历史版本：')
+    picker.setComboBoxItems([f"{s['base_code']}{s['version']} {s['name']} 历史版本{s['mirror_version']}" for s in svc.skus()]);dialog(picker);snap('compare_project_sku',picker,picker.findChild(QComboBox));picker.hide()
     snap('compare_diff',compare,compare.differences_only)
     table=compare.tables[0];index=next(table.model().index(i,1) for i in range(table.rowCount()) if table.item(i,1) is not None)
     menu_shot(lambda:compare.context_menu(table,index,table.viewport().mapToGlobal(QPoint(30,40))),[('打开BOM进行编辑','compare_edit')]);compare.close()

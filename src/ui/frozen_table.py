@@ -18,7 +18,7 @@ class FrozenMaterialTable(QTableWidget):
   self.frozen.verticalHeader().hide();self.frozen.horizontalHeader().setSectionsClickable(True)
   self.verticalScrollBar().valueChanged.connect(self.frozen.verticalScrollBar().setValue)
   self.frozen.verticalScrollBar().valueChanged.connect(self.verticalScrollBar().setValue)
-  self.horizontalHeader().sectionResized.connect(self.sync_frozen)
+  self.horizontalHeader().sectionResized.connect(self.sync_geometry)
   self.frozen.horizontalHeader().sectionResized.connect(lambda col,old,size:self.setColumnWidth(col,size) if self.columnWidth(col)!=size else None)
   self.verticalHeader().sectionResized.connect(lambda row,old,size:self.frozen.setRowHeight(row,size))
   self.frozen.doubleClicked.connect(lambda index:self.cellDoubleClicked.emit(index.row(),index.column()))
@@ -27,6 +27,7 @@ class FrozenMaterialTable(QTableWidget):
   self.frozen.horizontalHeader().sectionClicked.connect(self.horizontalHeader().sectionClicked.emit)
   self.viewport().installEventFilter(self);self.frozen.viewport().installEventFilter(self)
   self.model().columnsInserted.connect(self.sync_frozen);self.model().columnsRemoved.connect(self.sync_frozen)
+  self._sync_timer=QTimer(self);self._sync_timer.setSingleShot(True);self._sync_timer.timeout.connect(self.sync_geometry)
   self.frozen.show()
  def eventFilter(self,obj,event):
   if event.type()==QEvent.MouseButtonPress and event.button()==Qt.RightButton:
@@ -34,15 +35,17 @@ class FrozenMaterialTable(QTableWidget):
    index=view.indexAt(event.pos())
    if index.isValid() and self.selectionModel().isRowSelected(index.row()):
     event.accept();return True
-  if event.type() in (QEvent.Resize,QEvent.Show):QTimer.singleShot(0,self.sync_frozen)
+  if event.type() in (QEvent.Resize,QEvent.Show):self._sync_timer.start(0)
   return super().eventFilter(obj,event)
  def sync_frozen(self,*args):
+  for row in range(self.rowCount()):
+   self.frozen.setRowHidden(row,self.isRowHidden(row));self.frozen.setRowHeight(row,self.rowHeight(row))
+  self.sync_geometry()
+ def sync_geometry(self,*args):
+  if hasattr(self,'_sync_timer'):self._sync_timer.stop()
   for col in range(self.columnCount()):
    self.frozen.setColumnHidden(col,col>=3)
    if col<3:self.frozen.setColumnWidth(col,self.columnWidth(col))
-  for row in range(self.rowCount()):
-   checkpoint()
-   self.frozen.setRowHidden(row,self.isRowHidden(row));self.frozen.setRowHeight(row,self.rowHeight(row))
   self.frozen.horizontalHeader().setFixedHeight(self.horizontalHeader().height())
   width=sum(self.columnWidth(col) for col in range(min(3,self.columnCount())))
   self.frozen.setGeometry(self.viewport().x(),self.frameWidth(),min(width,self.viewport().width()),self.horizontalHeader().height()+self.viewport().height())

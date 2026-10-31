@@ -1262,3 +1262,19 @@ Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出�
 - 完成前核对最终VERSION/HEAD、两端全量回归/137条需求审计、包内51项检查、SHA256和Git干净状态；保留package业务数据，不启动常驻监控，不自动推送。
 
 进一步检查非WSL X11时发现窗口记忆center_dialog把固定520px进度窗的最大宽度放大，长阶段文字触发QProgressDialog扩宽到581px并重新居中。改为只收紧、不放宽已有最大宽度；新增真实Qt回归验证窗口记忆和长文字后固定尺寸约束不变，修复前失败、修复后通过。独立X11原生12组240次检查随后全部通过。首次收尾为处理该新发现中止，未提交；最终证据以finish_wslg_progress.log为准。
+
+
+## 2026-10-31：跨项目未保存BOM对比与刷新提速
+
+- 从干净c44aa3b/0.6.77开发。用户要求BOM清单最底部“载入其他项目”，随后补充其他项目也用未保存缓存实时刷新、优化全部刷新机制、加速项目切换并去除尺寸调整进度。功能修改按约定正常补丁升版、详细提交、双平台打包；不推送、不启动常驻监控。
+- services/project_bom_compare.py优先读本机新版来源进程的SKU草稿，离线则SQLite只读备份到内存；外部来源独立身份且节点只读，取消失败保留原选择。ui/bom_snapshot.py统一本地与跨项目草稿转换，包括属性、关系与替代料。
+- ui/live_project.py按事件100ms合并发布；infrastructure/live_project_cache.py用项目文件身份、持有锁及原子JSON在用户临时目录共享快照，正常退出清除、崩溃残留忽略。仅选中其他项目的对比窗口350ms检查变化，无变化不重算。Windows与WSL、不同电脑、旧版进程不共享草稿；旧版需升级重开。不是持久恢复机制，不写数据库/config。
+- 事件按数据库身份隔离，事务合并；移除保存后的重复刷新，SKU不变不重建控件、不重复排序通知。物料库缓存按本连接修改/外部提交/显示选项失效；数量汇总复用已有SKU清单，避免每个历史版本重读全清单。
+- BOM重建、撤销、导入只做最终尺寸调整；先确定字体再测量，每列一次、行高一次原生计算，非显示角色变更不失效。冻结列几何变化不再遍历整表，相同主题不重设样式。保留映射/窗口记忆现有合并计时器。审计表列出全部刷新类别及依据。
+- 专项跨项目9项、刷新效率3项及原外部Excel/批量/表格回归通过；Linux预提交597项、137/137审计通过（最终后续修改仍需全量收尾）。Windows原生烟测54项及双进程6项通过，证据test_reports/project_compare_process_windows.json。首次双进程验证工具误点保存且未结束Windows启动器实际子进程，已修复工具，以最终passed=true为准。
+- 性能工具tools/benchmark_refresh.py基准c44aa3b，60 SKU/250子料与400×18表格、三次中位数；test_reports/refresh_performance.json。排查发现首次显示前后字体不同造成再次整表测量，现先ensurePolished，并验证外部SQLite提交失效，不靠固定高度或截断文字提速。
+- 新增帮助3张实际控件图采用隔离示例项目，原作者业务库不在本机，原静态教程保留。tools/help_more_screenshots.py支持未来在有实际库的环境完整重拍；用户启动不生成截图。
+- 保留忽略数据：package/bom.db SHA256=51c7d3feea2a4f7cc3d09ad3aff52e80e86465948e8f2a83f88fee263ff210a6；package/config.ini SHA256=34d8b69f3aadefe49c723f51c96370cd11ce32778d2c28a841d66e9e53527e84。最终交付再次核验。
+- 收尾tools/finish_ai_change.sh --message-file .tmp/project_compare_refresh_commit.txt，结果test_reports/finish_project_compare_refresh.log；Linux同提交构建project_refresh_linux_final.log。提交前未完成项为最终双平台全量、构建及核验，最终状态/产物/哈希见test_reports/project_compare_refresh_summary.json，不将计划当成已通过。
+
+- 最终性能实测（三轮中位数，毫秒）：项目打开 315.09→278.39；物料库打开 938.89→842.3；未变清单重复刷新 984.48→26.44；首次表格测量 288.2→262.01；未变表格再次测量 248.26→0.21。项目首次打开主要仍是完整性检查及既有历史准备，保留这些校验；重点改善重复刷新和重复布局，不将无变化缓存收益夸大为所有打开操作的提速。Windows扩展原生冒烟62项、35类窗口通过，证据test_reports/native_project_refresh_windows/summary.json。

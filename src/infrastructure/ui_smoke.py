@@ -110,6 +110,9 @@ def exercise_windows(service,main,library):
             bom.save_action.trigger();drain(180)
             assert not bom.dirty and scoped.bom(root)[0]['quantity']==float(quantity),'BOM真实保存失败'
         checks.extend(['ui_save_three_times_with_real_prompt','ui_compare_live_after_save'])
+        from infrastructure.project_compare_smoke import exercise_live_project
+        checks.extend(exercise_live_project(main,compare))
+        compare.right.setCurrentIndex(compare.right.findData(sid));compare.compare()
         output=Path(service.db.path).parent/'ui_saved.xlsx';service.export_sku(sid,output);assert output.exists()
         checks.append('ui_export_after_save')
         material=service.material_snapshot(child)

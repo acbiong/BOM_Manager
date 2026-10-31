@@ -23,9 +23,7 @@ class BulkImportProgressTests(unittest.TestCase):
    book=Workbook();book.active.append(MATERIAL_IMPORT_HEADERS)
    for i in range(120):book.active.append([f'M{i}','100',f'测试物料{i}','规格','pcs','','M','厂商',''])
    path=Path(tmp)/'materials.xlsx';book.save(path);book.close()
-   counts={'main':0,'library':0};events=[];controllers=set();dialogs=set();sized_rows=[]
-   resize_row=library.t.resizeRowToContents
-   def row_size(row):sized_rows.append(row);resize_row(row)
+   counts={'main':0,'library':0};events=[];controllers=set();dialogs=set()
    main_refresh=main.refresh;library_refresh=library.refresh;update=OperationProgress.update
    def refresh_main():counts['main']+=1;main_refresh()
    def refresh_library():counts['library']+=1;library_refresh()
@@ -36,13 +34,14 @@ class BulkImportProgressTests(unittest.TestCase):
     if event.get('type')=='material_changed':events.append(event['id'])
    WindowRefreshBus.subscribe(collect);RECENT_OPERATIONS.clear()
    try:
-    with patch.object(library.t,'resizeRowToContents',row_size),patch.object(main,'refresh',refresh_main),patch.object(library,'refresh',refresh_library),patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'update',observe):
+    with patch.object(library.t,'resizeRowsToContents',wraps=library.t.resizeRowsToContents) as row_sizes,patch.object(main,'refresh',refresh_main),patch.object(library,'refresh',refresh_library),patch.object(OperationProgress,'threshold',0),patch.object(OperationProgress,'update',observe):
      ok,failed=operation('导入物料')(lambda:svc.import_materials(path))()
      self.app.processEvents()
     self.assertEqual(len(ok),120);self.assertEqual(failed,[])
     self.assertEqual(counts,{'main':1,'library':1});self.assertEqual(len(set(events)),120)
     self.assertEqual(library.t.rowCount(),120)
-    self.assertEqual(sized_rows,list(range(120)))
+    self.assertEqual(row_sizes.call_count,1)
+    self.assertTrue(all(library.t.rowHeight(r)>=library.t.fontMetrics().height() for r in range(120)))
     self.assertEqual(len(controllers),1);self.assertEqual(len(dialogs),1)
     self.assertEqual([r['operation'] for r in RECENT_OPERATIONS],['导入物料'])
    finally:

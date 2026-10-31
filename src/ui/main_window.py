@@ -18,7 +18,7 @@ from services.services import MaterialHeaderError, BomImportError, MATERIAL_IMPO
 from ui.theme import apply_theme, theme_icon
 from ui.material_clipboard import copy_material, clipboard_material, clipboard_relation, copy_materials, clipboard_entries
 from ui.material_search import MaterialSearchDialog, BomSearchDialog
-from ui.table_layout import fit_columns
+from ui.table_layout import fit_columns,batch_table_update
 from ui.about_dialog import AboutDialog
 from ui.frozen_table import FrozenMaterialTable
 from ui.import_paths import bom_import_directory, remember_bom_import
@@ -428,8 +428,10 @@ from ui.project_management import ProjectManagement
 class MainWindow(ProjectManagement,QMainWindow):
  def __init__(self,svc,version='0.0.1'):
   super().__init__(); self.svc=svc; self._bom_windows={}; self._material_bom_windows={}; self._materials=None; self.setWindowTitle('BOM管理系统'); self.resize(1100,700); self.version=version; self.build(); WindowRefreshBus.subscribe(self.on_data_change)
+  from ui.live_project import LiveProjectPublisher
+  self._live_project=LiveProjectPublisher(self)
  def on_data_change(self,event):
-  if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed'):WindowRefreshBus.refresh(self.refresh,priority=0)
+  if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed','project_changed'):WindowRefreshBus.refresh(self.refresh,priority=0)
  def closeEvent(self,event):
   # Resolve every owned BOM draft before hiding the main window or removing
   # its subscriptions. A rejected close must leave the application usable.
@@ -441,7 +443,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if self._materials is not None and not self._materials.close():event.ignore();return
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
-  WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
+  self._live_project.close();WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); self.sku_menu=bar.addMenu('SKU'); a=self.sku_menu.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
   self.table=QTableWidget(); self.table.setColumnCount(8); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID','锁定']); self.table.horizontalHeader().moveSection(7,1); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
@@ -494,9 +496,12 @@ class MainWindow(ProjectManagement,QMainWindow):
   self.table.horizontalHeader().setSortIndicator(column,order);self.table.horizontalHeader().setSortIndicatorShown(True)
   self.apply_sku_filters();self.publish_sku_order()
  def publish_sku_order(self):
-  self.svc.sku_display_order=[int(self.table.item(row,6).text()) for row in range(self.table.rowCount())]
-  WindowRefreshBus.publish({'type':'sku_order_changed'})
+  order=[int(self.table.item(row,6).text()) for row in range(self.table.rowCount())]
+  if order==getattr(self.svc,'sku_display_order',None):return
+  self.svc.sku_display_order=order
+  self.svc.publish({'type':'sku_order_changed'})
  @operation('刷新清单')
+ @batch_table_update('table')
  def refresh(self):
   available=self.svc.db is not None
   def update_actions(menu):
@@ -506,14 +511,17 @@ class MainWindow(ProjectManagement,QMainWindow):
     elif action.text() in ('选择SQLite数据库','导出资料库','修改项目信息','物料库','新建SKU','SKU筛选','导出SKU清单','BOM对比'):action.setEnabled(available)
   update_actions(self.menuBar());self.table.setEnabled(available);self.latest_bom_only.setEnabled(available)
   if not available:
-   self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单打开历史项目、新建或导入项目');return
+   self._sku_signature=None;self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单打开历史项目、新建或导入项目');return
   selected_ids={self.table.item(index.row(),6).text() for index in self.table.selectionModel().selectedRows() if self.table.item(index.row(),6)}
   current=self.table.currentRow(); column=max(1,self.table.currentColumn())
   selected_id=str(self._description_target) if getattr(self,'_description_target',None) is not None else (self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None)
   scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
   project=self.svc.project(); name=(project['project_name'] or '').strip(); code=(project['project_code'] or '').strip(); prefix=' '.join(x for x in (code,name) if x and x!='请输入项目名称'); title=f'{prefix} BOM管理系统' if prefix else 'BOM管理系统'
   self.setWindowTitle(title)
-  rows=self.svc.skus(); self.table.setRowCount(len(rows));
+  rows=self.svc.skus()
+  signature=(id(self.svc.db),tuple(tuple((key,r[key]) for key in sorted(r.keys())) for r in rows))
+  if signature==getattr(self,'_sku_signature',None):return
+  self.table.setRowCount(len(rows))
   for i,r in enumerate(rows):
    checkpoint()
    btn=QPushButton('打开'); btn.clicked.connect(lambda _,sid=r['id']: self.open_bom_id(sid)); self.table.setCellWidget(i,0,btn); self.table.setItem(i,1,QTableWidgetItem(r['base_code']+r['version'])); self.table.setItem(i,2,QTableWidgetItem(r['name'])); self.table.setItem(i,3,QTableWidgetItem(r['description'])); self.table.setItem(i,4,QTableWidgetItem());self.table.item(i,4).setData(Qt.DisplayRole,r['mirror_version']); self.table.item(i,4).setTextAlignment(Qt.AlignCenter); self.table.setItem(i,5,QTableWidgetItem(sku_timestamp(r['updated_at']))); self.table.setItem(i,6,QTableWidgetItem(str(r['id'])))
@@ -541,7 +549,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if selected_id is not None and selected_row is not None and not self.table.isRowHidden(selected_row):
    item=self.table.item(selected_row,column)
    if not self.table.viewport().rect().intersects(self.table.visualItemRect(item)):self.table.scrollToItem(item,QAbstractItemView.PositionAtCenter)
-  self.publish_sku_order()
+  self._sku_signature=signature;self.publish_sku_order()
  def filter_skus(self):
   labels=['SKU编码','SKU名称','SKU描述','版本号','修改日期时间','清除全部筛选']
   label,ok=QInputDialog.getItem(self,'SKU筛选','选择筛选列',labels,0,False)
@@ -622,7 +630,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   except Exception as error:show_operation_error(self,'导出资料库失败',error)
  def edit_project(self):
   d=ProjectDialog(self,self.svc.project())
-  if d.exec_(): self.svc.update_project(d.data()); self.remember_current_project(); self.refresh()
+  if d.exec_(): self.svc.update_project(d.data()); self.remember_current_project()
  def activate_window(self,window):
   if window.isMinimized(): window.showNormal()
   else: window.show()
@@ -664,7 +672,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   dialog=NewSkuDialog(self.svc,self)
   if dialog.exec_()==QDialog.Accepted:
    try:
-    sid=self.svc.create_sku(dialog.material_id,require_empty_bom=True); self.refresh(); self.open_bom_id(sid)
+    sid=self.svc.create_sku(dialog.material_id,require_empty_bom=True); self.open_bom_id(sid)
    except Exception as error:show_operation_error(self,'新建SKU失败',error)
  @operation('SKU版本变更')
  def change_sku_version(self,sid=None):
@@ -673,7 +681,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if sid is None:sid=int(self.table.item(r,6).text())
   v,ok=QInputDialog.getText(self,'SKU版本变更','新版本号')
   if ok:
-   try:self.svc.change_sku_version(sid,v.strip()); self.refresh()
+   try:self.svc.change_sku_version(sid,v.strip())
    except Exception as e: show_operation_error(self,'版本变更失败',e)
  @operation('删除SKU')
  def delete_sku(self,sid=None):
@@ -687,7 +695,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if QMessageBox.question(self,'确认',prompt)==QMessageBox.Yes:
    window=self._bom_windows.get(sid)
    if window and not window.close():return
-   try:self.svc.delete_sku(sid);self.refresh()
+   try:self.svc.delete_sku(sid)
    except Exception as error:show_operation_error(self,'删除SKU失败',error)
  def focus_sku_description(self,sid,scroll):
   row=next((r for r in range(self.table.rowCount()) if self.table.item(r,6).text()==str(sid)),None)
@@ -908,7 +916,7 @@ class BomImportConflictDialog(QDialog):
   for row,conflict in enumerate(conflicts):
    checkpoint()
    for column,key in enumerate(('parent','material','difference','system','incoming')):self.table.setItem(row,column,QTableWidgetItem(conflict[key]))
-  layout.addWidget(self.table);fit_columns(self.table);self.table.resizeRowsToContents()
+  layout.addWidget(self.table);fit_columns(self.table)
   buttons=QDialogButtonBox()
   for text,choice in [('停止导入','stop'),('继续导入并以系统子BOM为准','system'),('继续导入并以新导入子BOM为准','incoming')]:
    checkpoint()
@@ -1012,7 +1020,7 @@ class BomWindow(QMainWindow):
   self.save_action.setEnabled(True)
   self.export_action.setEnabled(False)
   self.refresh_styles()
-  WindowRefreshBus.publish({'type':'bom_draft_changed'})
+  self.svc.publish({'type':'bom_draft_changed'})
  def on_external_change(self,event):
   if event.get('type')=='sku_lock_changed':self.apply_lock_state();return
   if self._saving: return
@@ -1025,12 +1033,12 @@ class BomWindow(QMainWindow):
    if event.get('type')=='material_changed' and self.current_item is not None:
     self.show_item_info(self.current_item)
  def closeEvent(self,event):
-  if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept(); return
+  if not self.dirty: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); self.svc.publish({'type':'bom_draft_changed'}); event.accept(); return
   box=QMessageBox(self); box.setWindowTitle('BOM未保存'); box.setText('BOM结构或物料信息已修改，是否保存？'); save=box.addButton('保存并退出',QMessageBox.AcceptRole); discard=box.addButton('不保存退出',QMessageBox.DestructiveRole); cancel=box.addButton('取消',QMessageBox.RejectRole); box.exec_()
   if box.clickedButton()==save:
-   if self.save(): WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept()
+   if self.save(): WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); self.svc.publish({'type':'bom_draft_changed'}); event.accept()
    else: event.ignore()
-  elif box.clickedButton()==discard: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept()
+  elif box.clickedButton()==discard: WindowRefreshBus.unsubscribe(self.on_external_change); self.closed.emit(); self.svc.publish({'type':'bom_draft_changed'}); event.accept()
   else: event.ignore()
 
  def context_menu(self,pos):
@@ -1316,7 +1324,7 @@ class BomWindow(QMainWindow):
   for old in matches:
    checkpoint()
    if not (old.data(0,Qt.UserRole) or {}).get('_deleted'):self.remove_relation(old)
-  self.mark_dirty();fit_columns(self.tree)
+  self.mark_dirty()
   if selected is not None:self.tree.setCurrentItem(selected);self.show_item_info(selected);self.tree.scrollToItem(selected)
   return selected
  def can_move_item(self,item,direction):
@@ -1640,7 +1648,7 @@ class BomWindow(QMainWindow):
    return result
   from services.bom_colors import colors
   root_color=(self.root_item.data(0,Qt.UserRole) or {}).get('row_color','') if getattr(self,'_root_color_dirty',False) else colors(self.svc).get((0,self.root),'')
-  self.render_tree(exclude_deleted(merged,self.root));root_data=self.root_item.data(0,Qt.UserRole);root_data['row_color']=root_color;self.root_item.setData(0,Qt.UserRole,root_data); self._baseline_tree=deepcopy(fresh)
+  self.render_tree(exclude_deleted(merged,self.root),fit=False);root_data=self.root_item.data(0,Qt.UserRole);root_data['row_color']=root_color;self.root_item.setData(0,Qt.UserRole,root_data); self._baseline_tree=deepcopy(fresh)
   self.notice.setText(''); self.statusBar().clearMessage(); self.refresh_action.setEnabled(False); self.save_action.setEnabled(True); self.export_action.setEnabled(False); self.refresh_styles()
   if hasattr(self,'history'):self.history.clear()
   if conflicts:self.statusBar().showMessage('已加载外部更新；检测到冲突，已保留本地未保存修改，请核对后保存。')
@@ -1649,7 +1657,7 @@ class BomWindow(QMainWindow):
   self._root_color_dirty=False
   self.update_mirror_title()
   from copy import deepcopy
-  fresh=self.database_tree(); self.render_tree(fresh); self._baseline_tree=deepcopy(fresh); self._root_baseline=self.svc.material_snapshot(self.root); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
+  fresh=self.database_tree(); self.render_tree(fresh,fit=False); self._baseline_tree=deepcopy(fresh); self._root_baseline=self.svc.material_snapshot(self.root); self._external_paths.clear(); self._draft_baselines.clear(); self.refresh_styles()
   self.save_action.setEnabled(False); self.refresh_action.setEnabled(False); self.export_action.setEnabled(True)
   if hasattr(self,'history'):self.history.clear()
  def expansion_nodes(self):
@@ -1824,7 +1832,7 @@ class BomWindow(QMainWindow):
   if current_catalog:self.clone_version_children(item,latest_children)
   else:self.add_existing_children(item,r['id'],set())
   self._draft_baselines[temporary_id]=self.capture_item(item)
-  fit_columns(self.tree); self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
+  self.mark_dirty(); self.tree.setCurrentItem(item); self.show_item_info(item)
   return item
  def add_existing_children(self,parent_item,material_id,ancestors):
   if material_id in ancestors:return
@@ -2225,7 +2233,7 @@ class MaterialWindow(QMainWindow):
   if row<0 or row>=len(rs): return
   r=rs[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
   if dlg.exec_():
-   try:self.update_material_history(r['id'],dlg.data()); self.refresh()
+   try:self.update_material_history(r['id'],dlg.data())
    except Exception as e: show_operation_error(self,'保存失败',e)
  def menu(self,pos):
   row=self.t.rowAt(pos.y())
@@ -2276,7 +2284,7 @@ class MaterialWindow(QMainWindow):
   elif a==e:
    r=self.svc.materials()[row]; dlg=MaterialDialog(self,{k:r[k] for k in ['base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag']},readonly_keys={'base_code','version'})
    if dlg.exec_():
-    try:self.update_material_history(rid,dlg.data()); self.refresh()
+    try:self.update_material_history(rid,dlg.data())
     except Exception as error:show_operation_error(self,'保存失败',error)
   elif a==d and d.isEnabled():self.delete_materials(selected)
  @operation('删除物料')
@@ -2323,8 +2331,6 @@ class MaterialWindow(QMainWindow):
     if not ok:return
     selected=set()
    self.svc.change_material_version(material_id,version,selected,{r['parent_id'] for r in references})
-   self.refresh()
-   if self.parent() is not None and hasattr(self.parent(),'refresh'): self.parent().refresh()
   except Exception as error: show_operation_error(self,'版本变更失败',error)
  def new_material(self):
   return show_create_material(self)
@@ -2353,16 +2359,22 @@ class MaterialWindow(QMainWindow):
    remember_export_path(p,self.svc)
    from openpyxl import Workbook; w=Workbook(); w.active.append(MATERIAL_IMPORT_HEADERS); file_work(w.save,p); w.close()
  def on_event(self,event):
-  if event.get('type') in ('material_changed','material_history_changed','bom_changed','sku_changed','sku_order_changed'): WindowRefreshBus.refresh(self.refresh)
+  if event.get('type') in ('material_changed','material_history_changed','bom_changed','sku_changed','sku_order_changed','project_changed'): WindowRefreshBus.refresh(self.refresh)
  def closeEvent(self,event):
   for window in list(self._local_bom_windows.values()):
    checkpoint()
    if not window.close(): event.ignore(); return
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
-  WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); WindowRefreshBus.publish({'type':'bom_draft_changed'}); event.accept()
+  WindowRefreshBus.unsubscribe(self.on_event); self.closed.emit(); self.svc.publish({'type':'bom_draft_changed'}); event.accept()
  @operation('刷新清单')
+ @batch_table_update('t')
  def refresh(self):
   from decimal import Decimal,ROUND_HALF_UP
+  self.ensurePolished();self.t.ensurePolished()
+  database=getattr(self.svc.db,'original',self.svc.db)
+  signature=(id(database),database.conn.total_changes,database.conn.execute('PRAGMA data_version').fetchone()[0],
+             tuple(getattr(self.svc,'sku_display_order',[])),tuple(sorted(self._selected_skus)),self.t.font().toString())
+  if signature==getattr(self,'_library_signature',None):return
   project=self.svc.project();self.setWindowTitle(' '.join(str(project[key] or '').strip() for key in ('project_code','project_name') if str(project[key] or '').strip())+' 物料库')
   skus=list(self.svc.skus());order={sid:i for i,sid in enumerate(getattr(self.svc,'sku_display_order',[]))}
   skus.sort(key=lambda sku:order.get(sku['id'],len(order)+sku['id']))
@@ -2409,7 +2421,7 @@ class MaterialWindow(QMainWindow):
    width=max(header.minimumSectionSize(),metrics.horizontalAdvance(code+' ▾')+20)
    header.setSectionResizeMode(column,QHeaderView.Fixed);header.resizeSection(column,width)
    if not self.t.isColumnHidden(column):self.t._proportional_columns.widths[column]=width
-  self.t._proportional_columns.apply();self.t.sync_frozen()
+  self.t._proportional_columns.apply();self.t.sync_frozen();self._library_signature=signature
 
 class MaterialVersionDialog(QDialog):
  def __init__(self,material,references,parent=None):
@@ -2461,7 +2473,7 @@ class MaterialUsageDialog(QDialog):
   if window is not None:window.locate_material(self.usages[row].get('focus_material_id',self.material_id),self.usages[row].get('parent_id'))
  def resizeEvent(self,event):
   super().resizeEvent(event)
-  self.table.resizeRowsToContents()
+  if hasattr(self.table,'_proportional_columns'):self.table._proportional_columns.timer.start(0)
 
 class ProjectDialog(QDialog):
  def __init__(self,parent=None,row=None):

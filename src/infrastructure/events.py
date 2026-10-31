@@ -41,6 +41,9 @@ class WindowRefreshBus:
    for event in events:cls.publish(event)
  @classmethod
  def publish(cls,event):
+  with cls.batch():cls._dispatch(event)
+ @classmethod
+ def _dispatch(cls,event):
   from PyQt5 import sip
   from PyQt5.QtCore import QObject
   for h in list(cls._handlers):
@@ -49,4 +52,8 @@ class WindowRefreshBus:
    owner=getattr(h,'__self__',None)
    if isinstance(owner,QObject) and sip.isdeleted(owner):
     cls.unsubscribe(h);continue
+   target=getattr(owner,'svc',None) or getattr(owner,'service',None) or getattr(getattr(owner,'main',None),'svc',None)
+   if target is not None and 'database' in event:
+    database=getattr(target.db,'original',target.db)
+    if database is not event['database']:continue
    if h in cls._handlers:h(event)

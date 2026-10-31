@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import QApplication
 
 def apply_theme(dark=False):
  app=QApplication.instance()
+ if app.property('bom_fusion_initialized') and app.property('bom_dark_theme')==dark:return
  # Keep the existing Fusion style alive when opening additional windows.
  if not app.property('bom_fusion_initialized'):
   app.setStyle('Fusion');app.setProperty('bom_fusion_initialized',True)

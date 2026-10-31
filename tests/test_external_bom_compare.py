@@ -61,7 +61,7 @@ class ExternalBomTests(unittest.TestCase):
     dialog.left.setCurrentIndex(dialog.left.findData(sid));dialog.right.setCurrentIndex(dialog.right.findData(other));dialog.compare()
     main.sort_skus(1)
     self.assertEqual([dialog.left.itemData(i) for i in range(1,3)],[other,sid]);self.assertEqual(dialog.left.currentData(),sid)
-    self.assertEqual(dialog.left.itemText(dialog.left.count()-1),'载入其他BOM')
+    self.assertEqual(dialog.left.itemText(dialog.left.findData('load_external')),'载入其他BOM')
     before=db.conn.total_changes
     def mapping_exec(d):
      for field,combo in d.combos.items():
@@ -69,7 +69,7 @@ class ExternalBomTests(unittest.TestCase):
      d.validate_mapping();return d.result()
     path=str(Path(__file__).parent/'fixtures/external_bom.xls')
     with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=(path,'')),patch('ui.bom_compare.QInputDialog.getItem',return_value=('BOM',True)),patch.object(MaterialHeaderMappingDialog,'exec_',mapping_exec):
-     dialog.right.setCurrentIndex(dialog.right.count()-1);dialog.choose_source(1)
+     dialog.right.setCurrentIndex(dialog.right.findData('load_external'));dialog.choose_source(1)
     self.assertTrue(str(dialog.right.currentData()).startswith('external:'));self.assertTrue(dialog._compared)
     self.assertEqual(db.conn.total_changes,before);self.assertEqual(len(s.materials()),3)
     self.assertEqual(dialog._rows[1].status,'modified') # only imported alternate differs
@@ -89,9 +89,9 @@ class ExternalBomTests(unittest.TestCase):
     d.validate_mapping();return d.result()
    try:
     with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=(path,'')),patch('ui.bom_compare.QInputDialog.getItem',return_value=('BOM',True)),patch.object(MaterialHeaderMappingDialog,'exec_',accept_mapping):
-     dialog.left.setCurrentIndex(dialog.left.count()-1);dialog.choose_source(0)
+     dialog.left.setCurrentIndex(dialog.left.findData('load_external'));dialog.choose_source(0)
      self.assertFalse(dialog._compared);self.assertEqual(dialog._rows,[])
-     dialog.right.setCurrentIndex(dialog.right.count()-1);dialog.choose_source(1)
+     dialog.right.setCurrentIndex(dialog.right.findData('load_external'));dialog.choose_source(1)
      self.assertTrue(dialog._compared);self.assertTrue(dialog._rows)
      self.assertTrue(all(row.status=='same' for row in dialog._rows))
    finally:dialog.close();db.close()
@@ -117,7 +117,7 @@ class ExternalBomTests(unittest.TestCase):
      dialog.external_sources[key]={'label':label,'path':str(path),'sheet':'BOM','mapping':{h:h for h in rows[0]}}
     dialog.reload_choices();dialog.left.setCurrentIndex(dialog.left.findData('external:a'));dialog.right.setCurrentIndex(dialog.right.findData('external:b'))
     before=db.conn.total_changes;dialog.compare();self.assertEqual(dialog._rows[1].status,'modified')
-    dialog.left.setCurrentIndex(dialog.left.count()-1)
+    dialog.left.setCurrentIndex(dialog.left.findData('load_external'))
     with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=('','')):dialog.choose_source(0)
     self.assertEqual(dialog.left.currentData(),'external:a');self.assertTrue(dialog._compared)
     self.assertEqual(db.conn.total_changes,before);self.assertEqual(s.materials(),[])
@@ -167,7 +167,7 @@ class ExternalBomTests(unittest.TestCase):
    dialog=BomCompareDialog(s)
    try:
     with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=(str(path),'')),patch('ui.bom_compare.QInputDialog.getItem',return_value=('',False)):
-     dialog.left.setCurrentIndex(dialog.left.count()-1);dialog.choose_source(0)
+     dialog.left.setCurrentIndex(dialog.left.findData('load_external'));dialog.choose_source(0)
     self.assertEqual(config.load()['database']['last_compare_bom_file'],'外部BOM/对比.xls')
    finally:dialog.close()
    s.config_service=ConfigService(tmp);dialog=BomCompareDialog(s)
@@ -175,7 +175,7 @@ class ExternalBomTests(unittest.TestCase):
     for exists in (True,False):
      if not exists:path.unlink()
      with patch('ui.bom_compare.QFileDialog.getOpenFileName',return_value=('','')) as picker:
-      dialog.right.setCurrentIndex(dialog.right.count()-1);dialog.choose_source(1)
+      dialog.right.setCurrentIndex(dialog.right.findData('load_external'));dialog.choose_source(1)
      expected=str(path) if exists else QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
      self.assertEqual(picker.call_args.args[2],expected)
      self.assertEqual(config.load()['database']['last_compare_bom_file'],'外部BOM/对比.xls')

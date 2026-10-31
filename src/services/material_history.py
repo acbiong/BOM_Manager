@@ -283,6 +283,9 @@ def finish_save(service, changed_parents, edits=None, mode='sync', mapping=None,
     return changed
 
 
+from infrastructure.events import WindowRefreshBus
+
+@WindowRefreshBus.batch()
 def save(service, root, rows, edits, mode, versions_map=None):
     from services.snapshot_bom import save_with_revisions
     if not isinstance(mode, dict) and mode not in ('sync', 'fork'):

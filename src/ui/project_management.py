@@ -131,7 +131,7 @@ class ProjectManagement:
    old=self.svc.db;self.svc.db=candidate;candidate=None;created_path=None
    if old is not None:old.close()
    self.svc.UNITS=self.svc.config_service.material_units();self._project_id=new_key
-   self._sku_filters={};self.refresh();return True
+   self._sku_filters={};self._live_project.bind();self.refresh();return True
   except ProjectInUseError as error:
    return self.handle_occupied_project(error)
   except Exception as error:
@@ -153,7 +153,7 @@ class ProjectManagement:
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
   # Closing this window is not evidence that its remembered database is invalid.
   if self.svc.db is not None:self.svc.db.close()
-  self.svc.db=None;self._project_id=None;self.refresh();return True
+  self.svc.db=None;self._project_id=None;self._live_project.bind();self.refresh();return True
  def handle_occupied_project(self,error):
   from ui.startup_project import occupied_choice
   from PyQt5.QtWidgets import QInputDialog
