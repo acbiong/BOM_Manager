@@ -1,9 +1,10 @@
 """Exercise real nonmodal result loops, focus transfer and cancellation."""
 import os,sys,unittest,tempfile
-os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
+# QMessageBox needs native platform interfaces on Windows.
+os.environ['QT_QPA_PLATFORM']='windows' if os.name=='nt' else 'offscreen'
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
-from PyQt5.QtCore import Qt,QTimer,QEvent
+from PyQt5.QtCore import Qt,QTimer,QEvent,QElapsedTimer
 from PyQt5.QtWidgets import QApplication,QPushButton
 from PyQt5.QtTest import QTest
 from ui.interactive_windows import QDialog,QMainWindow,QInputDialog,QFileDialog,QColorDialog,QMessageBox,QProgressDialog
@@ -74,11 +75,27 @@ class InteractiveWindowsTests(unittest.TestCase):
     self.assertIs(self.app.activeWindow(),self.owner)
    finally:dialog.close();dialog.deleteLater()
  def test_static_input_and_file_helpers_keep_return_contract(self):
-  def answer():
-   window=self.app.activeWindow()
-   self.assertIsInstance(window,QInputDialog);window.setTextValue('新名称');window.accept()
-  QTimer.singleShot(30,answer)
-  self.assertEqual(QInputDialog.getText(self.owner,'输入','名称'),('新名称',True))
-  def cancel():self.app.activeWindow().reject()
-  QTimer.singleShot(30,cancel)
-  self.assertEqual(QFileDialog.getOpenFileName(self.owner,'选择文件')[0],'')
+  def invoke(window_type,call,complete):
+   # Native file-dialog construction can dispatch timers before activation.
+   # Target the visible helper itself, rather than whichever window has focus.
+   failures=[];answered=[];elapsed=QElapsedTimer();elapsed.start();timer=QTimer()
+   def tick():
+    windows=[w for w in self.app.topLevelWidgets() if isinstance(w,window_type) and w.isVisible()]
+    if not windows and elapsed.elapsed()<5000:return
+    timer.stop()
+    try:
+     self.assertEqual(len(windows),1,'Expected one visible helper window')
+     complete(windows[0]);answered.append(True)
+    except BaseException as error:
+     failures.append(error)
+     for window in windows:window.reject()
+     self.owner.close()
+   timer.timeout.connect(tick);timer.start(30)
+   try:result=call()
+   finally:timer.stop()
+   if failures:raise failures[0]
+   self.assertTrue(answered)
+   return result
+  def answer(window):window.setTextValue('新名称');window.accept()
+  self.assertEqual(invoke(QInputDialog,lambda:QInputDialog.getText(self.owner,'输入','名称'),answer),('新名称',True))
+  self.assertEqual(invoke(QFileDialog,lambda:QFileDialog.getOpenFileName(self.owner,'选择文件'),lambda w:w.reject())[0],'')

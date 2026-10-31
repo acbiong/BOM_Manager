@@ -1,5 +1,6 @@
 import os,sys,unittest,tempfile
-os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
+# Exercise actual confirmation-window destruction with Windows native handles.
+os.environ['QT_QPA_PLATFORM']='windows' if os.name=='nt' else 'offscreen'
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QWidget

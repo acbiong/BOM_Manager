@@ -2,6 +2,7 @@
 import json
 import tempfile
 import traceback
+from contextlib import ExitStack
 from pathlib import Path
 
 
@@ -9,6 +10,14 @@ def run_smoke_test(report_path):
     report = {'passed': False}
     db = None
     windows = []
+    def close_resources():
+        nonlocal db, windows
+        try:
+            for window in windows:window.close()
+        finally:
+            windows=[]
+            if db is not None:
+                db.close();db=None
     try:
         from PyQt5.QtWidgets import QApplication
         from database.database import Database
@@ -23,7 +32,11 @@ def run_smoke_test(report_path):
         from services.external_bom import ExcelSource,build_external_bom,ALIASES
         owns_app = QApplication.instance() is None
         app = QApplication.instance() or QApplication([])
-        with tempfile.TemporaryDirectory(prefix='bom-smoke-') as tmp:
+        with ExitStack() as resources:
+            tmp=resources.enter_context(tempfile.TemporaryDirectory(prefix='bom-smoke-'))
+            # Windows cannot remove an open SQLite database. Release windows and
+            # its connection before TemporaryDirectory, including failed checks.
+            resources.callback(close_resources)
             lock_target=Path(tmp)/'lock-test.db';lock_target.touch()
             guard = ProjectLock(lock_target)
             other = ProjectLock(lock_target)
@@ -87,8 +100,7 @@ def run_smoke_test(report_path):
     except Exception:
         report['error']=traceback.format_exc()
     finally:
-        for window in windows:window.close()
-        if db is not None:db.close()
+        close_resources()
         # Destroy native windows while QApplication is still alive, rather than
         # relying on Python/Qt shutdown order with pending widget timers.
         if locals().get('owns_app',False):

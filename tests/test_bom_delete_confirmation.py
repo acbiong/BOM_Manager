@@ -6,7 +6,7 @@ import sys,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
-from PyQt5.QtCore import Qt,QTimer,QEvent,QCoreApplication
+from PyQt5.QtCore import Qt,QTimer,QEvent,QCoreApplication,QElapsedTimer
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication,QMessageBox
 from ui.interactive_windows import QMessageBox
@@ -32,10 +32,25 @@ class DeleteConfirmationTests(unittest.TestCase):
   with patch.object(QMessageBox,'question',return_value=QMessageBox.No) as question:
    QTest.keyClick(self.w.tree,Qt.Key_Delete);self.assertEqual(question.call_count,1)
   self.assertFalse(item.data(0,Qt.UserRole).get('_deleted',False))
+  answered=[];failures=[];elapsed=QElapsedTimer();elapsed.start();timer=QTimer()
   def confirm():
-   box=self.app.activeWindow()
-   if box is not None:QTest.keyClick(box,Qt.Key_Return)
-  QTimer.singleShot(30,confirm);QTest.keyClick(self.w.tree,Qt.Key_Delete)
+   boxes=[w for w in self.app.topLevelWidgets() if isinstance(w,QMessageBox) and w.isVisible()]
+   if not boxes and elapsed.elapsed()<5000:return
+   timer.stop()
+   try:
+    self.assertEqual(len(boxes),1,'Delete must open one real confirmation')
+    QTest.keyClick(boxes[0],Qt.Key_Return)
+    self.assertFalse(boxes[0].isVisible(),'Enter must close the confirmation')
+    answered.append(True)
+   except BaseException as error:
+    failures.append(error)
+    for box in boxes:box.reject()
+    self.w.close()
+  timer.timeout.connect(confirm);timer.start(30)
+  try:QTest.keyClick(self.w.tree,Qt.Key_Delete)
+  finally:timer.stop()
+  if failures:raise failures[0]
+  self.assertTrue(answered)
   self.assertTrue(item.data(0,Qt.UserRole)['_deleted'])
   other=self.w.root_item.child(1);self.w.tree.setCurrentItem(other);self.w.show_item_info(other)
   field=self.w.fields['position'];field.setFocus();self.app.processEvents()

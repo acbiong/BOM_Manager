@@ -1236,3 +1236,19 @@ Windows逐文件测试现在经tools/run_test_module.py执行。在Python退出�
 - 旧库首次升级自动备份并事务合并，逐轮细化内容等价类，同步重映射子项、替代料与SKU绑定，保留不同结构和属性；遇到缺失引用拒绝修改。
 - 指定mobius_fda_bom.db已备份后修正：610条历史合并为559条，检查6052条绑定。BC2-3000001100的100～113版本合并为100。BOM关系、替代料、物料资料、日志等表逐表哈希不变；完整性和外键检查通过。备份：mobius_fda_bom.db.pre-history-dedup-20261030_184853_306985.db。
 - 可审计工具：tools/repair_material_history_identity.py，默认副本预演，--apply在项目排他锁及数据库事务内执行，必须指定--report。报告test_reports/history_dedup_applied.json；回归覆盖旧内容复用、当前指向、引用递归合并、真实差异保留、缺失引用拒绝与幂等。最终收尾报告test_reports/finish_history_identity.log。
+
+
+## 2026-10-31：本机最新代码重打包与原生窗口验证
+
+- 接手远程及本机均为0.6.75 / f2f1e45，工作区干净；Windows原生Python3.12与WSL2 Ubuntu24.04构建环境可用。用户要求全部通过则只打包，若测试失败则修复并正常提交。本次Windows首轮仅101/105步骤通过，进入获授权的修复收尾，不自动push；最终版本/提交以VERSION和git log为准。
+- test_cross_platform、test_interactive_windows、test_window_destruction仍在Windows强制/默认offscreen，真实QMessageBox导致0xC0000005；改用windows插件，Linux继续offscreen。静态输入/文件窗口回归改为有限等待实际显示的目标窗口，避免30ms定时器依赖activeWindow导致回调异常。保留确认、焦点切换、取消、销毁及全部断言。
+- 原生历史菜单冒烟改为先激活窗口、点击真实菜单栏，并向真实QMenu发送鼠标移动事件，有限等待首次子菜单展开；避免QTest.mouseMove只移动系统光标、弹窗焦点切换时原生事件未送达。仍检查首次悬停，不直接调用子菜单show或设置选中项。
+- 发布冒烟使用ExitStack保证异常时也先关闭窗口/SQLite，再删除临时目录；Windows文件占用不再遮住原检查失败。新增真实子进程故意失败回归，修复前失败、修复后保留原错误且清除临时数据库。业务数据与未保存BOM缓存逻辑未修改。
+- 源码扩展冒烟在Windows与WSLg xcb各通过58项，记录33类实际exposed窗口及截图；包含既有全部对话框/帮助教程、保存重开、对比联动，另验未保存草稿/撤销恢复、真实批量删除确认、历史版本切换/精确引用/同内容复用、40行导入差异滚动及数据库完整性。证据test_reports/native_20261031_windows、Linux构建目录test_reports/native_20261031_xcb。图形测试串行，避免共享桌面焦点争用；没有启动常驻监控。
+- 全量收尾与最终两端发布以test_reports/finish_native_rebuild_20261031.log、rebuild_20261031_linux_final.log及包内_smoke.json/SHA256为准。保留package/bom.db和config.ini，前后校验；本机自动化不替代其他电脑的人工双击、完整业务和SmartScreen验收。静态帮助图片使用当前源码资源，不读取其他电脑业务库。
+
+补充环境验证：tools/check_native_export_progress.py在Windows原生桌面和Linux独立X11（Xvfb，非人工桌面）各导入1000条并完成资料库/物料库/SKU导出及各进度组件检查，全部通过，1控制器/1窗口/1种几何位置，源库哈希一致。WSLg桥接桌面同场景功能成功，但首次映射后窗口坐标从(0,0)变为系统分配的位置，严格几何稳定断言失败；诊断记录native_bulk_probe_20261031.log，不将其冒充通过，也不为此修改生产窗口定位。原生Ubuntu/deepin桌面的人工位置/双击验收仍待执行。Windows与X11报告为native_bulk_windows_20261031.json、native_bulk_x11_20261031.json。
+
+截图复核发现精简WSL Ubuntu缺少中文字库，虽窗口功能通过但中文显示为方框；本机补装fonts-noto-cjk，并补入README系统依赖。最终Linux截图需在字库安装后重新检查。AppImage使用目标机字体，其他精简Linux环境也需安装中文字体。
+
+收尾补充：旧test_bom_delete_confirmation同样依赖30ms后activeWindow，原生复跑错过确认框后等待；中止当次收尾且未提交。改为有限等待真实QMessageBox，再发送Enter并断言窗口关闭，回调错误正常报告，保留取消/输入框Delete隔离断言；专项delete_confirmation_fixed_20261031.log通过。

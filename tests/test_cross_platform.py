@@ -18,6 +18,10 @@ class CrossPlatformTests(unittest.TestCase):
  def test_smoke_checks_windows_database_and_excel_without_user_data(self):
   with tempfile.TemporaryDirectory() as tmp:
    report=Path(tmp)/'smoke.json';root=Path(__file__).parents[1]
-   result=subprocess.run([sys.executable,str(root/'src/main.py'),'--smoke-test-report',str(report)],env=dict(os.environ,QT_QPA_PLATFORM='offscreen',PYTHONUTF8='1'),capture_output=True,timeout=40)
+   # The smoke flow opens actual QMessageBox windows; the Windows offscreen
+   # plugin cannot supply their native platform interfaces (0xC0000005).
+   qt_platform='windows' if os.name=='nt' else 'offscreen'
+   result=subprocess.run([sys.executable,'-X','faulthandler',str(root/'src/main.py'),'--smoke-test-report',str(report)],env=dict(os.environ,QT_QPA_PLATFORM=qt_platform,PYTHONUTF8='1'),capture_output=True,timeout=90)
    self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
    data=json.loads(report.read_text(encoding='utf-8'));self.assertTrue(data['passed']);self.assertIn('project_ownership',data['checks']);self.assertIn('excel',data['checks'])
+   self.assertEqual(data['qt_platform'],qt_platform)

@@ -33,7 +33,7 @@ git commit -m "初始化导入的BOM管理系统源码"
 ```bash
 sudo apt update
 sudo apt install -y git curl ca-certificates python3 python3-venv python3-pip \
-  build-essential binutils file squashfs-tools patchelf fonts-dejavu-core \
+  build-essential binutils file squashfs-tools patchelf fonts-dejavu-core fonts-noto-cjk \
   libgl1 libegl1 libxkbcommon-x11-0 libxcb-xinerama0 libxcb-cursor0 \
   libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
   libxcb-randr0 libxcb-shape0 libxcb-xfixes0 libdbus-1-3 libfontconfig1
@@ -73,7 +73,7 @@ mkdir -p test_reports .tmp package
 tools/run_tests.sh
 ```
 
-流程包含 137 项需求追踪编号审计、unittest 回归、源码编译校验。报告写入 `test_reports/`，编译临时文件在 `.tmp/`；两者均不提交 Git。Qt 测试使用离屏模式，无需真实桌面，但单实例测试需要本地 socket 权限；若 Codex 沙箱阻止 QLocalServer，允许该测试命令使用适当权限重跑，不要删掉测试。
+流程包含 137 项需求追踪编号审计、unittest 回归、源码编译校验。报告写入 `test_reports/`，编译临时文件在 `.tmp/`；两者均不提交 Git。大部分 Qt 测试使用离屏模式；Windows 的真实消息框、独立交互窗及发布冒烟使用原生 windows 插件，需要可交互桌面。单实例测试需要本地 socket 权限；若 Codex 沙箱阻止 QLocalServer，允许该测试命令使用适当权限重跑，不要删掉测试。原生图形测试应串行执行，避免多个进程争用桌面焦点。
 
 回归通过不等于真实桌面验收：仍需在目标电脑双击 AppImage，检查数据库选择、Excel 导入导出和窗口交互。
 

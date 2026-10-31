@@ -2,7 +2,8 @@
 import sys,traceback
 from pathlib import Path
 from PyQt5 import sip
-from PyQt5.QtCore import QTimer,QEventLoop,QEvent,Qt
+from PyQt5.QtCore import QTimer,QEventLoop,QEvent,Qt,QPointF
+from PyQt5.QtGui import QMouseEvent
 from PyQt5.QtWidgets import QApplication,QMessageBox as NativeMessageBox
 
 
@@ -46,7 +47,6 @@ def exercise_windows(service,main,library):
         from config.project_registry import ProjectRegistry
         from services.services import Services
         from ui.main_window import MainWindow
-        from PyQt5.QtCore import QPoint
         from PyQt5.QtTest import QTest
         with tempfile.TemporaryDirectory() as directory:
             from database.database import Database
@@ -58,12 +58,27 @@ def exercise_windows(service,main,library):
             config=ConfigService(directory);registry=ProjectRegistry(config)
             registry.remember(Path(directory)/'history.db',dict(project_code='OLD',project_name='历史项目'))
             history_window=MainWindow(Services(None,config));opened.append(history_window)
-            history_window.show();drain()
+            history_window.show();history_window.raise_();history_window.activateWindow();drain()
+            if app.platformName() not in ('offscreen','minimal'):
+                assert QTest.qWaitForWindowActive(history_window,3000),'历史项目测试窗口未获得焦点'
             assert history_window.history_menu.actions()[0].text()=='OLD 历史项目'
-            menu=next(a.menu() for a in history_window.menuBar().actions() if a.text()=='项目')
-            menu.popup(QPoint(50,50));drain()
-            QTest.mouseMove(menu,menu.actionGeometry(menu.actions()[0]).center());drain()
-            QTest.mouseMove(menu,menu.actionGeometry(history_window.history_menu.menuAction()).center());drain(550)
+            bar=history_window.menuBar()
+            project_action=next(a for a in bar.actions() if a.text()=='项目');menu=project_action.menu()
+            # Open through the actual menu bar so native popup focus and mouse
+            # tracking are established before the first submenu hover.
+            QTest.mouseClick(bar,Qt.LeftButton,pos=bar.actionGeometry(project_action).center());drain()
+            assert menu.isVisible(),'项目菜单无法打开'
+            def hover(action):
+                point=menu.actionGeometry(action).center()
+                # Deliver the pointer event to the real menu. On Windows,
+                # QTest.mouseMove only relocates the shared desktop cursor and
+                # its OS event may be lost when popup focus is being assigned.
+                app.sendEvent(menu,QMouseEvent(QEvent.MouseMove,QPointF(point),QPointF(menu.mapToGlobal(point)),Qt.NoButton,Qt.NoButton,Qt.NoModifier))
+            hover(menu.actions()[0]);drain()
+            hover(history_window.history_menu.menuAction())
+            for _ in range(40):
+                if history_window.history_menu.isVisible():break
+                drain(50)
             assert history_window.history_menu.isVisible(),'历史项目子菜单无法首次展开'
             history_window.history_menu.close();menu.close();history_window.close()
             history_window.deleteLater();opened.remove(history_window);drain()
