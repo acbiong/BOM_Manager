@@ -171,7 +171,7 @@ class SnapshotTests(unittest.TestCase):
   finally:d.close()
   save_with_revisions(self.m,self.r,rows,{self.p:'2'})
   self.assertEqual(self.s.for_sku(copy).bom(self.r)[1]['material_id'],self.c)
- def test_other_sku_historical_mirror_and_alternate_usage_require_revision(self):
+ def test_other_sku_historical_main_requires_revision_but_alternate_does_not(self):
   sid,root=self.share_parent();copy=self.s.copy_sku_bom(sid)
   self.s.for_sku(copy).save_bom(root,[])
   rows=[self.row(self.p),self.row(self.a,parent_material_id=self.p)]
@@ -179,7 +179,7 @@ class SnapshotTests(unittest.TestCase):
   self.assertEqual([r['id'] for r in conflicts[0]['other_skus']],[sid])
   self.assertEqual(conflicts[0]['other_skus'][0]['base_code'],'OTHER')
   self.s.for_sku(sid).save_bom(root,[self.row(self.a,alternate_material_ids=[self.p])])
-  self.assertEqual(len(revision_conflicts(self.m,self.r,rows)),1)
+  self.assertEqual(revision_conflicts(self.m,self.r,rows),[])
   self.s.for_sku(sid).save_bom(root,[])
   self.assertEqual(revision_conflicts(self.m,self.r,rows),[])
   self.m.save_bom(self.r,rows)

@@ -41,6 +41,7 @@ class Database:
     self.conn.execute('INSERT OR IGNORE INTO material_bom_items(parent_material_id,child_material_id,quantity,unit,position,remark,sort_no) VALUES(?,?,?,?,?,?,?)',(parent_id,r['material_id'],r['quantity'],r['unit'],r['position'],r['remark'],r['sort_no']))
   self.conn.execute('UPDATE materials SET has_bom=CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=materials.id) THEN 1 ELSE 0 END')
   self.conn.execute('CREATE TABLE IF NOT EXISTS app_metadata(key TEXT PRIMARY KEY,value TEXT)')
+  self.conn.execute('CREATE TABLE IF NOT EXISTS bom_revision_role_definitions(material_id INTEGER NOT NULL,child_codes TEXT NOT NULL,PRIMARY KEY(material_id,child_codes))')
   if 'mirror_version' not in {r[1] for r in self.conn.execute('PRAGMA table_info(skus)')}:
    self.conn.execute('ALTER TABLE skus RENAME TO skus_legacy')
    self.conn.execute("CREATE TABLE skus(id INTEGER PRIMARY KEY AUTOINCREMENT,material_id INTEGER,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,mirror_version INTEGER NOT NULL DEFAULT 100,scope_id INTEGER NOT NULL DEFAULT 0,UNIQUE(material_id,mirror_version))")

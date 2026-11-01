@@ -258,7 +258,7 @@ class MaterialHistoryTests(unittest.TestCase):
   rows=self.rows();rows[-1]['alternate_material_ids']=[self.a];h.save(self.new,self.r,rows,{},'fork')
   self.assertEqual({s['id'] for s in h.sku_references(self.s,self.p,100)},{self.sid,self.tid})
   self.assertEqual({s['id'] for s in h.sku_references(self.s,self.p,101)},{self.newid})
-  self.assertEqual({s['id'] for s in h.sku_references(self.s,self.a,100)},{self.newid})
+  self.assertEqual(h.sku_references(self.s,self.a,100),[])
   before=self.db.conn.total_changes;viewer=MaterialHistoryDialog(self.s,self.p,100)
   try:
    self.assertEqual(viewer.version_combo.currentData(),100)
@@ -292,7 +292,7 @@ class MaterialHistoryTests(unittest.TestCase):
   standalone=self.s.create_material(dict(base_code='FREE',version='1',name='unused',unit='pcs'))
   viewer=MaterialHistoryDialog(self.s,standalone,100)
   try:
-   self.assertEqual(viewer.references.rowCount(),0);self.assertIn('未被任何SKU BOM引用',viewer.reference_label.text())
+   self.assertEqual(viewer.references.rowCount(),0);self.assertIn('未被任何SKU BOM作为主料引用',viewer.reference_label.text())
    self.assertEqual(viewer.version_combo.count(),1)
   finally:viewer.close()
 

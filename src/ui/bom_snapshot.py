@@ -10,8 +10,8 @@ def draft_snapshot(window):
     def node(item,parent=None,path=()):
         data=dict(item.data(0,Qt.UserRole) or {})
         mid=data.get('material_id',window.root)
-        result=dict(data);result.update(material(mid))
-        for key in ('quantity','position','remark'):
+        result=dict(data);result.update(window.draft_material(mid) if mid in getattr(window,'_history_parent_versions',{}) else material(mid))
+        for key in ('quantity','unit','position','remark'):
             checkpoint()
             if key in data:result[key]=data[key]
         if parent:

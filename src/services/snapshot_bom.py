@@ -121,15 +121,16 @@ def draft_definitions(service,root,items):
     return {mid:signature(codes) for mid,codes in groups.items()}
 
 def other_sku_usages(service,material_id):
-    """Every saved mirror except the current editor counts as another BOM."""
+    """Other main-BOM owners, including roots and older SKU histories."""
     conn=getattr(service.db.conn,'raw',service.db.conn)
     sid=getattr(service,'sku_id',None)
     return [dict(row) for row in conn.execute(
         'SELECT DISTINCT s.id,s.mirror_version,m.base_code,m.version,m.name '
-        'FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id '
-        'JOIN materials m ON m.id=s.material_id '
-        'WHERE u.material_id=? AND s.id<>? ORDER BY m.base_code,m.version,s.mirror_version,s.id',
-        (material_id,sid if sid is not None else -1))]
+        'FROM skus s JOIN materials m ON m.id=s.material_id '
+        'WHERE (s.material_id=? OR EXISTS (SELECT 1 FROM mirror_material_usage u '
+        'WHERE u.sku_id=s.id AND u.material_id=? AND u.role="main")) '
+        'AND s.id<>? ORDER BY m.base_code,m.version,s.mirror_version,s.id',
+        (material_id,material_id,sid if sid is not None else -1))]
 
 def exclusive_to_current_sku(service,material_id):
     sid=getattr(service,'sku_id',None)
@@ -139,13 +140,17 @@ def exclusive_to_current_sku(service,material_id):
 
 def revision_conflicts(service,root,items):
     if not enabled(service.db):return []
+    from services.bom_role_swap import definitions as role_definitions,accepted
+    swaps=None
     conflicts=[]
     for mid,codes in draft_definitions(service,root,items).items():
         checkpoint()
         if service.db.conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue
         if mid in getattr(service,'_approved_catalog_parents',set()) or exclusive_to_current_sku(service,mid):continue
         known=service.db.conn.execute('SELECT child_codes FROM bom_revision_definitions WHERE material_id=?',(mid,)).fetchone()
-        if known and known[0]!=codes:
+        if known and known[0]!=codes and not accepted(service,mid,codes):
+            if swaps is None:swaps=role_definitions(service,root,items)
+            if swaps.get(mid)==codes:continue
             material=service.material_snapshot(mid)
             conflicts.append(dict(material_id=mid,label=material['base_code']+material['version']+' '+material['name'],before=json.loads(known[0]),after=json.loads(codes),other_skus=other_sku_usages(service,mid)))
     from services.material_history import attribute_conflicts
@@ -153,8 +158,10 @@ def revision_conflicts(service,root,items):
     combined.update({p['material_id']:p for p in attribute_conflicts(service,root,items)})
     return list(combined.values())
 
-def record_definitions(service,root):
+def record_definitions(service,root,role_definitions=None):
     conn=getattr(service.db.conn,'raw',service.db.conn)
+    for mid,codes in (role_definitions or {}).items():
+        conn.execute('INSERT OR IGNORE INTO bom_revision_role_definitions VALUES(?,?)',(mid,codes))
     for mid,codes in scope_definitions(conn,getattr(service,'scope_id',0),root).items():
         checkpoint()
         if conn.execute('SELECT 1 FROM skus WHERE material_id=?',(mid,)).fetchone():continue

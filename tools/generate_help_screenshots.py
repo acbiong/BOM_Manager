@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build-time help screenshots from a real project database; never run by the app."""
 import os, shutil, sys, tempfile, sqlite3
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from contextlib import ExitStack
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication
 
@@ -57,12 +58,14 @@ def main():
     if dbpath is None: raise SystemExit('帮助截图配置中没有可用数据库')
     OUT.mkdir(parents=True,exist_ok=True)
     for old in OUT.glob('*.png'):old.unlink()
-    with tempfile.TemporaryDirectory(prefix='bom-help-build-') as tmp:
+    with ExitStack() as cleanup:
+        tmp=cleanup.enter_context(tempfile.TemporaryDirectory(prefix='bom-help-build-'))
         demo_db_path=Path(tmp)/'demo.db'
         source=sqlite3.connect(dbpath.resolve().as_uri()+'?mode=ro',uri=True);target=sqlite3.connect(demo_db_path)
         try:source.backup(target)
         finally:target.close();source.close()
         cfg=ConfigService(tmp); db=Database(str(demo_db_path)); svc=Services(db,cfg)
+        cleanup.callback(db.close)
         from services.snapshot_bom import migrate
         from services.current_catalog import initialize as catalog_initialize
         from services.material_history import initialize as history_initialize
@@ -70,6 +73,13 @@ def main():
         from ui.main_window import MainWindow,MaterialDialog,NewSkuDialog,MaterialHeaderMappingDialog
         from ui.material_search import MaterialSearchDialog
         app=QApplication.instance() or QApplication([])
+        def close_windows():
+            from PyQt5 import sip
+            for window in app.topLevelWidgets():
+                if not sip.isdeleted(window):
+                    if hasattr(window,'dirty'):window.dirty=False
+                    window.close()
+        cleanup.callback(close_windows)
         from version import get_version
         main=MainWindow(svc,get_version());main.show();QApplication.processEvents()
         capture(main,OUT/'sku_overview.png')

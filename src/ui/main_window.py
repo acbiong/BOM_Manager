@@ -955,8 +955,8 @@ class BomTreeWidget(QTreeWidget):
   painter.save(); painter.setPen(self.palette().mid().color())
   rect=option.rect
   painter.drawLine(0,rect.bottom(),self.viewport().width(),rect.bottom())
+  # Painting must not dispatch events: nested paints can invalidate QPainter.
   for column in range(self.columnCount()):
-   checkpoint()
    x=self.header().sectionViewportPosition(column)+self.columnWidth(column)-1
    painter.drawLine(x,rect.top(),x,rect.bottom())
   painter.restore()
@@ -1013,7 +1013,7 @@ class BomWindow(QMainWindow):
  def update_mirror_title(self):
   if getattr(self.svc,'sku_id',None):
    sku=self.svc.db.conn.execute('SELECT mirror_version FROM skus WHERE id=?',(self.svc.sku_id,)).fetchone()
-   material=self.svc.material_snapshot(self.root)
+   material=self.draft_material(self.root)
    if sku:self.setWindowTitle(f"{material['base_code']}{material['version']} {material['name']} 历史版本{sku[0]}")
  def mark_dirty(self):
   if self.is_locked():return False
@@ -1312,7 +1312,7 @@ class BomWindow(QMainWindow):
    if version_children is not None:
     added.takeChildren();self.clone_version_children(added,version_children)
    data=dict(added.data(0,Qt.UserRole) or {})
-   for field,column in [('quantity',1),('position',3),('remark',4)]:
+   for field,column in [('quantity',1),('position',3),('remark',4)]+([('unit',2)] if swap_alternate else []):
     checkpoint()
     data[field]=original.get(field,1.0 if field=='quantity' else '')
     added.setText(column,format_quantity(data[field]) if field=='quantity' else str(data[field] or ''))
@@ -1705,6 +1705,7 @@ class BomWindow(QMainWindow):
   return [node['data'].get(k,'') if k=='row_color' else node['data'].get(k) for k in fields]
  def refresh_styles(self):
   if not hasattr(self,'root_item'):return
+  self.apply_parent_revision_drafts()
   baseline=self.snapshot_map(getattr(self,'_baseline_tree',[]))
   def style(item,path,added=False,deleted=False,external=False):
    data=item.data(0,Qt.UserRole) or {}; root=item is self.root_item
@@ -1720,6 +1721,7 @@ class BomWindow(QMainWindow):
    changed={column for field,column in [('quantity',1),('position',3),('remark',4)] if not root and data.get(field,'')!=original.get(field,'')}
    alternate_changed=self.alternate_key(item) in self._alternate_edits and self.alternate_ids(item)!=original.get('_db_alternates',[])
    if alternate_changed:changed.add(0)
+   if data.get('_pending_parent_revision'):changed.add(0)
    moved=data.get('_moved',False)
    from services.bom_colors import foreground
    custom=data.get('row_color','')
@@ -1779,7 +1781,9 @@ class BomWindow(QMainWindow):
   for k in self.fields:
    checkpoint()
    value=str(d.get(k,'') or '')
-   if k in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag') and latest and value!=str(latest.get(k,'') or ''):
+   if mid in self._history_parent_versions and k in ('base_code','version','name','description','grade','manufacturer','mpn','mp_flag'):
+    value=str(self.draft_material(mid).get(k,'') or '')
+   elif k in ('base_code','version','name','description','unit','grade','manufacturer','mpn','mp_flag') and latest and value!=str(latest.get(k,'') or ''):
     value=f"{value or '（空）'}（待保存：{latest.get(k) or '（空）'}）"
    self.fields[k].setText(value)
   self._loading_fields=False
@@ -2024,6 +2028,26 @@ class BomWindow(QMainWindow):
   dialog=MaterialHistoryChoiceDialog(self.svc,mid,title,self,impact_mid)
   if dialog.exec_()!=QDialog.Accepted:return None
   return dialog.mode()
+ def draft_material(self,mid):
+  original=self.svc.material_snapshot(mid);material=dict(original)
+  version=self._history_parent_versions.get(mid)
+  if version is not None:
+   existing=self.svc.db.conn.execute('SELECT id FROM materials WHERE base_code=? AND version=?',(original['base_code'],version)).fetchone()
+   if existing:material=dict(self.svc.material_snapshot(existing[0]))
+  material.update(self._material_edits.get(mid,{}))
+  if version is not None:material.update(base_code=original['base_code'],version=version)
+  return material
+ def apply_parent_revision_drafts(self):
+  cache={}
+  for _,node in self.expansion_nodes():
+   data=dict(node.data(0,Qt.UserRole) or {});mid=data.get('material_id')
+   if data.get('_deleted') or (mid not in self._history_parent_versions and not data.get('_pending_parent_revision')):continue
+   if mid not in cache:cache[mid]=self.draft_material(mid)
+   material=cache[mid]
+   for key in ('base_code','version','name','description','grade','manufacturer','mpn','mp_flag'):data[key]=material.get(key,'')
+   if mid in self._history_parent_versions:data['_pending_parent_revision']=True
+   else:data.pop('_pending_parent_revision',None)
+   node.setData(0,Qt.UserRole,data);node.setText(0,data['base_code']+data['version']+' '+data['name'])
  def check_history_rules(self,edits=None,alternate=None,rows=None,root=None,mode=None):
   from services.material_history import collect_conflicts
   from ui.parent_revision import ParentRevisionDialog
@@ -2038,6 +2062,11 @@ class BomWindow(QMainWindow):
    dialog=ParentRevisionDialog(self.svc,missing,self)
    if dialog.exec_()!=QDialog.Accepted:return False
    self._history_parent_versions.update(dialog.versions())
+  required={c['material_id'] for c in conflicts}
+  self._history_parent_versions={mid:v for mid,v in self._history_parent_versions.items() if mid in required}
+  self.refresh_styles()
+  self.update_mirror_title()
+  if self.current_item:self.show_item_info(self.current_item)
   return True
  def save_material_history(self,root,rows):
   from services.material_history import save,FIELDS
@@ -2045,6 +2074,8 @@ class BomWindow(QMainWindow):
    if row.get('_added'):
     mid=row['material_id'];before=self.svc.material_snapshot(mid)
     values={key:row.get(key,before.get(key,'')) for key in FIELDS}
+    if row.get('_pending_parent_revision'):
+     for key in ('base_code','version'):values[key]=before[key]
     if any(values[key]!=before.get(key,'') for key in FIELDS):self._material_edits.setdefault(mid,values)
   from services.current_catalog import groups
   # Operations with an immediate decision keep that decision; other structural

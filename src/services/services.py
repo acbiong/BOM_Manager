@@ -276,6 +276,8 @@ class Services:
   from services.sku_lock import assert_sku_unlocked
   if not preview and getattr(self,'sku_id',None) and not getattr(getattr(self.db,'original',self.db),'_transaction_depth',0):assert_sku_unlocked(self,self.sku_id)
   from services.snapshot_bom import revision_conflicts,ParentRevisionRequired,enabled,record_definitions
+  from services.bom_role_swap import definitions as role_definitions
+  role_changes=role_definitions(self,root,items) if enabled(self.db) and not preview else {}
   violations=[] if preview or getattr(self,'_catalog_sync',False) else revision_conflicts(self,root,items)
   if violations:raise ParentRevisionRequired(violations)
   report=progress or (lambda value,message:None)
@@ -499,7 +501,7 @@ class Services:
    from services.current_catalog import enabled as catalog_enabled,prune_snapshot,synchronize
    if catalog_enabled(self):prune_snapshot(self)
    if getattr(self,'scope_id',0):self.refresh_usage()
-   if enabled(self.db):record_definitions(self,root)
+   if enabled(self.db):record_definitions(self,root,role_changes)
    from services.material_history import enabled as histories_enabled,finish_save
    if histories_enabled(self):
     if not getattr(self,'_history_defer',False):finish_save(self,changed_parents)

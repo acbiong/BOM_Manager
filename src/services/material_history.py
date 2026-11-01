@@ -59,12 +59,27 @@ def versions(service, mid):
         'SELECT history_version,created_at,source_sku_id FROM material_histories WHERE material_id=? ORDER BY history_version DESC', (mid,))]
 
 
-def sku_references(service, mid, version):
-    """Actual bindings to this exact revision, including older SKU histories."""
+def main_bindings(service, mid=None, version=None):
+    """One binding per main-BOM owner; alternate-only uses never own revisions.
+
+    The maintained usage index includes reachable main nodes; SKU roots need
+    an explicit check because they have no incoming relationship in that index.
+    Keep alternate bindings for display, export and deletion protection.
+    """
     if not enabled(service):return []
-    ids={r[0] for r in connection(service).execute(
-        'SELECT b.sku_id FROM material_history_bindings b JOIN skus s ON s.id=b.sku_id '
-        'WHERE b.material_id=? AND b.history_version=?',(mid,version))}
+    sql=('SELECT b.sku_id,b.material_id,b.history_version FROM material_history_bindings b '
+         'JOIN skus s ON s.id=b.sku_id WHERE (s.material_id=b.material_id OR EXISTS '
+         '(SELECT 1 FROM mirror_material_usage u WHERE u.sku_id=b.sku_id '
+         'AND u.material_id=b.material_id AND u.role="main"))')
+    args=[]
+    if mid is not None:sql+=' AND b.material_id=?';args.append(mid)
+    if version is not None:sql+=' AND b.history_version=?';args.append(version)
+    return [dict(r) for r in connection(service).execute(sql,args)]
+
+
+def sku_references(service, mid, version):
+    """Main-BOM bindings to this revision, including older SKU histories."""
+    ids={r['sku_id'] for r in main_bindings(service,mid,version)}
     primary=getattr(service,'primary',service)
     return sorted((dict(s) for s in primary.skus() if s['id'] in ids),
                   key=lambda s:(s['base_code'],s['version'],-s['mirror_version'],s['id']))
@@ -204,13 +219,14 @@ def copy_bindings(source, sid):
 def affected(service, mids):
     from services.current_catalog import latest_skus
     primary = getattr(service, 'primary', service)
-    conn = connection(service)
     mids = set(mids)
+    bindings={}
+    for r in main_bindings(service):bindings.setdefault(r['sku_id'],set()).add(r['material_id'])
     owners = {}
     for sku in latest_skus(primary):
         if sku['id'] == getattr(service, 'sku_id', None):
             continue
-        used = {r[0] for r in conn.execute('SELECT material_id FROM material_history_bindings WHERE sku_id=?', (sku['id'],))}
+        used = bindings.get(sku['id'],set())
         shared = mids & used
         if shared:
             owners[sku['id']] = (dict(sku), shared)
@@ -368,10 +384,10 @@ def log_metadata_edit(service,mid,before):
 
 
 def catalog_source(service,mid):
-    from services.current_catalog import latest_skus
     primary=getattr(service,'primary',service)
-    for sku in latest_skus(primary):
-        if connection(service).execute('SELECT 1 FROM material_history_bindings WHERE sku_id=? AND material_id=?',(sku['id'],mid)).fetchone():
+    owners={r['sku_id'] for r in main_bindings(service,mid)}
+    for sku in sorted(primary.skus(),key=lambda s:(s['mirror_version'],s['updated_at'] or '',s['id']),reverse=True):
+        if sku['id'] in owners:
             return primary.for_sku(sku['id']),sku['material_id']
     return primary,None
 
@@ -401,7 +417,9 @@ def update_catalog_material(service,mid,data):
     primary=getattr(service,'primary',service)
     source,root=catalog_source(primary,mid)
     if root is not None:
-        return save(source,root,source.bom(root),{mid:data},'sync')
+        from services import history_selection
+        choice=history_selection.select(source,mid,[s['id'] for s in history_selection.references(source,mid)])
+        return save(source,root,source.bom(root),{mid:data},choice)
     conn=connection(service)
     with service.db.transaction():
         before=primary.material_snapshot(mid)
@@ -410,7 +428,11 @@ def update_catalog_material(service,mid,data):
         children=read(service,mid,current_version(conn,mid))['children'] if latest else []
         attrs={**before,**data}
         if attrs['unit'] not in service.UNITS:raise ValueError('单位不合规')
+        original_keys={tuple(r) for r in conn.execute('SELECT material_id,history_version FROM material_histories')}
+        original_current=dict(conn.execute('SELECT * FROM material_history_current'))
         record(conn,mid,attrs,children)
+        from services.history_selection import compact_new_revisions
+        compact_new_revisions(conn,original_keys,[(r['sku_id'],r['material_id'],r['history_version']) for r in main_bindings(service)],set(),original_current)
         keys=[k for k in FIELDS if k not in ('base_code','version')]
         conn.execute('UPDATE materials SET '+','.join(k+'=?' for k in keys)+',updated_at=? WHERE id=?',tuple(attrs.get(k,'') for k in keys)+(datetime.now().isoformat(sep=' '),mid))
         primary.log('material',mid,'update',primary.material_detail(before,attrs))
@@ -447,26 +469,25 @@ def attribute_conflicts(service, root, items):
     if not enabled(service):return []
     from services.current_catalog import groups
     from services.snapshot_bom import other_sku_usages
-    old = groups(service); desired = {}
-    by_id = {r.get('id'): r for r in items if r.get('id') is not None}
+    from services.bom_role_swap import draft_groups,pair_rows
+    old = groups(service); desired = draft_groups(root,items)
     edits = getattr(service, '_history_edits', {})
     details = {}
-    for row in items:
-        parent = row.get('parent_material_id')
-        if parent is None:parent = by_id.get(row.get('parent_item_id'), {}).get('material_id', root)
-        desired.setdefault(parent, []).append(row)
-        previous = next((r for r in old.get(parent, []) if r['material_id']==row['material_id']), None)
-        reasons = []
-        material = service.material_snapshot(row['material_id'])
-        label = material['base_code']+material['version']+' '+material['name']
-        if row['material_id'] in edits:
-            change = service.material_detail(material, {**material, **edits[row['material_id']]})
-            if change:reasons.append(change)
-        if previous:
-            for key, title in [('quantity','数量'),('unit','单位'),('position','位置'),('remark','备注')]:
-                a, b = previous.get(key) or '', row.get(key) or ''
-                if a != b:reasons.append(f'{title}：{a or "（空）"} → {b or "（空）"}')
-        if reasons:details.setdefault(parent, []).append(label+'：'+'；'.join(reasons))
+    for parent,rows in desired.items():
+        before=old.get(parent,[]);paired=pair_rows(before,rows)
+        for i,row in enumerate(rows):
+            previous=before[paired[i]] if i in paired else None
+            reasons = []
+            material = service.material_snapshot(row['material_id'])
+            label = material['base_code']+material['version']+' '+material['name']
+            if row['material_id'] in edits:
+                change = service.material_detail(material, {**material, **edits[row['material_id']]})
+                if change:reasons.append(change)
+            if previous:
+                for key, title in [('quantity','数量'),('unit','单位'),('position','位置'),('remark','备注')]:
+                    a, b = previous.get(key) or '', row.get(key) or ''
+                    if a != b:reasons.append(f'{title}：{a or "（空）"} → {b or "（空）"}')
+            if reasons:details.setdefault(parent, []).append(label+'：'+'；'.join(reasons))
     result = []
     for mid, detail in details.items():
         if mid in getattr(service,'_history_revision_approved',set()):continue

@@ -17,11 +17,11 @@ class MaterialHistoryChoiceDialog(QDialog):
         super().__init__(parent); self.setWindowTitle(title+' — 物料历史版本'); self.resize(850,480)
         layout=QVBoxLayout(self); material=service.material_snapshot(mid)
         label=QLabel(material['base_code']+material['version']+' '+material['name']+
-                     '\n当前BOM始终参与变更。请选择同时变更的其他BOM，包含同SKU旧历史版本及不同物料历史版本。仅在保存BOM后生效。');label.setWordWrap(True);layout.addWidget(label)
+                     '\n当前BOM始终参与变更。仅列出作为主料使用的其他BOM，包含旧SKU历史及不同物料历史；仅作替代料的不参与判断。仅在保存BOM后生效。');label.setWordWrap(True);layout.addWidget(label)
         from services import history_selection
         self.service=service;self.material_id=mid;self.impact_mid=impact_mid
-        self.reference_token=history_selection.token(service,mid)
         displayed=history_selection.references(service,mid)
+        self.reference_token=history_selection.reference_token(displayed)
         table=QTableWidget(len(displayed),5);self.table=table
         table.setHorizontalHeaderLabels(['一同变更','SKU编码','SKU名称','SKU历史版本','物料历史版本']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
         for row,sku in enumerate(displayed):
@@ -48,7 +48,7 @@ class MaterialHistoryChoiceDialog(QDialog):
         return Selection(self.material_id,ids,self.reference_token,self.impact_mid)
     def update_note(self,*args):
         count=len(self.mode().sku_ids)
-        self.note.setText('全部引用BOM一同变更，不新增该物料历史版本。' if count==self.table.rowCount() else
+        self.note.setText('全部主料引用BOM一同变更，不因替代料引用新增历史版本。' if count==self.table.rowCount() else
                          '有其他BOM未参与变更：保留其原内容，为本次变更新增或复用对应物料历史版本。')
     def accept(self):
         from services import history_selection
@@ -81,7 +81,7 @@ class MaterialHistoryDialog(QDialog):
             value.setMinimumWidth(0);form.addRow(label,value);self.attribute_labels[key]=label;self.attribute_values[key]=value
         info_scroll=QScrollArea();info_scroll.setWidgetResizable(True);info_scroll.setWidget(self.info)
         info_group=QGroupBox('选中物料的历史属性');QVBoxLayout(info_group).addWidget(info_scroll)
-        self.references_group=QGroupBox('包含当前物料历史版本的SKU BOM');reference_layout=QVBoxLayout(self.references_group)
+        self.references_group=QGroupBox('以主料包含当前物料历史版本的SKU BOM');reference_layout=QVBoxLayout(self.references_group)
         self.reference_label=QLabel();self.reference_label.setWordWrap(True);self.reference_label.setTextFormat(Qt.PlainText);reference_layout.addWidget(self.reference_label)
         self.references=QTableWidget(0,3);self.references.setHorizontalHeaderLabels(['SKU编码','SKU名称','SKU历史版本'])
         self.references.setEditTriggers(QAbstractItemView.NoEditTriggers);self.references.setSelectionBehavior(QAbstractItemView.SelectRows);self.references.setWordWrap(True)
@@ -215,7 +215,7 @@ class MaterialHistoryDialog(QDialog):
         self.style_info(item)
         references=history.sku_references(self.service,record['material_id'],record['history_version'])
         title=a['base_code']+a['version']+' '+a['name']+' / 物料历史版本'+str(record['history_version'])
-        self.reference_label.setText(('已删除的对照节点；以下为其原历史版本的引用。\n' if node['deleted'] else '')+title+('\n共计'+str(len(references))+'个SKU BOM（包含旧SKU历史版本）' if references else '\n此物料历史版本未被任何SKU BOM引用'))
+        self.reference_label.setText(('已删除的对照节点；以下为其原历史版本的主料引用。\n' if node['deleted'] else '')+title+('\n共计'+str(len(references))+'个主料引用SKU BOM（包含旧SKU历史版本）' if references else '\n此物料历史版本未被任何SKU BOM作为主料引用'))
         self.references.setRowCount(len(references))
         for row,sku in enumerate(references):
             for col,text in enumerate((sku['base_code']+sku['version'],sku['name'],sku['mirror_version'])):

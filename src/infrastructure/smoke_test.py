@@ -134,6 +134,34 @@ def run_smoke_test(report_path):
             other_svc=svc.for_sku(other_id)
             assert [a['material_id'] for a in other_svc.alternates(other_svc.bom(ap)[0]['id'])]==[aa]
             ui_checks.append('alternate_removal_keeps_parent_code_and_other_bom')
+            only_alt=svc.create_material(dict(base_code='ALTONLYROOT',version='100',name='仅替代料引用',unit='pcs'))
+            only_id=svc.create_sku(only_alt);only_svc=svc.for_sku(only_id)
+            only_svc.save_bom(only_alt,[dict(material_id=aa,quantity=1,unit='pcs',alternate_material_ids=[ap])])
+            assert only_id not in {s['id'] for s in history_selection.references(asvc,ap)}
+            assert only_id not in {s['id'] for s in material_history.sku_references(svc,ap,asvc.material_snapshot(ap)['history_version'])}
+            assert only_svc.material_snapshot(ap)['history_version'] is not None
+            ui_checks.append('material_history_main_references_only')
+            swapped=[dict(r,alternate_material_ids=[a['material_id'] for a in other_svc.alternates(r['id'])],replace_children=True) for r in other_svc.bom(ar)]
+            swapped[-1].update(material_id=aa,alternate_material_ids=[ac])
+            swap_choice=history_selection.select(other_svc,ap)
+            assert not material_history.collect_conflicts(other_svc,ar,swapped,{},swap_choice)
+            assert material_history.save(other_svc,ar,swapped,{},swap_choice)=={}
+            assert other_svc.material_snapshot(ap)['version']=='100'
+            assert other_svc.bom(ap)[0]['material_id']==aa
+            ui_checks.append('main_alternate_swap_keeps_parent_code')
+            from unittest.mock import patch
+            from ui.parent_revision import ParentRevisionDialog
+            from ui.bom_snapshot import draft_snapshot
+            draft=BomWindow(asvc,ar);windows.append(draft);draft.show();app.processEvents()
+            edits={ac:{**asvc.material_snapshot(ac),'name':'父级缓存升版验证'}}
+            before=list(db.conn.iterdump())
+            with patch.object(ParentRevisionDialog,'exec_',return_value=ParentRevisionDialog.Accepted),patch.object(ParentRevisionDialog,'versions',return_value={ap:'101'}):
+                assert draft.check_history_rules(edits=edits,mode=history_selection.select(asvc,ac))
+            assert draft.root_item.child(0).data(0,Qt.UserRole)['version']=='101'
+            assert draft_snapshot(draft)['children'][0]['version']=='101'
+            assert before==list(db.conn.iterdump())
+            draft.dirty=False;draft.close()
+            ui_checks.append('parent_revision_immediate_draft_without_database_write')
             report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None
