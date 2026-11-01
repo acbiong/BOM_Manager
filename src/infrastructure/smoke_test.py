@@ -91,9 +91,24 @@ def run_smoke_test(report_path):
             material_history.save(history_scope,root,history_scope.bom(root),{child:{**history_scope.material_snapshot(child),'name':'物料历史冒烟验证'}},'fork')
             assert svc.for_sku(sid).material_snapshot(child)['name']==previous
             assert history_scope.material_snapshot(child)['name']=='物料历史冒烟验证'
-            from ui.material_history import MaterialHistoryDialog
+            from ui.material_history import MaterialHistoryDialog,MaterialHistoryChoiceDialog
             history_view=MaterialHistoryDialog(svc,child,material_history.versions(svc,child)[0]['history_version']);history_view.show();app.processEvents();history_view.close()
             ui_checks.extend(['material_history_migration','material_history_metadata_isolation','material_history_readonly_window'])
+            choice=MaterialHistoryChoiceDialog(history_scope,child,'新增替代料',impact_mid=root)
+            choice.show();app.processEvents()
+            assert choice.table.rowCount()>=1
+            from services import history_selection
+            from PyQt5.QtCore import Qt
+            expected={s['id'] for s in history_selection.references(history_scope,child)}
+            assert {choice.table.item(row,0).data(Qt.UserRole) for row in range(choice.table.rowCount())}==expected
+            assert history_id not in expected and sid in expected
+            choice.select_all(True);assert choice.mode().sku_ids==expected
+            choice.select_all(False);assert not choice.mode().sku_ids
+            if app.platformName() not in ('offscreen','minimal'):
+                from PyQt5.QtTest import QTest
+                assert QTest.qWaitForWindowExposed(choice,3000)
+            assert choice.grab().save(str(Path(report_path).with_suffix('.history_owners.png')))
+            choice.close();ui_checks.append('material_history_choice_all_boms')
             report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None

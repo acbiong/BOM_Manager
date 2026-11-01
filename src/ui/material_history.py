@@ -1,7 +1,7 @@
 """Nonmodal material history decisions and immutable subtree inspection."""
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QDialogButtonBox, QRadioButton, QTreeWidget, QTreeWidgetItem, QAbstractItemView,QScrollArea,QWidget,QFormLayout,QHBoxLayout,QComboBox,QSplitter,QGroupBox)
+    QDialogButtonBox, QPushButton, QTreeWidget, QTreeWidgetItem, QAbstractItemView,QScrollArea,QWidget,QFormLayout,QHBoxLayout,QComboBox,QSplitter,QGroupBox)
 from ui.interactive_windows import QDialog,QMessageBox
 from services import material_history as history
 from domain.quantity import format_quantity
@@ -12,26 +12,43 @@ class MaterialHistoryChoiceDialog(QDialog):
         super().__init__(parent); self.setWindowTitle(title+' — 物料历史版本'); self.resize(850,480)
         layout=QVBoxLayout(self); material=service.material_snapshot(mid)
         label=QLabel(material['base_code']+material['version']+' '+material['name']+
-                     '\n请选择本次修改的处理范围。仅在保存BOM后生效，取消不写入数据。旧SKU历史版本始终不变。');label.setWordWrap(True);layout.addWidget(label)
-        self.sync=QRadioButton('更新所有受影响SKU的最新历史版本BOM');self.fork=QRadioButton('创建新的物料历史版本，仅当前BOM使用');self.fork.setChecked(True)
-        from services.current_catalog import latest_skus
-        is_latest=getattr(service,'sku_id',None) in {s['id'] for s in latest_skus(getattr(service,'primary',service))}
-        self.sync.setEnabled(is_latest)
-        if not is_latest:self.sync.setToolTip('当前是旧SKU历史版本，只能保存独立的物料历史状态')
-        layout.addWidget(self.sync);layout.addWidget(self.fork)
-        self.service=service;self.impact_mid=mid if impact_mid is None else impact_mid
-        owners=history.affected(service,[self.impact_mid]);table=QTableWidget(len(owners),3);self.table=table
-        table.setHorizontalHeaderLabels(['SKU编码','SKU名称','SKU历史版本']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
-        for row,(sku,_) in enumerate(owners.values()):
-            for col,value in enumerate([sku['base_code']+sku['version'],sku['name']+('（已锁定）' if sku['locked'] else ''),sku['mirror_version']]):table.setItem(row,col,QTableWidgetItem(str(value)))
+                     '\n当前BOM始终参与变更。请选择同时变更的其他BOM，包含同SKU旧历史版本及不同物料历史版本。仅在保存BOM后生效。');label.setWordWrap(True);layout.addWidget(label)
+        from services import history_selection
+        self.service=service;self.material_id=mid;self.impact_mid=impact_mid
+        self.reference_token=history_selection.token(service,mid)
+        displayed=history_selection.references(service,mid)
+        table=QTableWidget(len(displayed),5);self.table=table
+        table.setHorizontalHeaderLabels(['一同变更','SKU编码','SKU名称','SKU历史版本','物料历史版本']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
+        for row,sku in enumerate(displayed):
+            check=QTableWidgetItem();check.setData(Qt.UserRole,sku['id']);check.setCheckState(Qt.Unchecked)
+            check.setFlags(Qt.ItemIsEnabled|Qt.ItemIsUserCheckable if not sku['locked'] else Qt.NoItemFlags)
+            table.setItem(row,0,check)
+            name=sku['name']+('（已锁定，不能变更）' if sku['locked'] else '')
+            for col,value in enumerate([sku['base_code']+sku['version'],name,sku['mirror_version'],sku['material_history_version']],1):table.setItem(row,col,QTableWidgetItem(str(value)))
+        actions=QHBoxLayout()
+        for title,checked in [('全选可变更BOM',True),('全不选',False)]:
+            button=QPushButton(title);button.clicked.connect(lambda _,value=checked:self.select_all(value));actions.addWidget(button)
+        layout.addLayout(actions)
         table.resizeColumnsToContents();table.horizontalHeader().setStretchLastSection(True);layout.addWidget(table,1)
-        note=QLabel('新增替代料不要求父物料编码升版；其他属性修改及删除替代料会检查普通父项编码升版。SKU编码版本仍由用户手动管理。');note.setWordWrap(True);layout.addWidget(note)
+        self.note=QLabel();self.note.setWordWrap(True);layout.addWidget(self.note)
+        table.itemChanged.connect(self.update_note);self.update_note()
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
-    def mode(self):return 'sync' if self.sync.isChecked() else 'fork'
+    def select_all(self,checked):
+        for row in range(self.table.rowCount()):
+            item=self.table.item(row,0)
+            if item.flags() & Qt.ItemIsEnabled:item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+    def mode(self):
+        from services.history_selection import Selection
+        ids=frozenset(self.table.item(row,0).data(Qt.UserRole) for row in range(self.table.rowCount()) if self.table.item(row,0).checkState()==Qt.Checked)
+        return Selection(self.material_id,ids,self.reference_token,self.impact_mid)
+    def update_note(self,*args):
+        count=len(self.mode().sku_ids)
+        self.note.setText('全部引用BOM一同变更，不新增该物料历史版本。' if count==self.table.rowCount() else
+                         '有其他BOM未参与变更：保留其原内容，为本次变更新增或复用对应物料历史版本。')
     def accept(self):
-        locked=[sku for sku,_ in history.affected(self.service,[self.impact_mid]).values() if sku['locked']]
-        if self.sync.isChecked() and locked:
-            QMessageBox.warning(self,'BOM已锁定','下列BOM已被锁定，请解除锁定后再同步，或者选择创建独立物料历史版本：\n'+'\n'.join(s['base_code']+s['version']+' '+s['name']+' 历史版本'+str(s['mirror_version']) for s in locked));return
+        from services import history_selection
+        if self.reference_token!=history_selection.token(self.service,self.material_id):
+            QMessageBox.warning(self,'引用范围已变化','其他BOM内容、引用或锁定状态已变化，请取消后重新选择。');return
         super().accept()
 
 
@@ -125,14 +142,18 @@ def update_library_material(owner,mid,data):
     from ui.parent_revision import ParentRevisionDialog
     source,root=history.catalog_source(owner.svc,mid)
     if root is None:return owner.svc.update_material(mid,data)
-    choice=MaterialHistoryChoiceDialog(source,mid,'编辑物料',owner)
-    if choice.exec_()!=QDialog.Accepted:return False
+    from services import history_selection
+    if history_selection.references(source,mid):
+        choice=MaterialHistoryChoiceDialog(source,mid,'编辑物料',owner)
+        if choice.exec_()!=QDialog.Accepted:return False
+        mode=choice.mode()
+    else:mode=history_selection.select(source,mid)
     rows=[dict(r,alternate_material_ids=[a['material_id'] for a in source.alternates(r['id'])]) for r in source.bom(root)]
-    conflicts=history.collect_conflicts(source,root,rows,{mid:data},choice.mode())
+    conflicts=history.collect_conflicts(source,root,rows,{mid:data},mode)
     versions={}
     if conflicts:
         revision=ParentRevisionDialog(source,conflicts,owner)
         if revision.exec_()!=QDialog.Accepted:return False
         versions=revision.versions()
-    history.save(source,root,rows,{mid:data},choice.mode(),versions)
+    history.save(source,root,rows,{mid:data},mode,versions)
     return True

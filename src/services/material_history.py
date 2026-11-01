@@ -288,7 +288,8 @@ from infrastructure.events import WindowRefreshBus
 @WindowRefreshBus.batch()
 def save(service, root, rows, edits, mode, versions_map=None):
     from services.snapshot_bom import save_with_revisions
-    if not isinstance(mode, dict) and mode not in ('sync', 'fork'):
+    from services.history_selection import Selection
+    if not isinstance(mode, (dict,Selection)) and mode not in ('sync', 'fork'):
         raise ValueError('请选择同步最新BOM或升级物料历史版本')
     versions_map = versions_map or {}
     edits=dict(edits)
@@ -301,6 +302,9 @@ def save(service, root, rows, edits, mode, versions_map=None):
     rows=[dict(row) for row in rows]
     for row in rows:
         if row['material_id'] in edits:row['unit']=edits[row['material_id']].get('unit',row['unit'])
+    from services import history_selection
+    if history_selection.selections(mode):
+        return history_selection.save(service,root,rows,edits,mode,versions_map)
     from services.snapshot_bom import ParentRevisionRequired,revision_conflicts
     required=collect_conflicts(service,root,rows,edits,mode)
     if {c['material_id'] for c in required}!=set(versions_map):
@@ -378,6 +382,8 @@ def decision_token(service,mid):
 
 
 def collect_conflicts(service,root,rows,edits,mode='fork'):
+    from services import history_selection
+    if history_selection.selections(mode):return history_selection.conflicts(service,root,rows,edits,mode)
     from services.snapshot_bom import revision_conflicts
     service._history_edits=edits
     try:result={c['material_id']:c for c in revision_conflicts(service,root,rows)}

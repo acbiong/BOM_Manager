@@ -1865,8 +1865,8 @@ class BomWindow(QMainWindow):
   choices=[f"{row['base_code']}{row['version']} {row['name']}" for row in rows]
   choice,ok=MaterialSelectionDialog.getItem(self,'新增替代料','选择物料',choices,0,False)
   if not ok:return
-  self._alternate_edits[self.alternate_key(item)]=existing+[rows[choices.index(choice)]['id']]
-  if history_enabled(self.svc):self._history_choices[(item.parent().data(0,Qt.UserRole) or {})['material_id']]=history_choice
+  self.stage_alternate_change(item,existing+[rows[choices.index(choice)]['id']])
+  if history_enabled(self.svc):self._history_choices[('alternate',data['material_id'])]=history_choice
   self.mark_dirty(); self.show_item_info(item)
  @undoable
  def alternate_menu(self,pos):
@@ -1887,10 +1887,18 @@ class BomWindow(QMainWindow):
   choice=self.choose_material_history((item.data(0,Qt.UserRole) or {})['material_id'],'删除替代料',impact_mid=(item.parent().data(0,Qt.UserRole) or {})['material_id']) if history_enabled(self.svc) else None
   if history_enabled(self.svc) and choice is None:return
   proposed=[mid for mid in self.alternate_ids(item) if mid!=material_id]
-  if history_enabled(self.svc) and not self.check_history_rules(alternate=(item,proposed)):return
-  self._alternate_edits[self.alternate_key(item)]=proposed
-  if history_enabled(self.svc):self._history_choices[(item.parent().data(0,Qt.UserRole) or {})['material_id']]=choice
+  if history_enabled(self.svc) and not self.check_history_rules(alternate=(item,proposed),mode={**self._history_choices,('alternate',(item.data(0,Qt.UserRole) or {})['material_id']):choice}):return
+  self.stage_alternate_change(item,proposed)
+  if history_enabled(self.svc):self._history_choices[('alternate',(item.data(0,Qt.UserRole) or {})['material_id'])]=choice
   self.mark_dirty(); self.show_item_info(item)
+ def stage_alternate_change(self,item,proposed):
+  mid=(item.data(0,Qt.UserRole) or {})['material_id'];old=self.alternate_ids(item)
+  added=[a for a in proposed if a not in old];removed=set(old)-set(proposed)
+  for _,node in self.expansion_nodes():
+   data=node.data(0,Qt.UserRole) or {}
+   if node is self.root_item or data.get('_deleted') or data.get('material_id')!=mid:continue
+   ids=[a for a in self.alternate_ids(node) if a not in removed]
+   self._alternate_edits[self.alternate_key(node)]=ids+[a for a in added if a not in ids]
  def promote_alternate(self,item,material_id):
   if self.is_locked():return False
   if item is None or item is self.root_item or material_id not in self.alternate_ids(item):return
@@ -2010,12 +2018,11 @@ class BomWindow(QMainWindow):
   for j in range(self.root_item.childCount()):walk(self.root_item.child(j),self.root)
   return rows
  def choose_material_history(self,mid,title,impact_mid=None):
+  from services import history_selection
+  if not history_selection.references(self.svc,mid):return history_selection.select(self.svc,mid,impact_mid=impact_mid)
   from ui.material_history import MaterialHistoryChoiceDialog
   dialog=MaterialHistoryChoiceDialog(self.svc,mid,title,self,impact_mid)
   if dialog.exec_()!=QDialog.Accepted:return None
-  from services.material_history import decision_token
-  target=mid if impact_mid is None else impact_mid
-  self._history_decision_tokens[target]=decision_token(self.svc,target)
   return dialog.mode()
  def check_history_rules(self,edits=None,alternate=None,rows=None,root=None,mode=None):
   from services.material_history import collect_conflicts
@@ -2051,13 +2058,29 @@ class BomWindow(QMainWindow):
    desired.setdefault(row['material_id'],[])
   def payload(values):return [(r['material_id'],float(r['quantity']),r.get('unit'),r.get('position') or '',r.get('remark') or '',r.get('alternate_material_ids',[])) for r in values]
   changed={mid for mid in desired if payload(old.get(mid,[]))!=payload(desired[mid])}
-  from services.material_history import decision_token,affected
-  for mid in sorted(changed|set(self._material_edits)):
-   if mid not in self._history_choices or (mid in self._history_decision_tokens and self._history_decision_tokens[mid]!=decision_token(self.svc,mid)):
-    if not affected(self.svc,[mid]):self._history_choices[mid]='fork';continue
+  from services import history_selection
+  for key,choice in list(self._history_choices.items()):
+   if isinstance(choice,history_selection.Selection) and choice.token!=history_selection.token(self.svc,choice.material_id):
+    refreshed=self.choose_material_history(choice.material_id,'变更范围已变化，请重新确认',choice.impact_mid)
+    if refreshed is None:return None
+    self._history_choices[key]=refreshed
+  alternate_subjects={c.material_id for c in history_selection.selections(self._history_choices) if c.impact_mid is not None}
+  def covered(parent):
+   previous=old.get(parent,[]);following=desired.get(parent,[])
+   if len(previous)!=len(following):return False
+   for a,b in zip(previous,following):
+    if any(a.get(k)!=b.get(k) for k in ('material_id','quantity','position','remark')):return False
+    if a.get('unit')!=b.get('unit') and b['material_id'] not in self._material_edits:return False
+    if a.get('alternate_material_ids',[])!=b.get('alternate_material_ids',[]) and b['material_id'] not in alternate_subjects:return False
+   return True
+  needed={mid for mid in changed if not covered(mid)}|set(self._material_edits)
+  for mid in sorted(needed):
+   if mid not in self._history_choices:
     choice=self.choose_material_history(mid,'保存子BOM变更')
     if choice is None:return None
     self._history_choices[mid]=choice
+  if not self._history_choices:
+   self._history_choices[root]=history_selection.select(self.svc,root)
   if not self.check_history_rules(rows=rows,root=root):return None
   from services.material_history import collect_conflicts
   required={c['material_id'] for c in collect_conflicts(self.svc,root,rows,self._material_edits,self._history_choices)}

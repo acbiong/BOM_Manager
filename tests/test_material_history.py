@@ -162,6 +162,45 @@ class MaterialHistoryTests(unittest.TestCase):
     w.add_alternate();picker.assert_not_called()
    self.assertFalse(w.dirty);self.assertFalse(w._alternate_edits);self.assertFalse(w.history.undo_stack)
   finally:w.dirty=False;w.close()
+ def test_alternate_history_prompt_lists_other_boms_before_picker(self):
+  from ui.main_window import BomWindow,MaterialSelectionDialog
+  from ui.material_history import MaterialHistoryChoiceDialog
+  w=BomWindow(self.new,self.r);w.tree.setCurrentItem(w.root_item.child(0));seen=[]
+  before=self.db.conn.total_changes
+  def inspect(dialog):
+   dialog.show();self.app.processEvents()
+   self.assertEqual(dialog.table.rowCount(),2)
+   self.assertEqual([dialog.table.item(0,c).text() for c in range(1,4)],['R100','R','100'])
+   self.assertNotIn(self.newid,[dialog.table.item(r,0).data(Qt.UserRole) for r in range(dialog.table.rowCount())]);seen.append(True)
+   dialog.close();return QDialog.Rejected
+  try:
+   with patch.object(MaterialHistoryChoiceDialog,'exec_',inspect),patch.object(MaterialSelectionDialog,'getItem') as picker:
+    w.add_alternate();picker.assert_not_called()
+   self.assertEqual(seen,[True]);self.assertEqual(self.db.conn.total_changes,before)
+   self.assertFalse(w.dirty);self.assertFalse(w._alternate_edits);self.assertFalse(w.history.undo_stack)
+  finally:w.dirty=False;w.close()
+ def test_history_prompt_includes_old_and_locked_others_without_duplicates(self):
+  from ui.material_history import MaterialHistoryChoiceDialog
+  self.s.set_sku_locked(self.tid,True)
+  dialog=MaterialHistoryChoiceDialog(self.new,self.c,'新增替代料',impact_mid=self.p)
+  try:
+   rows=[[dialog.table.item(r,c).text() for c in range(1,4)] for r in range(dialog.table.rowCount())]
+   self.assertEqual(rows,[['R100','R','100'],['T100','T（已锁定，不能变更）','100']])
+   dialog.select_all(True);self.assertEqual(dialog.mode().sku_ids,frozenset({self.sid}))
+   self.assertEqual(set(h.affected(self.new,[self.p])),{self.tid})
+  finally:dialog.close()
+ def test_history_prompt_on_old_source_lists_all_other_material_references(self):
+  from ui.material_history import MaterialHistoryChoiceDialog
+  # Referencing the material, rather than just its incoming parent, also
+  # finds other BOMs when this parent has no saved SKU bindings yet.
+  dialog=MaterialHistoryChoiceDialog(self.old,self.c,'新增替代料',impact_mid=self.a)
+  before=self.db.conn.total_changes
+  try:
+   self.assertEqual(dialog.table.rowCount(),2)
+   self.assertEqual([dialog.table.item(0,c).text() for c in range(1,4)],['R100','R','101'])
+   dialog.select_all(True);self.assertEqual(dialog.mode().sku_ids,frozenset({self.newid,self.tid}))
+   self.assertEqual(self.db.conn.total_changes,before)
+  finally:dialog.close()
  def test_parent_metadata_and_child_metadata_keep_new_code(self):
   edits={mid:{**self.new.material_snapshot(mid),'name':'new '+str(mid)} for mid in (self.p,self.c)}
   mapping=h.save(self.new,self.r,self.rows(),edits,'fork',{self.p:'101'})

@@ -884,17 +884,18 @@
     ]
   },
   "action_material_history_choose": {
-    "window": "编辑此物料 — 物料历史版本",
+    "window": "新增替代料 — 物料历史版本",
     "target": [
-      9,
-      102,
-      832,
-      35
+      11,
+      72,
+      828,
+      350
     ],
     "size": [
       850,
       480
-    ]
+    ],
+    "source": "isolated-example-project"
   },
   "action_material_history_view": {
     "window": "BC4-3200016100 Mobius 1.5 SN码印刷贴纸 物料历史版本100（只读）",
