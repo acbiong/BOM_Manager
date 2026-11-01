@@ -162,6 +162,20 @@ def run_smoke_test(report_path):
             assert before==list(db.conn.iterdump())
             draft.dirty=False;draft.close()
             ui_checks.append('parent_revision_immediate_draft_without_database_write')
+            sr,sp,sc,sa=[svc.create_material(dict(base_code=code,version='100',name=code,unit='pcs')) for code in ('SWAPROOT','SWAPPARENT','SWAPCHILD','SWAPALT')]
+            ssid=svc.create_sku(sr);ssvc=svc.for_sku(ssid)
+            ssvc.save_bom(sr,[dict(material_id=sp,quantity=1,unit='pcs'),dict(material_id=sc,parent_material_id=sp,quantity=1,unit='pcs',alternate_material_ids=[sa])])
+            svc.copy_sku_bom(ssid)
+            editor=BomWindow(ssvc,sr);windows.append(editor)
+            selected=editor.promote_alternate(editor.root_item.child(0).child(0),sa)
+            editor.stage_alternate_change(selected,[]);editor.mark_dirty();editor.tree.setCurrentItem(selected)
+            from ui.main_window import QMessageBox
+            with patch.object(ParentRevisionDialog,'exec_',side_effect=AssertionError('Unexpected parent revision after swap/delete')),patch.object(MaterialHistoryChoiceDialog,'exec_',return_value=MaterialHistoryChoiceDialog.Accepted),patch.object(QMessageBox,'information'):
+                assert editor.save()
+            assert editor.tree.currentItem().data(0,Qt.UserRole)['material_id']==sa
+            assert ssvc.material_snapshot(sp)['version']=='100' and not ssvc.alternates(ssvc.bom(sp)[0]['id'])
+            editor.dirty=False;editor.close()
+            ui_checks.append('unsaved_swap_delete_and_save_selection')
             report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None

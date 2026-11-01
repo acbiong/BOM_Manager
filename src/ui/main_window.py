@@ -996,6 +996,7 @@ class BomWindow(QMainWindow):
   if not hasattr(self,'_search_dialog'):self._search_dialog=BomSearchDialog(self)
   self._search_dialog.show();self._search_dialog.raise_();self._search_dialog.activateWindow()
  def is_locked(self):
+  if getattr(self,'_source_deleted',False):return True
   sid=getattr(self.svc,'sku_id',None)
   row=self.svc.db.conn.execute('SELECT locked FROM skus WHERE id=?',(sid,)).fetchone() if sid else self.svc.db.conn.execute('SELECT MAX(locked) FROM skus WHERE material_id=? AND scope_id=0',(self.root,)).fetchone()
   return bool(row and row[0])
@@ -1023,9 +1024,18 @@ class BomWindow(QMainWindow):
   self.refresh_styles()
   self.svc.publish({'type':'bom_draft_changed'})
  def on_external_change(self,event):
+  if getattr(self,'_source_deleted',False):return
   if event.get('type')=='sku_lock_changed':self.apply_lock_state();return
   if self._saving: return
   if event.get('type')=='sku_changed':
+   sid=getattr(self.svc,'sku_id',None)
+   if sid and not self.svc.db.conn.execute('SELECT 1 FROM skus WHERE id=?',(sid,)).fetchone():
+    self._source_deleted=True
+    self.notice.setText('此SKU历史版本已被删除，当前窗口保留原显示和未保存缓存，无法继续保存。')
+    for action in (self.save_action,self.export_action,self.purchase_export_action,self.refresh_action):action.setEnabled(False)
+    self.tree.setEnabled(False);self.info_scroll.setEnabled(False)
+    if hasattr(self,'history'):self.history.update()
+    return
    self.update_mirror_title();self.apply_lock_state();return
   if event.get('type')=='bom_changed' and event.get('scope_id',0)!=getattr(self.svc,'scope_id',0):return
   if event.get('type') in ('bom_changed','material_changed') and self.contains_material(event.get('root') if event.get('type')=='bom_changed' else event.get('id')):
@@ -1316,9 +1326,13 @@ class BomWindow(QMainWindow):
     checkpoint()
     data[field]=original.get(field,1.0 if field=='quantity' else '')
     added.setText(column,format_quantity(data[field]) if field=='quantity' else str(data[field] or ''))
-   added.setData(0,Qt.UserRole,data)
    alternates=self.alternate_ids(old)
-   if swap_alternate:alternates=[original['material_id'] if mid==material['id'] else mid for mid in alternates]
+   if swap_alternate:
+    origin=dict(original.get('_role_swap_origin') or {k:original.get(k) for k in ('material_id','parent_material_id','position')})
+    origin.setdefault('alternate_material_ids',list(alternates))
+    origin['target_material_id']=material['id'];data['_role_swap_origin']=origin
+    alternates=[original['material_id'] if mid==material['id'] else mid for mid in alternates]
+   added.setData(0,Qt.UserRole,data)
    self._alternate_edits[self.alternate_key(added)]=alternates
    self._draft_baselines[data['id']]=self.capture_item(added)
    if selected is None or old is item:selected=added
@@ -2121,6 +2135,8 @@ class BomWindow(QMainWindow):
  def save(self):
   if self.is_locked():return False
   if self._saving:return False
+  from ui.bom_view_state import saved_view,restore_saved_view
+  view=saved_view(self)
   def report(value,message):checkpoint(message,value,100)
   self._saving=True
   if hasattr(self,'history'):self.history.update()
@@ -2171,6 +2187,7 @@ class BomWindow(QMainWindow):
    self.root=revisions.get(self.root,self.root)
    report(90,'正在刷新BOM显示…')
    self.dirty=False; self._deleted_relations.clear(); self.export_action.setEnabled(True); self._alternate_edits.clear(); self.load(); self.notice.setText(''); self.statusBar().clearMessage(); self.save_action.setEnabled(False); self.refresh_action.setEnabled(False)
+   restore_saved_view(self,view,revisions)
    report(100,'BOM保存完成')
   except Exception as error:
    from PyQt5 import sip

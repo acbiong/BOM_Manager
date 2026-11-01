@@ -1,7 +1,55 @@
 """Keep the visible BOM tree anchored while draft operations change selection."""
 from functools import wraps
-from PyQt5.QtCore import QPoint
+from PyQt5.QtCore import QPoint,Qt
 from PyQt5.QtWidgets import QAbstractItemView
+
+
+def saved_view(window):
+    """Capture logical paths before save replaces all tree items/relationship IDs."""
+    tree=window.tree
+    def path(item):
+        result=[]
+        while item is not None and item is not window.root_item:
+            data=item.data(0,Qt.UserRole) or {}
+            result.append((data['material_id'],data.get('position') or ''));item=item.parent()
+        return tuple(reversed(result))
+    current=tree.currentItem()
+    while current is not None and (current.data(0,Qt.UserRole) or {}).get('_deleted'):current=current.parent()
+    anchor=tree.itemAt(QPoint(1,0)) or tree.itemAt(QPoint(1,tree.fontMetrics().height()))
+    return dict(current=path(current),selected=[path(n) for n in tree.selectedItems() if not (n.data(0,Qt.UserRole) or {}).get('_deleted')],
+                expanded=[(path(n),n.isExpanded()) for _,n in window.expansion_nodes() if not (n.data(0,Qt.UserRole) or {}).get('_deleted')],
+                anchor=path(anchor) if anchor is not None else None,y=tree.visualItemRect(anchor).top() if anchor is not None else 0,
+                vertical=tree.verticalScrollBar().value(),horizontal=tree.horizontalScrollBar().value())
+
+
+def restore_saved_view(window,state,revisions):
+    """Follow saved parent revisions and keep the same occurrence selected."""
+    tree=window.tree;nodes={():window.root_item}
+    def walk(parent,path):
+        for i in range(parent.childCount()):
+            node=parent.child(i);data=node.data(0,Qt.UserRole) or {}
+            key=path+((data['material_id'],data.get('position') or ''),)
+            nodes[key]=node;walk(node,key)
+    walk(window.root_item,())
+    def mapped(path):return tuple((revisions.get(mid,mid),position) for mid,position in path)
+    hold=getattr(tree,'_hold_view',False);tree._hold_view=True
+    try:
+        for path,expanded in state['expanded']:
+            node=nodes.get(mapped(path))
+            if node is not None:node.setExpanded(expanded)
+        path=mapped(state['current'])
+        while path not in nodes:path=path[:-1]
+        current=nodes[path];tree.setCurrentItem(current);tree.clearSelection()
+        for selected in state['selected']:
+            node=nodes.get(mapped(selected))
+            if node is not None:node.setSelected(True)
+        if not tree.selectedItems():current.setSelected(True)
+        window.show_item_info(current);tree.doItemsLayout()
+        tree.verticalScrollBar().setValue(state['vertical'])
+        anchor=nodes.get(mapped(state['anchor'])) if state['anchor'] is not None else None
+        if anchor is not None:tree.verticalScrollBar().setValue(tree.verticalScrollBar().value()+tree.visualItemRect(anchor).top()-state['y'])
+        tree.horizontalScrollBar().setValue(state['horizontal'])
+    finally:tree._hold_view=hold
 
 
 def preserve_bom_view(method):

@@ -6,6 +6,25 @@ def is_swap(before,after):
     return old!=new and new in aa and old in bb and aa|{old}==bb|{new}
 
 
+def is_exchange(before,after):
+    """Retain a confirmed draft exchange after subsequent alternate edits.
+
+    The origin is anchored to the saved relationship, so refreshes, different
+    parents and arbitrary replacements cannot inherit an unrelated exemption.
+    Relationship fields are still compared separately by attribute_conflicts.
+    """
+    if is_swap(before,after):return True
+    origin=after.get('_role_swap_origin')
+    if not isinstance(origin,dict):return False
+    if any(origin.get(k)!=before.get(k) for k in ('material_id','parent_material_id')):return False
+    if (origin.get('position') or '')!=(before.get('position') or ''):return False
+    alternatives=set(before.get('alternate_material_ids',[]))
+    return (set(origin.get('alternate_material_ids',[]))==alternatives
+            and after['material_id']!=before['material_id']
+            and after['material_id'] in alternatives
+            and origin.get('target_material_id')==after['material_id'])
+
+
 def pair_rows(before,after):
     """Match each occurrence once, preserving position identity when possible."""
     from collections import defaultdict,deque
@@ -15,8 +34,8 @@ def pair_rows(before,after):
     for i,row in enumerate(after):
         candidates=exact[row['material_id'],row.get('position') or '']
         if candidates:j=candidates.popleft();paired[i]=j;remaining.remove(j)
-    for match in (lambda a,b:is_swap(a,b) and (a.get('position') or '')==(b.get('position') or ''),
-                  lambda a,b:a['material_id']==b['material_id'],is_swap):
+    for match in (lambda a,b:is_exchange(a,b) and (a.get('position') or '')==(b.get('position') or ''),
+                  lambda a,b:a['material_id']==b['material_id'],is_exchange):
         for i,row in enumerate(after):
             if i in paired:continue
             j=next((j for j in sorted(remaining) if match(before[j],row)),None)
@@ -54,7 +73,7 @@ def definitions(service,root,items):
         if not before or len(before)!=len(after):continue
         if {r['material_id'] for r in before}=={r['material_id'] for r in after}:continue
         pairs=pair_rows(before,after)
-        if len(pairs)!=len(after) or not any(is_swap(before[j],after[i]) for i,j in pairs.items()):continue
+        if len(pairs)!=len(after) or not any(is_exchange(before[j],after[i]) for i,j in pairs.items()):continue
         original=signature(code(r['material_id']) for r in before)
         known=service.db.conn.execute('SELECT child_codes FROM bom_revision_definitions WHERE material_id=?',(mid,)).fetchone()
         if known and (known[0]==original or accepted(service,mid,original)):
