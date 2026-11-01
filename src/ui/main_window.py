@@ -712,7 +712,13 @@ class MainWindow(ProjectManagement,QMainWindow):
   self.table.setFocus(Qt.OtherFocusReason)
   self.table.horizontalScrollBar().setValue(scroll[0]);self.table.verticalScrollBar().setValue(scroll[1])
   item=self.table.item(row,8)
-  if not self.table.viewport().rect().contains(self.table.visualItemRect(item)):self.table.scrollToItem(item,QAbstractItemView.PositionAtCenter)
+  # A new horizontal scrollbar can clip a few pixels from the last visible
+  # row. Keep that row's vertical position; only reveal wholly hidden targets.
+  viewport=self.table.viewport().rect();rect=self.table.visualItemRect(item)
+  row_visible=rect.bottom()>=viewport.top() and rect.top()<=viewport.bottom()
+  if not viewport.intersects(rect):
+   self.table.scrollToItem(item,QAbstractItemView.EnsureVisible)
+   if row_visible:self.table.verticalScrollBar().setValue(scroll[1])
  def edit_sku_ecn(self,sid):
   row=next((r for r in self.svc.skus() if r['id']==sid),None)
   if row is None:return
