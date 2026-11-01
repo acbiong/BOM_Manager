@@ -142,7 +142,25 @@ def generate(out,main,materials,bom,svc):
         candidate=svc.for_sku(sku['id'])
         match=next((m for m in definitions(candidate) if affected(candidate,[m])),None)
         if match is not None:choice_service=candidate;choice_mid=match;break
-    choice=dialog(MaterialHistoryChoiceDialog(choice_service,choice_mid,'编辑此物料',bom));snap('material_history_choose',choice,choice.table);choice.hide()
+    # Demonstrate the deletion filter with actual project content, on the
+    # generator's disposable copy. No synthetic material data is introduced.
+    from services.history_state import pending,matching_skus
+    from services.history_selection import references
+    choice_options={};choice_title='编辑此物料'
+    for sku in latest_skus(svc):
+        candidate=svc.for_sku(sku['id'])
+        rows=[dict(r,alternate_material_ids=[a['material_id'] for a in candidate.alternates(r['id'])],replace_children=True) for r in candidate.bom(sku['material_id'])]
+        selected=next((r for r in rows if r['alternate_material_ids'] and references(candidate,r['material_id'])),None)
+        if selected is None:continue
+        subject=selected['material_id'];removed=selected['alternate_material_ids'][0]
+        for row in rows:
+            if row['material_id']==subject:row['alternate_material_ids']=[a for a in row['alternate_material_ids'] if a!=removed]
+        comparison=pending(candidate,subject,rows);refs=references(candidate,subject)
+        matching=matching_skus(candidate,subject,comparison,refs)
+        if len(matching)==len(refs):continue
+        choice_service=candidate;choice_mid=subject;choice_title='删除替代料'
+        choice_options=dict(impact_mid=selected['parent_material_id'],comparison=comparison,scope=(refs,matching));break
+    choice=dialog(MaterialHistoryChoiceDialog(choice_service,choice_mid,choice_title,bom,**choice_options));snap('material_history_choose',choice,choice.table);choice.hide()
     sample=svc.db.conn.execute('SELECT b.material_id,b.history_version,COUNT(*) n FROM material_history_bindings b JOIN skus s ON s.id=b.sku_id WHERE EXISTS (SELECT 1 FROM material_histories h WHERE h.material_id=b.material_id AND h.history_version<b.history_version) AND (s.material_id=b.material_id OR EXISTS (SELECT 1 FROM mirror_material_usage u WHERE u.sku_id=b.sku_id AND u.material_id=b.material_id AND u.role="main")) GROUP BY b.material_id,b.history_version ORDER BY b.history_version DESC,n DESC LIMIT 1').fetchone()
     view_mid=sample['material_id'] if sample else mid;view_version=sample['history_version'] if sample else versions(svc,mid)[0]['history_version']
     viewer=dialog(MaterialHistoryDialog(svc,view_mid,view_version,materials));snap('material_history_view',viewer,viewer.tree)

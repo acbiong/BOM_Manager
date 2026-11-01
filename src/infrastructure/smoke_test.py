@@ -134,6 +134,19 @@ def run_smoke_test(report_path):
             other_svc=svc.for_sku(other_id)
             assert [a['material_id'] for a in other_svc.alternates(other_svc.bom(ap)[0]['id'])]==[aa]
             ui_checks.append('alternate_removal_keeps_parent_code_and_other_bom')
+            # A target already at the pending content must not be offered again.
+            from services.history_state import pending
+            before=list(db.conn.iterdump())
+            desired=[dict(r,alternate_material_ids=[],replace_children=True) for r in other_svc.bom(ar)]
+            choice=MaterialHistoryChoiceDialog(other_svc,ac,'删除替代料',impact_mid=ap,comparison=pending(other_svc,ac,desired))
+            choice.show();app.processEvents()
+            assert choice.table.rowCount()==0 and choice.mode().matching_sku_ids=={aid}
+            assert history_selection.current(other_svc,choice.mode(),desired,{})
+            assert before==list(db.conn.iterdump())
+            if app.platformName() not in ('offscreen','minimal'):
+                assert QTest.qWaitForWindowExposed(choice,3000)
+            assert choice.grab().save(str(Path(report_path).with_suffix('.history_filter.png')))
+            choice.close();ui_checks.append('alternate_removal_excludes_identical_boms')
             only_alt=svc.create_material(dict(base_code='ALTONLYROOT',version='100',name='仅替代料引用',unit='pcs'))
             only_id=svc.create_sku(only_alt);only_svc=svc.for_sku(only_id)
             only_svc.save_bom(only_alt,[dict(material_id=aa,quantity=1,unit='pcs',alternate_material_ids=[ap])])

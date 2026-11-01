@@ -12,6 +12,8 @@ class Selection:
     sku_ids: frozenset
     token: tuple
     impact_mid: int | None = None
+    comparison: str | None = None
+    matching_sku_ids: frozenset = frozenset()
 
 
 def references(service, mid):
@@ -35,6 +37,15 @@ def select(service, mid, ids=(), impact_mid=None):
     return Selection(mid,frozenset(ids),token(service,mid),impact_mid)
 
 
+def current(service,choice,rows,edits,refs=None,check_pending=True):
+    refs=references(service,choice.material_id) if refs is None else refs
+    if choice.token!=reference_token(refs):return False
+    if choice.comparison is None:return True
+    from services.history_state import pending,equivalent,matching_skus
+    if check_pending and not equivalent(choice.comparison,pending(service,choice.material_id,rows,edits)):return False
+    return choice.matching_sku_ids==matching_skus(service,choice.material_id,choice.comparison,refs)
+
+
 def selections(mode):
     values=[mode] if isinstance(mode,Selection) else [v for v in mode.values() if isinstance(v,Selection)] if isinstance(mode,dict) else []
     return list(dict.fromkeys(values))
@@ -45,7 +56,7 @@ def signature(rows):
              tuple(r.get('alternate_material_ids',[]))) for r in rows]
 
 
-def plans(service, root, rows, edits, mode):
+def plans(service, root, rows, edits, mode,check_pending=True):
     """Apply only the approved change, preserving target-specific quantities etc."""
     primary=getattr(service,'primary',service);sid=service.sku_id
     skus={s['id']:s for s in primary.skus()}
@@ -61,11 +72,12 @@ def plans(service, root, rows, edits, mode):
     fork_mids=set()
     for choice in selections(mode):
         refs=references(service,choice.material_id)
-        if choice.token!=reference_token(refs):raise ValueError('主料引用BOM或锁定状态已变化，请重新选择变更范围')
+        if not current(service,choice,rows,edits,refs,check_pending):raise ValueError('主料引用BOM、待保存状态或锁定状态已变化，请重新选择变更范围')
         available={s['id'] for s in refs}
         if not choice.sku_ids<=available:raise ValueError('所选BOM已不再引用此物料，请重新选择')
         mid=choice.material_id
-        partial=bool(available-choice.sku_ids)
+        if choice.sku_ids & choice.matching_sku_ids:raise ValueError('状态一致的BOM无需重复选择变更')
+        partial=bool(available-choice.sku_ids-choice.matching_sku_ids)
         if partial:fork_mids.add(mid)
         for target_id in choice.sku_ids:
             if target_id not in result:
@@ -114,7 +126,10 @@ def plans(service, root, rows, edits, mode):
 
 
 def conflicts(service, root, rows, edits, mode):
-    return conflicts_for_plans(service,plans(service,root,rows,edits,mode)[0])
+    # Further draft edits may invalidate a deletion's proposed state. Preview
+    # parent rules without blocking editing; save reconfirms the final scope
+    # and its transaction always uses the strict default above.
+    return conflicts_for_plans(service,plans(service,root,rows,edits,mode,check_pending=False)[0])
 
 
 def conflicts_for_plans(service,entries,bindings=None):

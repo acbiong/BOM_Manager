@@ -13,15 +13,20 @@ HISTORY_DIFF_ROLE=Qt.UserRole+2
 
 
 class MaterialHistoryChoiceDialog(QDialog):
-    def __init__(self, service, mid, title, parent=None,impact_mid=None):
+    def __init__(self, service, mid, title, parent=None,impact_mid=None,comparison=None,scope=None):
         super().__init__(parent); self.setWindowTitle(title+' — 物料历史版本'); self.resize(850,480)
         layout=QVBoxLayout(self); material=service.material_snapshot(mid)
         label=QLabel(material['base_code']+material['version']+' '+material['name']+
                      '\n当前BOM始终参与变更。仅列出作为主料使用的其他BOM，包含旧SKU历史及不同物料历史；仅作替代料的不参与判断。仅在保存BOM后生效。');label.setWordWrap(True);layout.addWidget(label)
         from services import history_selection
         self.service=service;self.material_id=mid;self.impact_mid=impact_mid
-        displayed=history_selection.references(service,mid)
-        self.reference_token=history_selection.reference_token(displayed)
+        from services.history_state import matching_skus
+        all_refs=history_selection.references(service,mid) if scope is None else scope[0]
+        self.matching_sku_ids=matching_skus(service,mid,comparison,all_refs) if scope is None else scope[1]
+        self.comparison=comparison
+        displayed=[r for r in all_refs if r['id'] not in self.matching_sku_ids]
+        self.reference_token=history_selection.reference_token(all_refs)
+        if comparison is not None:label.setText(label.text()+'\n已排除物料及替代料内容与本次待保存状态一致的BOM，仅提示仍有差异的BOM。')
         table=QTableWidget(len(displayed),5);self.table=table
         table.setHorizontalHeaderLabels(['一同变更','SKU编码','SKU名称','SKU历史版本','物料历史版本']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
         for row,sku in enumerate(displayed):
@@ -45,15 +50,20 @@ class MaterialHistoryChoiceDialog(QDialog):
     def mode(self):
         from services.history_selection import Selection
         ids=frozenset(self.table.item(row,0).data(Qt.UserRole) for row in range(self.table.rowCount()) if self.table.item(row,0).checkState()==Qt.Checked)
-        return Selection(self.material_id,ids,self.reference_token,self.impact_mid)
+        return Selection(self.material_id,ids,self.reference_token,self.impact_mid,self.comparison,self.matching_sku_ids)
     def update_note(self,*args):
         count=len(self.mode().sku_ids)
-        self.note.setText('全部主料引用BOM一同变更，不因替代料引用新增历史版本。' if count==self.table.rowCount() else
+        self.note.setText(('全部需要变更的主料BOM已勾选；状态一致的BOM无需重复变更。' if self.comparison is not None else '全部主料引用BOM一同变更，不因替代料引用新增历史版本。') if count==self.table.rowCount() else
                          '有其他BOM未参与变更：保留其原内容，为本次变更新增或复用对应物料历史版本。')
     def accept(self):
         from services import history_selection
-        if self.reference_token!=history_selection.token(self.service,self.material_id):
+        refs=history_selection.references(self.service,self.material_id)
+        if self.reference_token!=history_selection.reference_token(refs):
             QMessageBox.warning(self,'引用范围已变化','其他BOM内容、引用或锁定状态已变化，请取消后重新选择。');return
+        if self.comparison is not None:
+            from services.history_state import matching_skus
+            if self.matching_sku_ids!=matching_skus(self.service,self.material_id,self.comparison,refs):
+                QMessageBox.warning(self,'物料状态已变化','其他BOM的物料或替代料内容已变化，请取消后重新选择。');return
         super().accept()
 
 

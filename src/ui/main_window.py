@@ -1902,13 +1902,22 @@ class BomWindow(QMainWindow):
   if QMessageBox.question(self,'确认','删除当前替代料？')!=QMessageBox.Yes:return
   material_id=self.alt_table.item(row,0).data(Qt.UserRole)
   from services.material_history import enabled as history_enabled
-  choice=self.choose_material_history((item.data(0,Qt.UserRole) or {})['material_id'],'删除替代料',impact_mid=(item.parent().data(0,Qt.UserRole) or {})['material_id']) if history_enabled(self.svc) else None
-  if history_enabled(self.svc) and choice is None:return
   proposed=[mid for mid in self.alternate_ids(item) if mid!=material_id]
-  if history_enabled(self.svc) and not self.check_history_rules(alternate=(item,proposed),mode={**self._history_choices,('alternate',(item.data(0,Qt.UserRole) or {})['material_id']):choice}):return
+  planned=self.alternate_change_rows(item,proposed)
+  choice=self.choose_material_history((item.data(0,Qt.UserRole) or {})['material_id'],'删除替代料',impact_mid=(item.parent().data(0,Qt.UserRole) or {})['material_id'],rows=planned) if history_enabled(self.svc) else None
+  if history_enabled(self.svc) and choice is None:return
+  if history_enabled(self.svc) and not self.check_history_rules(rows=planned,mode={**self._history_choices,('alternate',(item.data(0,Qt.UserRole) or {})['material_id']):choice}):return
   self.stage_alternate_change(item,proposed)
   if history_enabled(self.svc):self._history_choices[('alternate',(item.data(0,Qt.UserRole) or {})['material_id'])]=choice
   self.mark_dirty(); self.show_item_info(item)
+ def alternate_change_rows(self,item,proposed):
+  mid=(item.data(0,Qt.UserRole) or {})['material_id'];old=self.alternate_ids(item)
+  added=[a for a in proposed if a not in old];removed=set(old)-set(proposed);rows=self.history_rows()
+  for row in rows:
+   if row['material_id']==mid:
+    ids=[a for a in row['alternate_material_ids'] if a not in removed]
+    row['alternate_material_ids']=ids+[a for a in added if a not in ids]
+  return rows
  def stage_alternate_change(self,item,proposed):
   mid=(item.data(0,Qt.UserRole) or {})['material_id'];old=self.alternate_ids(item)
   added=[a for a in proposed if a not in old];removed=set(old)-set(proposed)
@@ -2035,11 +2044,16 @@ class BomWindow(QMainWindow):
    for j in range(item.childCount()):walk(item.child(j),data['material_id'])
   for j in range(self.root_item.childCount()):walk(self.root_item.child(j),self.root)
   return rows
- def choose_material_history(self,mid,title,impact_mid=None):
+ def choose_material_history(self,mid,title,impact_mid=None,rows=None):
   from services import history_selection
-  if not history_selection.references(self.svc,mid):return history_selection.select(self.svc,mid,impact_mid=impact_mid)
+  from services.history_state import pending,matching_skus
+  refs=history_selection.references(self.svc,mid)
+  comparison=pending(self.svc,mid,rows,self._material_edits) if rows is not None and impact_mid is not None else None
+  matching=matching_skus(self.svc,mid,comparison,refs)
+  if not any(r['id'] not in matching for r in refs):
+   return history_selection.Selection(mid,frozenset(),history_selection.reference_token(refs),impact_mid,comparison,matching)
   from ui.material_history import MaterialHistoryChoiceDialog
-  dialog=MaterialHistoryChoiceDialog(self.svc,mid,title,self,impact_mid)
+  dialog=MaterialHistoryChoiceDialog(self.svc,mid,title,self,impact_mid,comparison=comparison,scope=(refs,matching))
   if dialog.exec_()!=QDialog.Accepted:return None
   return dialog.mode()
  def draft_material(self,mid):
@@ -2067,9 +2081,7 @@ class BomWindow(QMainWindow):
   from ui.parent_revision import ParentRevisionDialog
   rows=self.history_rows() if rows is None else rows
   if alternate:
-   item,ids=alternate;data=item.data(0,Qt.UserRole) or {}
-   for row in rows:
-    if row.get('id')==data.get('id'):row['alternate_material_ids']=ids
+   item,ids=alternate;rows=self.alternate_change_rows(item,ids)
   conflicts=collect_conflicts(self.svc,root or self.root,rows,self._material_edits if edits is None else edits,self._history_choices if mode is None else mode)
   missing=[c for c in conflicts if c['material_id'] not in self._history_parent_versions]
   if missing:
@@ -2105,8 +2117,8 @@ class BomWindow(QMainWindow):
   changed={mid for mid in desired if payload(old.get(mid,[]))!=payload(desired[mid])}
   from services import history_selection
   for key,choice in list(self._history_choices.items()):
-   if isinstance(choice,history_selection.Selection) and choice.token!=history_selection.token(self.svc,choice.material_id):
-    refreshed=self.choose_material_history(choice.material_id,'变更范围已变化，请重新确认',choice.impact_mid)
+   if isinstance(choice,history_selection.Selection) and not history_selection.current(self.svc,choice,rows,self._material_edits):
+    refreshed=self.choose_material_history(choice.material_id,'变更范围已变化，请重新确认',choice.impact_mid,rows=rows if choice.comparison is not None else None)
     if refreshed is None:return None
     self._history_choices[key]=refreshed
   alternate_subjects={c.material_id for c in history_selection.selections(self._history_choices) if c.impact_mid is not None}
