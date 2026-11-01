@@ -62,7 +62,7 @@ class PurchaseExportTests(unittest.TestCase):
       self.assertEqual(getattr(cell.border,side).style,'thin');self.assertEqual(getattr(cell.border,side).color.rgb,'FF000000')
      if headers[cell.column-1] in ('序号','用量','单位','物料等级','M/P'):self.assertEqual(cell.alignment.horizontal,'center')
      if cell.row==1:self.assertTrue(cell.font.bold)
-    if cells[0].row>1:self.assertEqual(cells[4].number_format,'0.############')
+    if cells[0].row>1:self.assertEqual(cells[4].number_format,'0' if cells[4].value==int(cells[4].value) else '0.############')
   finally:wb.close()
  def test_empty_bom_and_non_sku_root(self):
   wb=self.export()

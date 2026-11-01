@@ -1043,7 +1043,7 @@ class Services:
   # 根SKU也属于导出的BOM：ROOT标记便于导入时核对根物料身份。
   material=materials[root]
   sheet.append(['1',0,'ROOT','ROOT',material['base_code'],material['version'],material['name'],material['description'],'',1.0,material['unit'],material['grade'],material['mp_flag'],material['manufacturer'],material['mpn']]+['']*(count*5)+[''])
-  sheet.cell(2,1).number_format='@'; sheet.cell(2,10).number_format='0.############'
+  sheet.cell(2,1).number_format='@'
   counters={}; numbers={}
   for row in rows:
    checkpoint()
@@ -1056,7 +1056,6 @@ class Services:
    alternate_values+=['']*(count*5-len(alternate_values))
    sheet.append([number,row['level_no'],parent['base_code'],parent['version'],row['base_code'],row['version'],row['name'],row['description'],row['position'],row['quantity'],row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn']]+alternate_values+[row['remark']])
    sheet.cell(sheet.max_row,1).number_format='@'
-   sheet.cell(sheet.max_row,10).number_format='0.############'
   centered={'层级','父项版本','物料版本号','用量','单位','物料等级','M/P'}
   centered.update(f'替代料{number}版本号' for number in range(1,count+1))
   self.format_export_sheet(sheet,centered)
@@ -1118,7 +1117,6 @@ class Services:
     values+=['']*(count*5-len(values))
     quantity=float(entry['quantity'])
     sheet.append([number,row['base_code']+row['version'],row['name'],row['description'],quantity,row['unit'],row['grade'],row['mp_flag'],row['manufacturer'],row['mpn']]+values+['\n'.join(notes)])
-    sheet.cell(sheet.max_row,5).number_format='0.############'
    self.format_export_sheet(sheet,{'序号','用量','单位','物料等级','M/P'})
    file_work(wb.save,path)
   finally:wb.close()
@@ -1145,6 +1143,10 @@ class Services:
    lines=1
    for cell in cells:
     checkpoint()
+    # Optional decimal digits still leave a decimal separator in Excel/WPS.
+    # Keep quantities numeric, but give whole values an integer-only format.
+    if cell.row>1 and headers[cell.column-1]=='用量' and isinstance(cell.value,(int,float)):
+     cell.number_format='0' if cell.value==int(cell.value) else '0.############'
     cell.border=border
     cell.alignment=Alignment(horizontal='center' if headers[cell.column-1] in centered else 'left',vertical='center',wrap_text=True)
     if cell.row==1:cell.font=Font(bold=True)

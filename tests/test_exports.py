@@ -17,6 +17,30 @@ class TestExports(unittest.TestCase):
 if __name__=='__main__': unittest.main()
 
 class BomExportLayoutTests(unittest.TestCase):
+ def test_quantity_numeric_values_and_formats_across_export_paths(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Database(str(Path(tmp)/'db'));s=Services(db)
+   try:
+    root=s.create_material(dict(base_code='ROOT',version='100',name='数量格式',unit='pcs'))
+    quantities=[1.0,2.0,.1,1.25,.00000001,1.000000000001]
+    children=[s.create_material(dict(base_code=f'C{i}',version='100',name=f'子料{i}',unit='pcs')) for i in range(len(quantities))]
+    s.save_bom(root,[dict(material_id=mid,quantity=qty,unit='pcs') for mid,qty in zip(children,quantities)])
+    sid=s.create_sku(root);before=list(db.conn.iterdump())
+    exports=[('sku',lambda p:s.export_sku(sid,p),'数量格式',10,True),
+             ('material',lambda p:s.export_bom_structure(root,p),'数量格式',10,True),
+             ('database',s.export_database,'ROOT100',10,True),
+             ('purchase',lambda p:s.export_purchase_bom(root,p),'数量格式',5,False)]
+    for name,export,title,column,has_root in exports:
+     with self.subTest(export=name):
+      path=Path(tmp)/(name+'.xlsx');export(path);book=load_workbook(path)
+      try:
+       cells=[row[0] for row in book[title].iter_rows(min_row=2,min_col=column,max_col=column)]
+       self.assertEqual([c.value for c in cells],([1] if has_root else [])+quantities)
+       self.assertTrue(all(c.data_type=='n' for c in cells))
+       self.assertEqual([c.number_format for c in cells],(['0'] if has_root else [])+['0','0','0.############','0.############','0.############','0.############'])
+      finally:book.close()
+    self.assertEqual(list(db.conn.iterdump()),before)
+   finally:db.close()
  def test_hierarchy_shared_paths_fields_and_excel_format(self):
   with tempfile.TemporaryDirectory() as tmp:
    db=Database(str(Path(tmp)/'db'));s=Services(db)
@@ -50,7 +74,7 @@ class BomExportLayoutTests(unittest.TestCase):
          edge=getattr(cell.border,side);self.assertEqual(edge.style,'thin');self.assertEqual(edge.color.rgb,'FF000000')
         if headers[cell.column-1] in centered:self.assertEqual(cell.alignment.horizontal,'center')
         if cell.row==1:self.assertTrue(cell.font.bold)
-       if cells[0].row>1:self.assertEqual(cells[9].number_format,'0.############')
+       if cells[0].row>1:self.assertEqual(cells[9].number_format,'0' if cells[9].value==int(cells[9].value) else '0.############')
      finally:wb.close()
     empty=s.create_sku(s.create_material(dict(base_code='EMPTY',version='1',name='空',unit='pcs')))
     s.export_sku(empty,Path(tmp)/'empty.xlsx');wb=load_workbook(Path(tmp)/'empty.xlsx')
