@@ -91,16 +91,9 @@ class Services:
    from services.current_catalog import refresh_latest_from_catalog
    refresh_latest_from_catalog(self)
   self.publish({'type':'sku_changed','id':sid})
- def update_sku_change_description(self,sid,text):
-  row=self.db.conn.execute('SELECT change_description,material_id,scope_id FROM skus WHERE id=?',(sid,)).fetchone()
-  if row is None:raise ValueError('SKU不存在')
-  if row['change_description']==text:return
-  stamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]
-  with self.db.transaction():
-   self.db.conn.execute('UPDATE skus SET change_description=?,updated_at=? WHERE id=?',(text,stamp,sid))
-   if not row['scope_id']:self.db.conn.execute('UPDATE materials SET updated_at=? WHERE id=?',(stamp,row['material_id']))
-   self.for_sku(sid).log('sku',sid,'change_description','变更描述：'+(row['change_description'] or '（空）')+' → '+(text or '（空）'))
-  self.publish({'type':'sku_changed','id':sid})
+ def update_sku_ecn(self,sid,number,name,content,expected=None):
+  from services.sku_ecn import update
+  return update(self,sid,number,name,content,expected)
  def set_sku_locked(self,sid,locked):
   row=self.db.conn.execute('SELECT id FROM skus WHERE id=?',(sid,)).fetchone()
   if row is None:raise ValueError('SKU不存在')
@@ -163,7 +156,7 @@ class Services:
   before=self.material_snapshot(i)
   with self.db.transaction(): self.db.conn.execute('DELETE FROM material_bom_items WHERE parent_material_id=? OR child_material_id=?',(i,i)); self.db.conn.execute('DELETE FROM materials WHERE id=?',(i,)); self.db.conn.execute('DELETE FROM bom_row_colors WHERE parent_id=? OR material_id=?',(i,i)); self.log('material',i,'delete','删除物料；删除前：'+self.material_detail({},before),before)
  def skus(self):
-  rows=self.db.conn.execute('SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,s.change_description,s.locked,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id').fetchall()
+  rows=self.db.conn.execute("SELECT s.id,m.id AS material_id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom,s.mirror_version,s.scope_id,COALESCE(s.ecn_number,CASE WHEN s.mirror_version=100 THEN '/' ELSE '' END) AS ecn_number,s.ecn_name,s.ecn_content,s.locked,CASE WHEN s.scope_id=0 THEN m.updated_at ELSE s.updated_at END AS updated_at FROM skus s JOIN materials m ON m.id=s.material_id ORDER BY s.id").fetchall()
   from services.material_history import enabled
   if not enabled(self):return rows
   import json
@@ -902,12 +895,17 @@ class Services:
    return ok,fail
   finally:wb.close()
  def write_sku_list_sheet(self,ws,skus=None):
-  ws.title='SKU清单';ws.append(['序号','SKU编码','SKU名称','SKU描述','版本号','修改日期时间'])
-  for n,r in enumerate(self.skus() if skus is None else skus,1):ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],seconds_timestamp(r['updated_at'])])
+  ws.title='SKU清单';ws.append(['序号','SKU编码','SKU名称','SKU描述','历史版本号','ECN','修改日期时间'])
+  for n,r in enumerate(self.skus() if skus is None else skus,1):
+   ws.append([n,r['base_code']+r['version'],r['name'],r['description'],r['mirror_version'],r['ecn_number'],seconds_timestamp(r['updated_at'])]);ws.cell(ws.max_row,6).data_type='s'
   self.format_export_sheet(ws,{'序号'})
+ def write_ecn_sheet(self,sheet,skus):
+  from services.sku_ecn import write_sheet
+  write_sheet(self,sheet,skus)
  def export_sku_list(self,path):
   wb=Workbook()
-  try:self.write_sku_list_sheet(wb.active);file_work(wb.save,path)
+  try:
+   skus=list(self.skus());self.write_sku_list_sheet(wb.active,skus);self.write_ecn_sheet(wb.create_sheet('ECN'),skus);file_work(wb.save,path)
   finally:wb.close()
  def export_database(self,path):
   from collections import Counter
@@ -916,16 +914,18 @@ class Services:
   from openpyxl.utils import quote_sheetname
   import re
   skus=list(self.skus());counts=Counter(r['material_id'] for r in skus)
-  sheet_count=len(skus)+3;total=sheet_count+1
+  sheet_count=len(skus)+4;total=sheet_count+1
   wb=Workbook()
   try:
    with progress_stage(f'正在生成工作表 1/{sheet_count}：SKU清单',0,total):
     self.write_sku_list_sheet(wb.active,skus)
-   with progress_stage(f'正在生成工作表 2/{sheet_count}：物料库',1,total):
+   with progress_stage(f'正在生成工作表 2/{sheet_count}：ECN',1,total):
+    self.write_ecn_sheet(wb.create_sheet('ECN'),skus)
+   with progress_stage(f'正在生成工作表 3/{sheet_count}：物料库',2,total):
     self.write_material_sheet(wb.create_sheet('物料库'))
-   with progress_stage(f'正在生成工作表 3/{sheet_count}：变更记录',2,total):
+   with progress_stage(f'正在生成工作表 4/{sheet_count}：变更记录',3,total):
     self.write_change_sheet(wb.create_sheet('变更记录'),list(self.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' ORDER BY id")))
-   for index,r in enumerate(skus,3):
+   for index,r in enumerate(skus,4):
     name=r['base_code']+r['version']+(' 历史版本'+str(r['mirror_version']) if counts[r['material_id']]>1 else '')
     base=re.sub(r'[\\/*?:\[\]]','_',name).strip().strip("'")[:31] or 'BOM'
     title=base;number=2;used={value.casefold() for value in wb.sheetnames}
@@ -934,7 +934,7 @@ class Services:
     with progress_stage(f'正在生成工作表 {index+1}/{sheet_count}：{title}',index,total):
      bom_sheet=wb.create_sheet(title)
      self.for_sku(r['id']).write_bom_sheet(bom_sheet,r['material_id'])
-     cell=wb['SKU清单'].cell(index-1,2)
+     cell=wb['SKU清单'].cell(index-2,2)
      cell.hyperlink=Hyperlink(ref=cell.coordinate,location=quote_sheetname(bom_sheet.title)+'!A1',tooltip='跳转到 '+name)
      font=copy(cell.font);font.color='0563C1';font.underline='single';cell.font=font
    with progress_stage(f'{sheet_count}张工作表已生成，正在写入Excel文件…',sheet_count,total):
@@ -1122,7 +1122,7 @@ class Services:
    self.format_export_sheet(sheet,{'序号','用量','单位','物料等级','M/P'})
    file_work(wb.save,path)
   finally:wb.close()
- def format_export_sheet(self,sheet,centered):
+ def format_export_sheet(self,sheet,centered,max_width=60):
   checkpoint('正在设置Excel表格格式…')
   from openpyxl.styles import Alignment, Border, Side, Font
   from openpyxl.utils import get_column_letter
@@ -1138,7 +1138,7 @@ class Services:
   for column,header in enumerate(headers,1):
    checkpoint()
    longest=max(width(line) for cells in sheet.iter_rows(min_col=column,max_col=column) for line in (display(cells[0]).split('\n')))
-   widths[column]=min(60,max(5,longest+2))
+   widths[column]=min(max_width,max(5,longest+2))
    sheet.column_dimensions[get_column_letter(column)].width=widths[column]
   for cells in sheet:
    checkpoint()

@@ -177,11 +177,17 @@ class BomCompareDialog(QDialog):
         if not index.isValid() or index.row()>=len(self._rows):return
         side=self.tables.index(table);diff=self._rows[index.row()]
         node=diff.left if side==0 else diff.right
-        if node is None or node.get('_external'):return
-        menu=QMenu(self);edit=menu.addAction('打开BOM进行编辑')
-        menu.addSeparator();material_edit=menu.addAction('编辑此物料')
+        if node is None:return
+        menu=QMenu(self);copy_name=menu.addAction('复制物料名称');copy_code=menu.addAction('复制物料编码')
+        edit=material_edit=None
+        if not node.get('_external'):
+            menu.addSeparator();edit=menu.addAction('打开BOM进行编辑')
+            material_edit=menu.addAction('编辑此物料')
         action=menu.exec_(global_pos)
-        if action==edit:self.open_editor(side,index.row())
+        if action is None:return
+        if action==copy_name:QApplication.clipboard().setText(display_value(node,'name'))
+        elif action==copy_code:QApplication.clipboard().setText(display_value(node,'material_code'))
+        elif action==edit:self.open_editor(side,index.row())
         elif action==material_edit:self.edit_material(side,index.row())
     def edit_material(self,side,row):
         if row<0 or row>=len(self._rows):return

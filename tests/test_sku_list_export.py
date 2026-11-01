@@ -30,7 +30,7 @@ class SkuListExportTests(unittest.TestCase):
      w.export_sku_list();self.assertEqual(Path(choose.call_args.args[2]).parent,Path(tmp))
     whole=Path(tmp)/'all.xlsx';s.export_database(whole);a=load_workbook(target);b=load_workbook(whole)
     try:
-     self.assertEqual(a.sheetnames,['SKU清单']);self.assertEqual(list(a.active.values),list(b['SKU清单'].values))
+     self.assertEqual(a.sheetnames,['SKU清单','ECN']);self.assertEqual(list(a.active.values),list(b['SKU清单'].values))
      self.assertEqual(a.active['A2'].alignment.horizontal,'center')
      for row in a.active:
       for cell in row:

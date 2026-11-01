@@ -50,7 +50,7 @@ class SkuLockTests(unittest.TestCase):
    self.assertEqual(self.state(),before)
   with self.assertRaises(LockedBomError):self.s.change_sku_version(self.sid,'101')
   with self.assertRaises(LockedBomError):self.s.change_mirror_version(self.sid,102)
-  with self.assertRaises(LockedBomError):self.s.update_sku_change_description(self.sid,'修改描述')
+  with self.assertRaises(LockedBomError):self.s.update_sku_ecn(self.sid,'E001','','修改内容')
   with self.assertRaises(LockedBomError):self.s.delete_sku(self.sid)
  def test_shared_bom_sync_is_atomic_and_reports_locked_target(self):
   self.s.set_sku_locked(self.tid,True);source=self.s.for_sku(self.sid);rows=source.bom(self.r)

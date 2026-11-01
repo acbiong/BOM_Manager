@@ -21,7 +21,7 @@ class DatabaseExportLinkTests(unittest.TestCase):
     try:
      seen=set()
      for i,sku in enumerate(skus,2):
-      cell=book['SKU清单'].cell(i,2);link=cell.hyperlink;sheet=book.worksheets[i+1]
+      cell=book['SKU清单'].cell(i,2);link=cell.hyperlink;sheet=book.worksheets[i+2]
       self.assertEqual(link.location,quote_sheetname(sheet.title)+'!A1');self.assertIsNone(link.target)
       self.assertEqual(cell.value,sku['base_code']+sku['version']);self.assertNotIn(link.location,seen);seen.add(link.location)
       self.assertEqual(sheet.cell(2,5).value,sku['base_code']);self.assertEqual(sheet.cell(2,6).value,sku['version'])

@@ -4,11 +4,14 @@ sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from database.database import Database
 from services.services import Services
 from openpyxl import load_workbook
+from contextlib import ExitStack
 
 class IntegerTimestampTests(unittest.TestCase):
  def test_exports_seconds_without_changing_stored_precision(self):
-  with tempfile.TemporaryDirectory() as folder:
+  with ExitStack() as cleanup:
+   folder=cleanup.enter_context(tempfile.TemporaryDirectory())
    db=Database(str(Path(folder)/'db'));svc=Services(db)
+   cleanup.callback(db.close)
    root=svc.create_material(dict(base_code='R',version='1',name='根',unit='pcs'));sid=svc.create_sku(root);mirror=svc.copy_sku_bom(sid)
    value='2026-10-28 10:01:02.987654'
    for table in ['materials','skus']:db.conn.execute(f'UPDATE {table} SET updated_at=?',(value,))
@@ -16,11 +19,13 @@ class IntegerTimestampTests(unittest.TestCase):
    db.conn.commit()
    for label,export in [('library',svc.export_database),('materials',svc.export_materials),('skus',svc.export_sku_list),('bom',lambda p:svc.export_sku(mirror,p))]:
     out=Path(folder)/(label+'.xlsx');export(out);wb=load_workbook(out)
-    if 'SKU清单' in wb:
-     self.assertTrue(all(row[5].value=='2026-10-28 10:01:02' for row in list(wb['SKU清单'].rows)[1:]))
-    if '变更记录' in wb:
-     self.assertTrue(all(row[2].value=='10:01:02' for row in list(wb['变更记录'].rows)[1:]))
-    wb.close()
+    try:
+     if 'SKU清单' in wb:
+      column=[c.value for c in wb['SKU清单'][1]].index('修改日期时间')
+      self.assertTrue(all(row[column].value=='2026-10-28 10:01:02' for row in list(wb['SKU清单'].rows)[1:]))
+     if '变更记录' in wb:
+      self.assertTrue(all(row[2].value=='10:01:02' for row in list(wb['变更记录'].rows)[1:]))
+    finally:wb.close()
    for table,column in [('materials','updated_at'),('skus','updated_at'),('change_logs','changed_at'),(f'mirror_{mirror}_change_logs','changed_at')]:
     self.assertTrue(all(row[0]==value for row in db.conn.execute(f'SELECT {column} FROM {table}')))
-   self.assertEqual(db.conn.execute('PRAGMA integrity_check').fetchone()[0],'ok');db.close()
+   self.assertEqual(db.conn.execute('PRAGMA integrity_check').fetchone()[0],'ok')

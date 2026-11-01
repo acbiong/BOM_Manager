@@ -20,6 +20,13 @@ class Database:
     destination=sqlite3.connect(str(backup))
     try:self.conn.backup(destination)
     finally:destination.close()
+   if columns and not {'ecn_number','ecn_name','ecn_content'}<=columns and path!=':memory:':
+    from pathlib import Path
+    from datetime import datetime
+    backup=Path(str(path)+'.pre-ecn-'+datetime.now().strftime('%Y%m%d_%H%M%S_%f')+'.db')
+    destination=sqlite3.connect(str(backup))
+    try:self.conn.backup(destination)
+    finally:destination.close()
    self.create_schema()
   except Exception:self.close(); raise
  def create_schema(self):
@@ -49,6 +56,8 @@ class Database:
    self.conn.execute('DROP TABLE skus_legacy')
   if 'change_description' not in {r[1] for r in self.conn.execute('PRAGMA table_info(skus)')}:self.conn.execute("ALTER TABLE skus ADD COLUMN change_description TEXT NOT NULL DEFAULT ''")
   if 'locked' not in {r[1] for r in self.conn.execute('PRAGMA table_info(skus)')}:self.conn.execute('ALTER TABLE skus ADD COLUMN locked INTEGER NOT NULL DEFAULT 0 CHECK(locked IN (0,1))')
+  from services.sku_ecn import migrate as migrate_ecn
+  migrate_ecn(self.conn)
   self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_material_usage(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,parent_id INTEGER NOT NULL,role TEXT NOT NULL,PRIMARY KEY(sku_id,material_id,parent_id,role))')
   self.conn.execute('CREATE TABLE IF NOT EXISTS mirror_captured_materials(sku_id INTEGER NOT NULL,material_id INTEGER NOT NULL,PRIMARY KEY(sku_id,material_id))')
   self.conn.execute('CREATE INDEX IF NOT EXISTS mirror_usage_material ON mirror_material_usage(material_id)')

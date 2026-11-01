@@ -587,9 +587,9 @@
   "action_bom_open": {
     "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
-      176,
+      158,
       51,
-      152,
+      129,
       24
     ],
     "size": [
@@ -821,9 +821,9 @@
   "action_sku_context": {
     "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
-      176,
+      158,
       51,
-      152,
+      129,
       24
     ],
     "size": [
@@ -835,39 +835,65 @@
     "window": "",
     "target": [
       2,
-      129,
+      104,
       140,
       29
     ],
     "size": [
       144,
-      312
+      287
     ]
   },
   "action_sku_lock": {
     "window": "",
     "target": [
       2,
-      102,
+      77,
       140,
       29
     ],
     "size": [
       144,
-      312
+      287
     ]
   },
   "action_sku_unlock": {
     "window": "",
     "target": [
       2,
-      102,
+      77,
       140,
       29
     ],
     "size": [
       144,
-      312
+      287
+    ]
+  },
+  "action_sku_ecn_cell": {
+    "window": "Mobius FDA 智能仿生腿 BOM管理系统",
+    "target": [
+      774,
+      114,
+      162,
+      24
+    ],
+    "size": [
+      1100,
+      700
+    ]
+  },
+  "action_sku_ecn_form": {
+    "window": "ECN内容",
+    "target": [
+      9,
+      83,
+      622,
+      322
+    ],
+    "size": [
+      640,
+      440
     ]
   },
   "action_material_history_column": {
@@ -897,7 +923,7 @@
     ]
   },
   "action_material_history_view": {
-    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 物料历史版本117（只读）",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 物料历史版本118（只读）",
     "target": [
       9,
       400,
@@ -910,7 +936,7 @@
     ]
   },
   "action_material_history_switch": {
-    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 物料历史版本117（只读）",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 物料历史版本118（只读）",
     "target": [
       123,
       9,
@@ -923,7 +949,7 @@
     ]
   },
   "action_material_history_references": {
-    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 物料历史版本117（只读）",
+    "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 物料历史版本118（只读）",
     "target": [
       555,
       75,
@@ -1160,13 +1186,13 @@
     "window": "",
     "target": [
       2,
-      241,
+      220,
       116,
       21
     ],
     "size": [
       120,
-      264
+      243
     ]
   },
   "action_delete_sku_confirm": {
@@ -1693,13 +1719,13 @@
     "window": "",
     "target": [
       2,
-      2,
+      42,
       122,
-      21
+      25
     ],
     "size": [
       126,
-      44
+      86
     ]
   },
   "action_bom_import_menu": {

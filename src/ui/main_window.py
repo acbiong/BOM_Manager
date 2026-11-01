@@ -1,6 +1,6 @@
 from infrastructure.operation_progress import checkpoint, file_work
 from ui.operation_progress import operation
-from ui.sku_change_description import ChangeDescriptionDialog, VersionDescriptionHover, DESCRIPTION_ROLE
+from ui.sku_ecn import EcnDialog, EcnHover, ECN_ROLE
 from PyQt5.QtCore import QEventLoop
 from domain.quantity import format_quantity
 from ui.time_display import sku_timestamp
@@ -432,7 +432,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   from ui.live_project import LiveProjectPublisher
   self._live_project=LiveProjectPublisher(self)
  def on_data_change(self,event):
-  if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed','project_changed'):WindowRefreshBus.refresh(self.refresh,priority=0)
+  if event.get('type') in ('bom_changed','material_changed','sku_changed','sku_lock_changed','sku_ecn_changed','project_changed'):WindowRefreshBus.refresh(self.refresh,priority=0)
  def closeEvent(self,event):
   # Resolve every owned BOM draft before hiding the main window or removing
   # its subscriptions. A rejected close must leave the application usable.
@@ -447,10 +447,10 @@ class MainWindow(ProjectManagement,QMainWindow):
   self._live_project.close();WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); self.sku_menu=bar.addMenu('SKU'); a=self.sku_menu.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
-  self.table=QTableWidget(); self.table.setColumnCount(8); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','版本号','修改日期时间','ID','锁定']); self.table.horizontalHeader().moveSection(7,1); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.open_bom); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
+  self.table=QTableWidget(); self.table.setColumnCount(9); self.table.setHorizontalHeaderLabels(['打开','SKU编码','SKU名称','SKU描述','历史版本号','修改日期时间','ID','锁定','ECN']); self.table.horizontalHeader().moveSection(7,1); self.table.horizontalHeader().moveSection(8,6); self.table.hideColumn(6); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.table.setWordWrap(True); self.table.cellDoubleClicked.connect(self.sku_double_clicked); self.table.setContextMenuPolicy(Qt.CustomContextMenu); self.table.customContextMenuRequested.connect(self.sku_context_menu)
   self.table._fixed_column_widths={7:max(44,self.table.horizontalHeader().minimumSectionSize(),self.table.fontMetrics().horizontalAdvance('锁定')+20)};self.table.setItemDelegateForColumn(7,CenteredLockDelegate(self.table))
   self._sku_sort=None;self._sku_filters={}
-  self._description_hover=VersionDescriptionHover(self.table)
+  self._ecn_hover=EcnHover(self.table)
   filter_action=self.sku_menu.addAction('SKU筛选');filter_action.triggered.connect(self.filter_skus)
   self.sku_menu.addSeparator();self.sku_menu.addAction('导出SKU清单',self.export_sku_list)
   compare_action=bar.addAction('BOM对比');compare_action.triggered.connect(self.compare_boms)
@@ -458,7 +458,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   a=bar.addAction('关于'); a.triggered.connect(self.show_about)
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.table.horizontalHeader().setSectionsClickable(True);self.table.horizontalHeader().sectionClicked.connect(self.sort_skus)
-  for column in (1,2,4,5):self.table.horizontalHeaderItem(column).setToolTip('点击升序/降序排序')
+  for column in (1,2,4,5,8):self.table.horizontalHeaderItem(column).setToolTip('点击升序/降序排序')
   corner=QWidget(); corner_layout=QHBoxLayout(corner); corner_layout.setContentsMargins(0,0,4,0)
   self.theme_button=QToolButton(); self.theme_button.setIconSize(QSize(24,24)); self.theme_button.setAutoRaise(True); self.theme_button.clicked.connect(self.toggle_theme); corner_layout.addWidget(self.theme_button); bar.setCornerWidget(corner,Qt.TopRightCorner)
   self.set_theme(bool(QApplication.instance().property('bom_dark_theme')))
@@ -491,7 +491,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   self.theme_button.setToolTip(label); self.theme_button.setAccessibleName(label)
  def toggle_theme(self):self.set_theme(not bool(QApplication.instance().property('bom_dark_theme')))
  def sort_skus(self,column):
-  if column not in (1,2,4,5):return
+  if column not in (1,2,4,5,8):return
   order=Qt.DescendingOrder if self._sku_sort==(column,Qt.AscendingOrder) else Qt.AscendingOrder
   self._sku_sort=(column,order);self.table.sortItems(column,order)
   self.table.horizontalHeader().setSortIndicator(column,order);self.table.horizontalHeader().setSortIndicatorShown(True)
@@ -515,7 +515,7 @@ class MainWindow(ProjectManagement,QMainWindow):
    self._sku_signature=None;self.table.setRowCount(0);self.setWindowTitle('BOM管理系统');self.count_label.setText('未打开项目，请通过“项目”菜单打开历史项目、新建或导入项目');return
   selected_ids={self.table.item(index.row(),6).text() for index in self.table.selectionModel().selectedRows() if self.table.item(index.row(),6)}
   current=self.table.currentRow(); column=max(1,self.table.currentColumn())
-  selected_id=str(self._description_target) if getattr(self,'_description_target',None) is not None else (self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None)
+  selected_id=str(self._ecn_target) if getattr(self,'_ecn_target',None) is not None else (self.table.item(current,6).text() if current>=0 and self.table.item(current,6) else None)
   scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
   project=self.svc.project(); name=(project['project_name'] or '').strip(); code=(project['project_code'] or '').strip(); prefix=' '.join(x for x in (code,name) if x and x!='请输入项目名称'); title=f'{prefix} BOM管理系统' if prefix else 'BOM管理系统'
   self.setWindowTitle(title)
@@ -529,8 +529,9 @@ class MainWindow(ProjectManagement,QMainWindow):
    lock=QTableWidgetItem();lock.setData(Qt.UserRole,bool(r['locked']));lock.setTextAlignment(Qt.AlignCenter);lock.setToolTip('已锁定，只能浏览BOM' if r['locked'] else '未锁定')
    if r['locked']:lock.setIcon(lock_icon())
    self.table.setItem(i,7,lock)
-   self.table.item(i,4).setData(DESCRIPTION_ROLE,r['change_description'])
-   version_font=self.table.item(i,4).font();version_font.setBold(bool((r['change_description'] or '').strip()));self.table.item(i,4).setFont(version_font)
+   ecn=QTableWidgetItem(r['ecn_number']);ecn.setTextAlignment(Qt.AlignCenter)
+   ecn.setData(ECN_ROLE,'ECN编号：'+r['ecn_number']+'\nECN名称：'+r['ecn_name']+'\nECN变更内容：\n'+r['ecn_content'])
+   self.table.setItem(i,8,ecn)
    self.table.item(i,1).setData(Qt.UserRole,r['material_id'])
   if self._sku_sort:self.table.sortItems(*self._sku_sort)
   fit_columns(self.table)
@@ -541,7 +542,7 @@ class MainWindow(ProjectManagement,QMainWindow):
    if selected_row is not None and not self.table.isRowHidden(selected_row):
     self.table.setCurrentCell(selected_row,column);self.table.selectRow(selected_row)
    else:self.table.setCurrentItem(None)
-  if selected_ids and not getattr(self,'_description_target',None):
+  if selected_ids and not getattr(self,'_ecn_target',None):
    self.table.clearSelection()
    for r in range(self.table.rowCount()):
     checkpoint()
@@ -552,11 +553,11 @@ class MainWindow(ProjectManagement,QMainWindow):
    if not self.table.viewport().rect().intersects(self.table.visualItemRect(item)):self.table.scrollToItem(item,QAbstractItemView.PositionAtCenter)
   self._sku_signature=signature;self.publish_sku_order()
  def filter_skus(self):
-  labels=['SKU编码','SKU名称','SKU描述','版本号','修改日期时间','清除全部筛选']
+  labels=['SKU编码','SKU名称','SKU描述','历史版本号','ECN','修改日期时间','清除全部筛选']
   label,ok=QInputDialog.getItem(self,'SKU筛选','选择筛选列',labels,0,False)
   if not ok:return
   if label==labels[-1]:self._sku_filters.clear();self.apply_sku_filters();return
-  column=labels.index(label)+1
+  column=(1,2,3,4,8,5)[labels.index(label)]
   dialog=MaterialColumnFilterDialog(label,[self.table.item(row,column).text() for row in range(self.table.rowCount())],self._sku_filters.get(column),self)
   if dialog.exec_()==QDialog.Accepted:
    condition=dialog.condition()
@@ -698,34 +699,41 @@ class MainWindow(ProjectManagement,QMainWindow):
    if window and not window.close():return
    try:self.svc.delete_sku(sid)
    except Exception as error:show_operation_error(self,'删除SKU失败',error)
- def focus_sku_description(self,sid,scroll):
+ def sku_double_clicked(self,row,column):
+  if column==8:
+   item=self.table.item(row,6)
+   if item:self.edit_sku_ecn(int(item.text()))
+  else:self.open_bom(row,column)
+ def focus_sku_ecn(self,sid,scroll):
   row=next((r for r in range(self.table.rowCount()) if self.table.item(r,6).text()==str(sid)),None)
   if row is None or self.table.isRowHidden(row):return
-  self.table.setCurrentCell(row,4);self.table.selectRow(row)
+  self.table.selectRow(row);self.table.setCurrentCell(row,8)
   if self.isVisible():self.activateWindow()
   self.table.setFocus(Qt.OtherFocusReason)
   self.table.horizontalScrollBar().setValue(scroll[0]);self.table.verticalScrollBar().setValue(scroll[1])
-  item=self.table.item(row,4)
+  item=self.table.item(row,8)
   if not self.table.viewport().rect().contains(self.table.visualItemRect(item)):self.table.scrollToItem(item,QAbstractItemView.PositionAtCenter)
- def edit_sku_change_description(self,sid):
+ def edit_sku_ecn(self,sid):
   row=next((r for r in self.svc.skus() if r['id']==sid),None)
   if row is None:return
   scroll=(self.table.horizontalScrollBar().value(),self.table.verticalScrollBar().value())
-  self._description_target=sid
-  dialog=ChangeDescriptionDialog(row['change_description'],self)
+  self._ecn_target=sid
+  from services.sku_ecn import values
+  original=values(row);database=self.svc.db
+  dialog=EcnDialog(original,self,readonly=bool(row['locked']))
   try:
-   if dialog.exec_()==QDialog.Accepted:
-    try:self.svc.update_sku_change_description(sid,dialog.description())
+   if dialog.exec_()==QDialog.Accepted and not row['locked']:
+    if self.svc.db is not database:return
+    try:self.svc.update_sku_ecn(sid,*dialog.values(),expected=original)
     except Exception as error:show_operation_error(self,'保存失败',error)
   finally:
-   self._description_target=None
-   self.focus_sku_description(sid,scroll)
+   self._ecn_target=None
+   if self.svc.db is database:self.focus_sku_ecn(sid,scroll)
    # Qt restores the pre-dialog focus during queued activation/menu cleanup.
    # Restore the explicitly edited mirror once more after those events settle.
-   if getattr(self,'_description_focus_timer',None):self._description_focus_timer.stop();self._description_focus_timer.deleteLater()
-   timer=QTimer(self);timer.setSingleShot(True);self._description_focus_timer=timer
-   database=self.svc.db
-   timer.timeout.connect(lambda:self.focus_sku_description(sid,scroll) if self.isVisible() and self.svc.db is database else None)
+   if getattr(self,'_ecn_focus_timer',None):self._ecn_focus_timer.stop();self._ecn_focus_timer.deleteLater()
+   timer=QTimer(self);timer.setSingleShot(True);self._ecn_focus_timer=timer
+   timer.timeout.connect(lambda:self.focus_sku_ecn(sid,scroll) if self.isVisible() and self.svc.db is database else None)
    timer.start(0)
  def toggle_sku_lock(self,sid):
   row=self.svc.db.conn.execute('SELECT material_id,locked FROM skus WHERE id=?',(sid,)).fetchone()
@@ -760,8 +768,8 @@ class MainWindow(ProjectManagement,QMainWindow):
   sid=int(self.table.item(row,6).text());multiple=len(sids)>1
   states={r['id']:bool(r['locked']) for r in self.svc.skus() if r['id'] in sids};locked=states[sid]
   menu=QMenu(self)
-  description=menu.addAction('编辑变更描述');version=menu.addAction('SKU版本变更');mirror=menu.addAction('历史版本变更')
-  for edit in (description,version,mirror):edit.setEnabled(not locked and not multiple)
+  version=menu.addAction('SKU版本变更');mirror=menu.addAction('历史版本变更')
+  for edit in (version,mirror):edit.setEnabled(not locked and not multiple)
   menu.addSeparator();open_action=menu.addAction('编辑/浏览BOM')
   menu.addSeparator()
   lock=unlock=None
@@ -786,7 +794,6 @@ class MainWindow(ProjectManagement,QMainWindow):
   elif action in (copy_code,copy_name):
    material=self.svc.db.conn.execute('SELECT m.base_code,m.version,m.name FROM skus s JOIN materials m ON m.id=s.material_id WHERE s.id=?',(sid,)).fetchone()
    if material:QApplication.clipboard().setText(material['base_code']+material['version'] if action==copy_code else material['name'])
-  elif action==description:self.edit_sku_change_description(sid)
   elif action==copy:self.copy_sku_bom(sid)
   elif action==compare:self.compare_sku_bom(sid)
   elif action==mirror:self.change_mirror_version(sid)

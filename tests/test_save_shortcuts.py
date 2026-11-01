@@ -10,7 +10,7 @@ from ui.interactive_windows import QMessageBox
 from PyQt5.QtTest import QTest
 from ui.save_shortcut import install_save_shortcuts
 from ui.main_window import MaterialDialog,MaterialHeaderMappingDialog,ProjectDialog,MainWindow
-from ui.sku_change_description import ChangeDescriptionDialog
+from ui.sku_ecn import EcnDialog
 from database.database import Database
 from services.services import Services
 
@@ -32,12 +32,12 @@ class SaveShortcutTests(unittest.TestCase):
   for w in windows:w.close();w.deleteLater()
   QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
  def test_forms_and_multiline_save_use_existing_confirmation(self):
-  for dialog in (MaterialDialog(),ProjectDialog(),ChangeDescriptionDialog('原描述')):
+  for dialog in (MaterialDialog(),ProjectDialog(),EcnDialog(('', '', '原内容'))):
    try:
     editor=getattr(dialog,'editor',None)
     if editor:editor.setPlainText('第一行\n第二行')
     self.press(dialog,editor);self.assertEqual(dialog.result(),QDialog.Accepted)
-    if editor:self.assertEqual(dialog.description(),'第一行\n第二行')
+    if editor:self.assertEqual(dialog.values()[2],'第一行\n第二行')
    finally:self.dispose(dialog)
  def test_mapping_validation_is_not_bypassed_and_disabled_ok_stays_disabled(self):
   dialog=MaterialHeaderMappingDialog('missing.xlsx',['源列'],[],required=['必需字段'])
@@ -70,7 +70,7 @@ class SaveShortcutTests(unittest.TestCase):
    finally:bom.dirty=False;self.dispose(bom,main);db.close()
 
  def test_modal_child_does_not_save_parent_and_save_on_close_button(self):
-  parent=ChangeDescriptionDialog('父窗口草稿');child=MaterialDialog(parent)
+  parent=EcnDialog(('', '', '父窗口草稿'));child=MaterialDialog(parent)
   try:
    parent.show();child.setWindowModality(Qt.WindowModal);self.press(child)
    self.assertEqual(child.result(),QDialog.Accepted);self.assertTrue(parent.isVisible());self.assertEqual(parent.result(),QDialog.Rejected)

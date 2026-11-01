@@ -12,7 +12,7 @@ from config.config_service import ConfigService
 from infrastructure.events import WindowRefreshBus
 from services.services import Services
 from ui.main_window import MainWindow
-from ui.sku_change_description import DESCRIPTION_ROLE
+from ui.sku_ecn import ECN_ROLE
 
 
 class MainWindowExitTests(unittest.TestCase):
@@ -53,8 +53,8 @@ class MainWindowExitTests(unittest.TestCase):
   self.assertTrue(self.editor.dirty);self.assertEqual(self.editor.fields['quantity'].text(),'2')
   self.assertEqual(self.mirror.bom(self.root)[0]['quantity'],1)
   self.assertIn(self.main.on_data_change,WindowRefreshBus._handlers)
-  self.svc.update_sku_change_description(self.sid,'取消退出后仍可编辑')
-  self.assertEqual(self.main.table.item(0,4).data(DESCRIPTION_ROLE),'取消退出后仍可编辑')
+  self.svc.update_sku_ecn(self.sid,'E001','','取消退出后仍可编辑')
+  self.assertIn('取消退出后仍可编辑',self.main.table.item(0,8).data(ECN_ROLE))
   self.assertEqual(create.e['name'].text(),'未保存物料')
  def test_save_failure_cancels_main_close_and_keeps_draft(self):
   with patch.object(self.editor,'save',return_value=False) as save:

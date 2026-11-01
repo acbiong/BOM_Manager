@@ -10,7 +10,7 @@ class TestExports(unittest.TestCase):
    db=Database(str(Path(tmp)/'bom.db'));s=Services(db)
    try:
     m=s.create_material({'base_code':'A','version':'1','name':'A','unit':'pcs'});s.create_sku(m);out=Path(tmp)/'out.xlsx';s.export_database(out);wb=load_workbook(out)
-    try:self.assertEqual(wb.sheetnames,['SKU清单','物料库','变更记录','A1'])
+    try:self.assertEqual(wb.sheetnames,['SKU清单','ECN','物料库','变更记录','A1'])
     finally:wb.close()
    finally:db.close()
 

@@ -128,6 +128,14 @@ def generate(out,main,materials,bom,svc):
     with patch.object(QMenu,'exec_',menu_capture):main.sku_context_menu(pos)
     svc.set_sku_locked(sid,True)
     with patch.object(QMenu,'exec_',menu_capture):main.sku_context_menu(pos)
+    from ui.sku_ecn import EcnDialog
+    from services.sku_ecn import values as ecn_values
+    sample=next((r for r in svc.skus() if r['ecn_content']),svc.skus()[0])
+    main.refresh();row=next(i for i in range(main.table.rowCount()) if int(main.table.item(i,6).text())==sample['id'])
+    main.table.scrollToItem(main.table.item(row,8));QApplication.processEvents()
+    rect=main.table.visualItemRect(main.table.item(row,8));rect.translate(main.table.viewport().mapTo(main,QPoint()))
+    snap('sku_ecn_cell',main,rect=rect)
+    ecn=dialog(EcnDialog(ecn_values(sample),main));snap('sku_ecn_form',ecn,ecn.editor);ecn.hide()
     from ui.material_history import MaterialHistoryDialog,MaterialHistoryChoiceDialog
     from services.material_history import versions
     column=materials._base_column_labels.index('物料历史版本')

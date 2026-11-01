@@ -36,7 +36,7 @@ class MultiSelectTests(unittest.TestCase):
   def click(row,mod=Qt.NoModifier):QTest.mouseClick(t.viewport(),Qt.LeftButton,mod,t.visualItemRect(t.item(row,2)).center())
   click(0);click(2,Qt.ControlModifier);self.assertEqual({i.row() for i in t.selectionModel().selectedRows()},{0,2})
   actions=self.menu(0)
-  for label in ('编辑变更描述','SKU版本变更','历史版本变更','复制BOM','BOM对比','删除SKU'):self.assertFalse(actions[label])
+  for label in ('SKU版本变更','历史版本变更','复制BOM','BOM对比','删除SKU'):self.assertFalse(actions[label])
   self.assertEqual({i.row() for i in t.selectionModel().selectedRows()},{0,2})
   self.menu(1);self.assertEqual([i.row() for i in t.selectionModel().selectedRows()],[1])
   click(0);click(2,Qt.ShiftModifier);self.assertEqual(len(t.selectionModel().selectedRows()),3)

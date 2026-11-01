@@ -18,7 +18,7 @@ def exercise_windows(service,main,library):
     from ui.parent_revision import ParentRevisionDialog
     from ui.replacement_selection import ReplacementSelectionDialog
     from ui.shared_bom_migration import SharedBomMigrationDialog
-    from ui.sku_change_description import ChangeDescriptionDialog
+    from ui.sku_ecn import EcnDialog
     from ui.about_dialog import AboutDialog
     from ui.interactive_windows import QFileDialog,QInputDialog,QColorDialog,QMessageBox
     from ui.window_geometry import WindowGeometryMemory
@@ -119,7 +119,7 @@ def exercise_windows(service,main,library):
         incoming={'物料基础编码':material['base_code'],'物料版本号':material['version'],'物料名称':material['name']}
         factories=[
             lambda:MaterialDialog(main,data=material),lambda:CreateMaterialDialog(main),lambda:NewSkuDialog(service,main),
-            lambda:ProjectDialog(main),lambda:ChangeDescriptionDialog('测试描述',main),
+            lambda:ProjectDialog(main),lambda:EcnDialog(('ECN-001','测试名称','测试内容'),main),
             lambda:MaterialHeaderMappingDialog('smoke.xlsx',['物料基础编码'],[],main,required=['物料基础编码']),
             lambda:MaterialConflictDialog(incoming,material,main),lambda:MaterialImportResultDialog([],[(2,'A1','测试','必填项缺失')],main),
             lambda:BomImportIssuesDialog(BomImportError(['第2行缺少物料编码']),main),lambda:BomImportConflictDialog([],main),

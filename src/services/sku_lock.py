@@ -46,7 +46,7 @@ def check_locked_changes(conn,before):
  for sid,old in before.items():
   new=after.get(sid);sku=old['sku'];root=sku['material_id'];root_label=label(old['materials'].get(root));sku_label=root_label+' 历史版本'+str(sku['mirror_version'])
   impacts=set()
-  if new is None or any(new['sku'][k]!=sku[k] for k in ('material_id','mirror_version','scope_id','change_description')):impacts.add((root,None))
+  if new is None or any(new['sku'][k]!=sku[k] for k in ('material_id','mirror_version','scope_id','change_description','ecn_number','ecn_name','ecn_content')):impacts.add((root,None))
   if new:
    for mid in set(old['materials'])|set(new['materials']):
     if old['materials'].get(mid)!=new['materials'].get(mid):

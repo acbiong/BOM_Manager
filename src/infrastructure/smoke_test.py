@@ -189,6 +189,8 @@ def run_smoke_test(report_path):
             assert ssvc.material_snapshot(sp)['version']=='100' and not ssvc.alternates(ssvc.bom(sp)[0]['id'])
             editor.dirty=False;editor.close()
             ui_checks.append('unsaved_swap_delete_and_save_selection')
+            from infrastructure.ecn_smoke import exercise_ecn
+            ui_checks.extend(exercise_ecn(svc,report_path))
             report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None
