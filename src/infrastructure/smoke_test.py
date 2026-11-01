@@ -120,6 +120,20 @@ def run_smoke_test(report_path):
                 assert QTest.qWaitForWindowExposed(choice,3000)
             assert choice.grab().save(str(Path(report_path).with_suffix('.history_owners.png')))
             choice.close();ui_checks.append('material_history_choice_all_boms')
+            # A shared ordinary parent must keep its code when only an alternate
+            # is removed; the unselected SKU history keeps the original list.
+            ar,ap,ac,aa=[svc.create_material(dict(base_code=code,version='100',name=code,unit='pcs')) for code in ('ALTROOT','ALTPARENT','ALTCHILD','ALTBACKUP')]
+            aid=svc.create_sku(ar);asvc=svc.for_sku(aid)
+            arows=[dict(material_id=ap,quantity=1,unit='pcs'),dict(material_id=ac,parent_material_id=ap,quantity=1,unit='pcs',alternate_material_ids=[aa])]
+            asvc.save_bom(ar,arows);other_id=svc.copy_sku_bom(aid)
+            arows=[dict(r,alternate_material_ids=[]) for r in asvc.bom(ar)]
+            amode=history_selection.select(asvc,ac,impact_mid=ap)
+            assert not material_history.collect_conflicts(asvc,ar,arows,{},amode)
+            assert material_history.save(asvc,ar,arows,{},amode)=={}
+            assert asvc.bom(ar)[0]['material_id']==ap and not asvc.alternates(asvc.bom(ap)[0]['id'])
+            other_svc=svc.for_sku(other_id)
+            assert [a['material_id'] for a in other_svc.alternates(other_svc.bom(ap)[0]['id'])]==[aa]
+            ui_checks.append('alternate_removal_keeps_parent_code_and_other_bom')
             report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None

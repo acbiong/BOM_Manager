@@ -440,8 +440,9 @@ def selection_tree(service,root):
 def attribute_conflicts(service, root, items):
     """Code revision rules are separate from material history revisions.
 
-    Adding alternatives is exempt; removing one or editing relationship/child
-    metadata requires the non-SKU parent's code revision. Pure order is ignored.
+    Alternative-list edits are isolated by material history, not parent codes.
+    Relationship/child metadata still requires the non-SKU parent's code revision.
+    Pure order is ignored.
     """
     if not enabled(service):return []
     from services.current_catalog import groups
@@ -465,7 +466,6 @@ def attribute_conflicts(service, root, items):
             for key, title in [('quantity','数量'),('unit','单位'),('position','位置'),('remark','备注')]:
                 a, b = previous.get(key) or '', row.get(key) or ''
                 if a != b:reasons.append(f'{title}：{a or "（空）"} → {b or "（空）"}')
-            if 'alternate_material_ids' in row and set(previous['alternate_material_ids'])-set(row['alternate_material_ids']):reasons.append('删除替代料')
         if reasons:details.setdefault(parent, []).append(label+'：'+'；'.join(reasons))
     result = []
     for mid, detail in details.items():

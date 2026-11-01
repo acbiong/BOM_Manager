@@ -152,3 +152,59 @@ class HistorySelectionTests(unittest.TestCase):
   self.assertEqual(service.material_snapshot(y)['history_version'],100)
   self.assertEqual(service.material_snapshot(y)['name'],'draft name')
   self.assertEqual(len(h.versions(self.s,y)),1)
+ def test_remove_alternate_partial_keeps_unselected_bom_and_parent_identity(self):
+  self.add();old=self.old.bom(self.r);snapshot=h.read(self.s,self.p,100)
+  rows=self.rows();rows[-1]['alternate_material_ids']=[];choice=self.choice([self.tid])
+  self.assertFalse(h.collect_conflicts(self.new,self.r,rows,{},choice))
+  self.assertEqual(h.save(self.new,self.r,rows,{},choice),{})
+  for service in (self.new,self.other):
+   self.assertEqual(service.bom(self.p)[0]['material_id'],self.c)
+   self.assertFalse(service.alternates(service.bom(self.p)[0]['id']))
+   self.assertEqual(service.material_snapshot(self.p)['version'],'100')
+   self.assertNotEqual(service.material_snapshot(self.p)['history_version'],100)
+  self.assertEqual(self.old.bom(self.r),old)
+  self.assertEqual(h.read(self.s,self.p,100),snapshot)
+  self.assertEqual([a['material_id'] for a in self.old.alternates(self.old.bom(self.p)[0]['id'])],[self.a])
+ def test_remove_all_reuses_history_number_across_parents_and_positions(self):
+  q=self.s.create_material(dict(base_code='Q',version='100',name='Q',unit='pcs'))
+  u=self.s.create_material(dict(base_code='U',version='100',name='U',unit='pcs'));target=self.s.for_sku(self.s.create_sku(u))
+  target.save_bom(u,[dict(material_id=q,quantity=1,unit='pcs'),dict(material_id=self.c,parent_material_id=q,quantity=7,unit='pcs',position='one'),dict(material_id=self.c,parent_material_id=q,quantity=9,unit='pcs',position='two')])
+  self.add();before={s.sku_id:[(r['material_id'],r['quantity'],r['position'],r['remark']) for r in s.bom(root)] for s,root in [(self.new,self.r),(self.old,self.r),(target,u)]}
+  versions={s.sku_id:s.material_snapshot(parent)['history_version'] for s,parent in [(self.new,self.p),(self.old,self.p),(target,q)]}
+  rows=self.rows();rows[-1]['alternate_material_ids']=[];choice=self.choice()
+  self.assertFalse(h.collect_conflicts(self.new,self.r,rows,{},choice));h.save(self.new,self.r,rows,{},choice)
+  for service,root,parent in [(self.new,self.r,self.p),(self.old,self.r,self.p),(target,u,q)]:
+   self.assertEqual([(r['material_id'],r['quantity'],r['position'],r['remark']) for r in service.bom(root)],before[service.sku_id])
+   self.assertEqual(service.material_snapshot(parent)['history_version'],versions[service.sku_id])
+   self.assertTrue(all(not service.alternates(r['id']) for r in service.bom(parent)))
+ def test_removal_does_not_exempt_other_changes_and_locked_selection(self):
+  from services.snapshot_bom import ParentRevisionRequired
+  self.add();rows=self.rows();rows[-1].update(alternate_material_ids=[],quantity=8)
+  choice=self.choice();before=list(self.db.conn.iterdump())
+  problems=h.collect_conflicts(self.new,self.r,rows,{},choice)
+  self.assertEqual([p['material_id'] for p in problems],[self.p]);self.assertIn('数量',problems[0]['detail'])
+  with self.assertRaises(ParentRevisionRequired):h.save(self.new,self.r,rows,{},choice)
+  self.assertEqual(before,list(self.db.conn.iterdump()))
+  rows[-1]['quantity']=2;self.s.set_sku_locked(self.tid,True);choice=self.choice();before=list(self.db.conn.iterdump())
+  with self.assertRaises(LockedBomError):h.save(self.new,self.r,rows,{},choice)
+  self.assertEqual(before,list(self.db.conn.iterdump()))
+ def test_remove_ui_no_parent_prompt_undo_redo_and_save(self):
+  from ui.main_window import BomWindow,QMessageBox
+  from ui.material_history import MaterialHistoryChoiceDialog
+  from ui.parent_revision import ParentRevisionDialog
+  from PyQt5.QtWidgets import QDialog,QMenu
+  from PyQt5.QtCore import QPoint
+  self.add();w=BomWindow(self.new,self.r);w.tree.setCurrentItem(w.root_item.child(0).child(0));w.show_item_info(w.tree.currentItem())
+  def choose(menu,pos):return next(a for a in menu.actions() if a.text()=='删除替代料')
+  try:
+   with patch.object(QMenu,'exec_',choose),patch.object(w.alt_table,'rowAt',return_value=0),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(MaterialHistoryChoiceDialog,'exec_',return_value=QDialog.Accepted),patch.object(ParentRevisionDialog,'exec_') as parent:
+    w.alternate_menu(QPoint());parent.assert_not_called()
+   self.assertTrue(w.dirty);self.assertEqual(w.alternate_ids(w.tree.currentItem()),[])
+   self.assertTrue(self.new.alternates(self.new.bom(self.p)[0]['id']))
+   w.history.undo();self.assertTrue(w.alternate_ids(w.tree.currentItem()))
+   w.history.redo();self.assertFalse(w.alternate_ids(w.tree.currentItem()))
+   with patch.object(ParentRevisionDialog,'exec_') as parent,patch.object(QMessageBox,'information'):
+    self.assertTrue(w.save());parent.assert_not_called()
+   self.assertFalse(self.new.alternates(self.new.bom(self.p)[0]['id']))
+   self.assertTrue(self.old.alternates(self.old.bom(self.p)[0]['id']))
+  finally:w.dirty=False;w.close()

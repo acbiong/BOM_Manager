@@ -106,7 +106,7 @@ class MaterialHistoryTests(unittest.TestCase):
   self.assertEqual(self.other.bom(self.t)[0]['material_id'],mapping[self.p])
   self.assertEqual(self.old.bom(self.r)[0]['material_id'],self.p)
   self.assertEqual(self.old.material_snapshot(self.c)['name'],'C')
- def test_alternate_add_exempt_delete_requires_code(self):
+ def test_alternate_add_and_delete_exempt_parent_code(self):
   rows=self.rows();rows[-1]['alternate_material_ids']=[self.a]
   self.assertFalse(revision_conflicts(self.new,self.r,rows))
   h.save(self.new,self.r,rows,{},'fork')
@@ -115,8 +115,10 @@ class MaterialHistoryTests(unittest.TestCase):
   self.assertEqual(h.versions(self.s,self.c)[0]['history_version'],100)
   self.assertFalse(self.other.alternates(self.other.bom(self.t)[-1]['id']))
   rows=self.rows();rows[-1]['alternate_material_ids']=[]
-  self.assertEqual(revision_conflicts(self.new,self.r,rows)[0]['material_id'],self.p)
-  with self.assertRaises(ParentRevisionRequired):h.save(self.new,self.r,rows,{},'fork')
+  self.assertFalse(revision_conflicts(self.new,self.r,rows))
+  h.save(self.new,self.r,rows,{},'fork')
+  self.assertEqual(self.new.bom(self.r)[0]['material_id'],self.p)
+  self.assertFalse(self.new.alternates(self.new.bom(self.p)[0]['id']))
  def test_locked_target_rolls_back_and_fork_is_allowed(self):
   self.s.set_sku_locked(self.tid,True)
   rows=self.rows();rows[-1]['alternate_material_ids']=[self.a]
