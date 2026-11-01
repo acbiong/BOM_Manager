@@ -910,16 +910,16 @@
     ]
   },
   "action_material_history_choose": {
-    "window": "删除替代料 — 物料历史版本",
+    "window": "保存子BOM变更 — 物料历史版本",
     "target": [
       9,
-      81,
-      832,
-      346
+      73,
+      1082,
+      376
     ],
     "size": [
-      850,
-      480
+      1100,
+      720
     ]
   },
   "action_material_history_view": {
@@ -1511,26 +1511,26 @@
     "window": "",
     "target": [
       2,
-      304,
+      262,
       116,
       25
     ],
     "size": [
       120,
-      371
+      329
     ]
   },
   "action_move_down": {
     "window": "",
     "target": [
       2,
-      325,
+      283,
       116,
       25
     ],
     "size": [
       120,
-      371
+      329
     ]
   },
   "action_color_menu": {
@@ -1543,7 +1543,7 @@
     ],
     "size": [
       120,
-      371
+      329
     ]
   },
   "action_color_default": {
@@ -1738,7 +1738,7 @@
     ],
     "size": [
       120,
-      348
+      306
     ]
   },
   "action_bom_import_file": {

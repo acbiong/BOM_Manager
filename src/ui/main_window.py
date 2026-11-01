@@ -2064,16 +2064,20 @@ class BomWindow(QMainWindow):
    for j in range(item.childCount()):walk(item.child(j),data['material_id'])
   for j in range(self.root_item.childCount()):walk(self.root_item.child(j),self.root)
   return rows
- def choose_material_history(self,mid,title,impact_mid=None,rows=None):
+ def choose_material_history(self,mid,title,impact_mid=None,rows=None,preview=None):
   from services import history_selection
   from services.history_state import pending,matching_skus
+  if rows is not None and impact_mid is None:
+   from services.pending_history_diff import compare
+   if preview is None:preview=compare(self.svc,mid,rows,self._material_edits)
+   if not preview['changes']:return history_selection.select(self.svc,mid)
   refs=history_selection.references(self.svc,mid)
   comparison=pending(self.svc,mid,rows,self._material_edits) if rows is not None and impact_mid is not None else None
   matching=matching_skus(self.svc,mid,comparison,refs)
   if not any(r['id'] not in matching for r in refs):
    return history_selection.Selection(mid,frozenset(),history_selection.reference_token(refs),impact_mid,comparison,matching)
   from ui.material_history import MaterialHistoryChoiceDialog
-  dialog=MaterialHistoryChoiceDialog(self.svc,mid,title,self,impact_mid,comparison=comparison,scope=(refs,matching))
+  dialog=MaterialHistoryChoiceDialog(self.svc,mid,title,self,impact_mid,comparison=comparison,scope=(refs,matching),preview=preview)
   if dialog.exec_()!=QDialog.Accepted:return None
   return dialog.mode()
  def draft_material(self,mid):
@@ -2136,9 +2140,22 @@ class BomWindow(QMainWindow):
   def payload(values):return [(r['material_id'],float(r['quantity']),r.get('unit'),r.get('position') or '',r.get('remark') or '',r.get('alternate_material_ids',[])) for r in values]
   changed={mid for mid in desired if payload(old.get(mid,[]))!=payload(desired[mid])}
   from services import history_selection
+  from services.pending_history_diff import compare
+  from services.history_state import Reader,equivalent
+  previews={}
+  def has_changes(mid):
+   if mid not in previews:previews[mid]=compare(self.svc,mid,rows,self._material_edits)
+   return bool(previews[mid]['changes'])
   for key,choice in list(self._history_choices.items()):
+   if isinstance(choice,history_selection.Selection):
+    if choice.impact_mid is None:unchanged=not has_changes(choice.material_id)
+    else:
+     reader=Reader(self.svc)
+     unchanged=equivalent(reader.state(self.svc,choice.material_id),reader.state(self.svc,choice.material_id,rows,self._material_edits))
+    if unchanged:
+     del self._history_choices[key];continue
    if isinstance(choice,history_selection.Selection) and not history_selection.current(self.svc,choice,rows,self._material_edits):
-    refreshed=self.choose_material_history(choice.material_id,'变更范围已变化，请重新确认',choice.impact_mid,rows=rows if choice.comparison is not None else None)
+    refreshed=self.choose_material_history(choice.material_id,'变更范围已变化，请重新确认',choice.impact_mid,rows=rows)
     if refreshed is None:return None
     self._history_choices[key]=refreshed
   alternate_subjects={c.material_id for c in history_selection.selections(self._history_choices) if c.impact_mid is not None}
@@ -2152,8 +2169,8 @@ class BomWindow(QMainWindow):
    return True
   needed={mid for mid in changed if not covered(mid)}|set(self._material_edits)
   for mid in sorted(needed):
-   if mid not in self._history_choices:
-    choice=self.choose_material_history(mid,'保存子BOM变更')
+   if mid not in self._history_choices and has_changes(mid):
+    choice=self.choose_material_history(mid,'保存子BOM变更',rows=rows,preview=previews[mid])
     if choice is None:return None
     self._history_choices[mid]=choice
   if not self._history_choices:

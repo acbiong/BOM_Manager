@@ -147,6 +147,17 @@ def run_smoke_test(report_path):
                 assert QTest.qWaitForWindowExposed(choice,3000)
             assert choice.grab().save(str(Path(report_path).with_suffix('.history_filter.png')))
             choice.close();ui_checks.append('alternate_removal_excludes_identical_boms')
+            from services.pending_history_diff import compare as pending_diff
+            preview=pending_diff(other_svc,ap,desired)
+            assert preview['changes'] and preview['changes'][0]['field']=='替代料'
+            choice=MaterialHistoryChoiceDialog(other_svc,ap,'保存子BOM变更',preview=preview)
+            windows.append(choice);choice.show();app.processEvents()
+            assert choice.diff_table.rowCount()==1
+            assert choice.diff_table.item(0,0).text()=='删除'
+            assert 'ALTBACKUP' in choice.diff_table.item(0,3).text()
+            assert not pending_diff(asvc,ap,[dict(r,alternate_material_ids=[],replace_children=True) for r in asvc.bom(ar)])['changes']
+            assert choice.grab().save(str(Path(report_path).with_suffix('.pending_history.png')))
+            choice.close();ui_checks.append('pending_subbom_history_diff_and_noop')
             only_alt=svc.create_material(dict(base_code='ALTONLYROOT',version='100',name='仅替代料引用',unit='pcs'))
             only_id=svc.create_sku(only_alt);only_svc=svc.for_sku(only_id)
             only_svc.save_bom(only_alt,[dict(material_id=aa,quantity=1,unit='pcs',alternate_material_ids=[ap])])

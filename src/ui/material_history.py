@@ -13,7 +13,7 @@ HISTORY_DIFF_ROLE=Qt.UserRole+2
 
 
 class MaterialHistoryChoiceDialog(QDialog):
-    def __init__(self, service, mid, title, parent=None,impact_mid=None,comparison=None,scope=None):
+    def __init__(self, service, mid, title, parent=None,impact_mid=None,comparison=None,scope=None,preview=None):
         super().__init__(parent); self.setWindowTitle(title+' — 物料历史版本'); self.resize(850,480)
         layout=QVBoxLayout(self); material=service.material_snapshot(mid)
         label=QLabel(material['base_code']+material['version']+' '+material['name']+
@@ -27,6 +27,24 @@ class MaterialHistoryChoiceDialog(QDialog):
         displayed=[r for r in all_refs if r['id'] not in self.matching_sku_ids]
         self.reference_token=history_selection.reference_token(all_refs)
         if comparison is not None:label.setText(label.text()+'\n已排除物料及替代料内容与本次待保存状态一致的BOM，仅提示仍有差异的BOM。')
+        if preview is not None:
+            self.resize(1100,720)
+            version=preview['version']
+            summary=QLabel(f'待保存子BOM 对比 当前BOM绑定的原物料历史版本 {version if version is not None else "（未建立）"}：共 {len(preview["changes"])} 项差异。\n仅历史编号或排列顺序不同不算内容变化；下表包含子层级及替代料的实际变化。')
+            summary.setWordWrap(True);layout.addWidget(summary)
+            self.diff_table=QTableWidget(len(preview['changes']),5)
+            self.diff_table.setObjectName('pending_history_differences')
+            self.diff_table.setHorizontalHeaderLabels(['变更类型','子BOM路径','变更字段','原历史版本','准备保存'])
+            self.diff_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.diff_table.setWordWrap(True)
+            for row,change in enumerate(preview['changes']):
+                color={'新增':ADDED,'删除':DELETED,'修改':MODIFIED}[change['kind']]
+                for col,key in enumerate(('kind','path','field','before','after')):
+                    cell=QTableWidgetItem(change[key] or '（空）');cell.setToolTip(cell.text())
+                    cell.setForeground(QBrush(QColor(color)))
+                    font=cell.font();font.setBold(col in (2,3,4));cell.setFont(font)
+                    self.diff_table.setItem(row,col,cell)
+            for col,width in enumerate((75,290,95,280,280)):self.diff_table.setColumnWidth(col,width)
+            self.diff_table.resizeRowsToContents();layout.addWidget(self.diff_table,2)
         table=QTableWidget(len(displayed),5);self.table=table
         table.setHorizontalHeaderLabels(['一同变更','SKU编码','SKU名称','SKU历史版本','物料历史版本']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
         for row,sku in enumerate(displayed):

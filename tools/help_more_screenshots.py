@@ -12,7 +12,6 @@ def generate(e):
         MaterialSelectionDialog,MaterialHeaderMappingDialog)
     from ui.interactive_windows import QFileDialog,QMessageBox,QDialog,QColorDialog,QInputDialog
     from ui.replacement_selection import ReplacementSelectionDialog
-    from ui.material_clipboard import copy_material
     from ui.bom_colors import ColorMenu
     def accept_button(w):
         buttons=w.findChild(QDialogButtonBox)
@@ -97,7 +96,10 @@ def generate(e):
     table=bom.alt_table;row=table.rowCount()-1;shown(bom);bom.info_scroll.ensureWidgetVisible(table);QApplication.processEvents();snap('alternate_select',bom,rect=table_rect(bom,table,row))
     menu_shot(lambda:bom.alternate_menu(table.visualItemRect(table.item(row,0)).center()),[('切换成主物料','alternate_promote')])
     # A library item not already under the destination provides an allowed paste.
-    copy_material(svc,alt['id']);tree_menu(node,[('粘贴为同级物料','clipboard_peer'),('粘贴为子级物料','clipboard_child')])
+    # Capture the real paste actions with a project-copy material, without
+    # depending on (or replacing) the desktop user's shared OS clipboard.
+    with patch('ui.main_window.clipboard_entries',return_value=[(bom.svc.material_snapshot(alt['id']),None)]):
+        tree_menu(node,[('粘贴为同级物料','clipboard_peer'),('粘贴为子级物料','clipboard_child')])
     siblings=[bom.root_item.child(i) for i in range(bom.root_item.childCount())]
     up=next(n for n in siblings if bom.can_move_item(n,-1));down=next(n for n in siblings if bom.can_move_item(n,1))
     tree_menu(up,[('物料上移','move_up')]);tree_menu(down,[('物料下移','move_down')])
