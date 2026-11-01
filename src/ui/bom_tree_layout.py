@@ -3,25 +3,31 @@ import json
 import math
 from functools import lru_cache
 from PyQt5 import sip
-from PyQt5.QtCore import QObject, QEvent, QSettings, QSize, QTimer, Qt
-from PyQt5.QtGui import QFont, QFontMetrics, QPalette, QTextDocument, QTextOption
+from PyQt5.QtCore import QObject, QEvent, QPointF, QSettings, QSize, QTimer, Qt
+from PyQt5.QtGui import QFont, QFontMetrics, QPalette, QTextLayout, QTextOption
 from PyQt5.QtWidgets import QHeaderView, QStyledItemDelegate, QStyleOptionViewItem, QStyle
 from infrastructure.operation_progress import silent_progress
 
 
-def text_document(text,font,width,alignment):
-    doc=QTextDocument();doc.setDocumentMargin(0);doc.setDefaultFont(font)
+def text_layout(text,font,width,alignment):
+    layout=QTextLayout(text.replace('\n','\u2028'),font)
     option=QTextOption();option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
-    option.setAlignment(Qt.Alignment(alignment));doc.setDefaultTextOption(option)
-    doc.setPlainText(text);doc.setTextWidth(max(1,width))
-    return doc
+    option.setAlignment(Qt.Alignment(alignment));layout.setTextOption(option)
+    height=0;count=0;layout.beginLayout()
+    while True:
+        line=layout.createLine()
+        if not line.isValid():break
+        line.setLineWidth(max(1,width));line.setPosition(QPointF(0,height))
+        height+=line.height();count+=1
+    layout.endLayout()
+    return layout,math.ceil(height),count
 
 
 @lru_cache(maxsize=4096)
 def text_size(text,font_key,width,alignment):
     font=QFont();font.fromString(font_key)
-    doc=text_document(text,font,width,alignment);height=math.ceil(doc.size().height())
-    return height,doc.blockCount()>1 or doc.firstBlock().layout().lineCount()>1
+    _,height,count=text_layout(text,font,width,alignment)
+    return height,count>1
 
 
 class BomTreeDelegate(QStyledItemDelegate):
@@ -40,16 +46,13 @@ class BomTreeDelegate(QStyledItemDelegate):
 
     def paint(self,painter,option,index):
         opt=QStyleOptionViewItem(option);self.initStyleOption(opt,index)
-        doc=text_document(opt.text,opt.font,max(1,opt.rect.width()-8),int(opt.displayAlignment & Qt.AlignHorizontal_Mask))
-        doc.size()
-        if doc.blockCount()==1 and doc.firstBlock().layout().lineCount()<=1:
+        layout,height,count=text_layout(opt.text,opt.font,max(1,opt.rect.width()-8),int(opt.displayAlignment & Qt.AlignHorizontal_Mask))
+        if count<=1:
             super().paint(painter,option,index);return
         opt.text='';self.parent().style().drawControl(QStyle.CE_ItemViewItem,opt,painter,self.parent())
         painter.save();painter.setClipRect(opt.rect)
-        painter.translate(opt.rect.left()+4,opt.rect.top()+max(1,(opt.rect.height()-doc.size().height())/2))
-        context=doc.documentLayout().PaintContext();context.palette=opt.palette
-        if opt.state & QStyle.State_Selected:context.palette.setColor(QPalette.Text,opt.palette.color(QPalette.HighlightedText))
-        doc.documentLayout().draw(painter,context);painter.restore()
+        painter.setPen(opt.palette.color(QPalette.HighlightedText if opt.state & QStyle.State_Selected else QPalette.Text))
+        layout.draw(painter,QPointF(opt.rect.left()+4,opt.rect.top()+max(1,(opt.rect.height()-height)/2)));painter.restore()
 
 
 class BomTreeColumns(QObject):
@@ -63,7 +66,7 @@ class BomTreeColumns(QObject):
             self.manual={int(k):v for k,v in saved.items() if str(k) in ('0','1','2','3','4') and type(v) is int and 20<=v<=10000}
         except (ValueError,TypeError,AttributeError):self.manual={}
         self.revision=0;self.measured=None;self.widths={};self.layout_signature=None
-        self.applying=False;self.dragging=False;self.changed=False
+        self.applying=False;self.dragging=False;self.changed=False;self.closed=False
         self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.timeout.connect(self.fit)
         self.header.setStretchLastSection(False);self.header.setSectionResizeMode(QHeaderView.Interactive)
         self.header.viewport().installEventFilter(self);tree.viewport().installEventFilter(self);tree.installEventFilter(self)
@@ -76,7 +79,15 @@ class BomTreeColumns(QObject):
         tree.setItemDelegate(BomTreeDelegate(tree))
 
     def schedule(self,*args):
-        if not self.timer.isActive():self.timer.start(0)
+        if not self.closed and not self.timer.isActive():self.timer.start(0)
+
+    def shutdown(self):
+        """An accepted close must cancel queued work before native destruction."""
+        if self.closed:return
+        self.closed=True;self.timer.stop()
+        self.tree.removeEventFilter(self);self.tree.viewport().removeEventFilter(self)
+        if not sip.isdeleted(self.header):self.header.viewport().removeEventFilter(self)
+        if self.changed:self.persist()
 
     def invalidate(self,*args):self.revision+=1;self.schedule()
 
@@ -86,6 +97,8 @@ class BomTreeColumns(QObject):
     def eventFilter(self,obj,event):
         if sip.isdeleted(self.header):return False
         kind=event.type()
+        if obj is self.tree and kind==QEvent.Close:
+            self.shutdown();return False
         if obj is self.header.viewport():
             if kind==QEvent.MouseButtonPress and event.button()==Qt.LeftButton:self.dragging=True
             elif kind==QEvent.MouseButtonRelease:
@@ -111,6 +124,7 @@ class BomTreeColumns(QObject):
     @silent_progress()
     def fit(self,apply=True):
         self.timer.stop();tree=self.tree;header=self.header
+        if self.closed:return
         if getattr(tree.window(),'_rendering_tree',False) or header.count()!=5:return
         tree.ensurePolished()
         signature=(self.revision,tree.font().toString(),header.font().toString(),tuple(sorted(self.manual)))

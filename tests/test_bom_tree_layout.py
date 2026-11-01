@@ -1,4 +1,4 @@
-import os,sys,tempfile,unittest,json
+import os,sys,tempfile,unittest,json,subprocess
 os.environ['QT_QPA_PLATFORM']='offscreen'
 from pathlib import Path
 from unittest.mock import patch
@@ -102,3 +102,35 @@ class BomTreeLayoutTests(unittest.TestCase):
   finally:
    for w in self.widgets:w.dirty=False;w.close()
    self.app.sendPostedEvents(None,QEvent.DeferredDelete);self.widgets=[];db.close()
+ def test_standalone_theme_initialization_and_close_lifecycle(self):
+  code='''
+import sys,tempfile
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0,'src')
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QEvent
+from database.database import Database
+from services.services import Services
+from ui.main_window import BomWindow,MainWindow
+app=QApplication([]);calls=[];original=app.setStyle
+def style(*args):calls.append(args);return original(*args)
+with tempfile.TemporaryDirectory() as tmp,patch.object(app,'setStyle',side_effect=style):
+ db=Database(str(Path(tmp)/'db'));s=Services(db)
+ root=s.create_material(dict(base_code='R',version='100',name='换行物料名称'*30,unit='pcs'));s.create_sku(root)
+ try:
+  for _ in range(4):
+   w=BomWindow(s,root);w.show();app.processEvents()
+   assert app.property('bom_fusion_initialized') and len(calls)==1
+   layout=w.tree._bom_columns;layout.invalidate();assert layout.timer.isActive()
+   w.close();assert layout.closed and not layout.timer.isActive()
+   # Deliberately leave deferred destruction pending while opening the main window.
+   main=MainWindow(s);main.toggle_theme();main.toggle_theme()
+   assert len(calls)==1
+   main.close();main.deleteLater();app.sendPostedEvents(None,QEvent.DeferredDelete)
+ finally:db.close()
+from tools.run_test_module import release_qt
+release_qt()
+'''
+  result=subprocess.run([sys.executable,'-X','faulthandler','-c',code],cwd=Path(__file__).parents[1],capture_output=True,text=True,timeout=60)
+  self.assertEqual(result.returncode,0,result.stdout+result.stderr)
