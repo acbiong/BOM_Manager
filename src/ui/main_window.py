@@ -979,6 +979,8 @@ class BomWindow(QMainWindow):
  def __init__(self,svc,root,parent=None):
   super().__init__(parent); self.setAttribute(Qt.WA_DeleteOnClose); self.svc=svc; self.root=root; self._material_edits={}; self._history_choices={}; self._history_parent_versions={}; self._history_decision_tokens={}; self.current_item=None; self._deleted_relations=set(); self._alternate_edits={}; self._external_paths=set(); self._draft_baselines={}; self._loading_fields=False; self._saving=False; self.notice=QLabel(''); self.notice.setStyleSheet('color:red'); WindowRefreshBus.subscribe(self.on_external_change); self.setWindowTitle('BOM管理'); self.resize(1200,700); self.dirty=False
   self.tree=BomTreeWidget(); self.tree.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel); self.tree.itemClicked.connect(self.show_item_info); self.tree.setWordWrap(True); self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self.context_menu); self.tree.setHeaderLabels(['物料编码/名称','数量','单位','位置','备注']); self.tree.setMinimumWidth(420)
+  from ui.bom_tree_layout import BomTreeColumns
+  self.tree._bom_columns=BomTreeColumns(self.tree)
   self.delete_action=QAction('删除物料',self.tree);self.delete_action.setShortcut('Delete');self.delete_action.setShortcutContext(Qt.WidgetWithChildrenShortcut);self.delete_action.setAutoRepeat(False);self.delete_action.triggered.connect(lambda:self.confirm_delete(self.tree.currentItem()));self.tree.addAction(self.delete_action)
   import hashlib
   database_path=str(Path(self.svc.db.path).resolve())

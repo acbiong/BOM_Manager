@@ -95,6 +95,9 @@ class ProportionalColumns(QObject):
 @silent_progress()
 def fit_columns(widget, apply=True):
     widget.window().ensurePolished();widget.ensurePolished()
+    if hasattr(widget,'_bom_columns'):
+        widget._bom_columns.fit(apply=apply)
+        return
     widget.setWordWrap(True)
     header = widget.header() if hasattr(widget, 'header') else widget.horizontalHeader()
     char_width = max(widget.fontMetrics().horizontalAdvance('中'), 1)

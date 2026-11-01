@@ -587,9 +587,9 @@
   "action_bom_open": {
     "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
-      158,
+      159,
       51,
-      129,
+      130,
       24
     ],
     "size": [
@@ -601,9 +601,9 @@
     "window": "BC3-0000211100 Mobius智能假肢包装成品/BR3B/深空灰/CE 历史版本100",
     "target": [
       48,
-      73,
+      92,
       576,
-      21
+      40
     ],
     "size": [
       1250,
@@ -821,9 +821,9 @@
   "action_sku_context": {
     "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
-      158,
+      159,
       51,
-      129,
+      130,
       24
     ],
     "size": [
@@ -873,9 +873,9 @@
   "action_sku_ecn_cell": {
     "window": "Mobius FDA 智能仿生腿 BOM管理系统",
     "target": [
-      774,
+      780,
       114,
-      162,
+      155,
       24
     ],
     "size": [
