@@ -25,6 +25,7 @@ from ui.import_paths import bom_import_directory, remember_bom_import
 from ui.replacement_selection import ReplacementSelectionDialog
 from ui.bom_view_state import preserve_bom_view
 from ui.bom_undo import BomUndo,undoable
+from ui.bom_change_style import level_background,change_foreground,MOVED,MOVED_TEXT
 from ui.material_enter import FirstMaterialOnEnter
 
 class WrappingTextEdit(QPlainTextEdit):
@@ -1725,12 +1726,11 @@ class BomWindow(QMainWindow):
    # Five subtle gray overlays. In light mode black overlays darken the
    # white base; in dark mode white overlays lighten the dark base by the
    # same amounts, so perceived level separation remains consistent.
-   alpha=(24,18,12,6,0)[min(len(path),4)]
    dark_theme=bool(QApplication.instance().property('bom_dark_theme'))
-   level_tint=QColor(255,255,255,alpha) if dark_theme else QColor(0,0,0,alpha)
+   level_tint=level_background(len(path),dark_theme)
    row_background=QColor(custom) if custom and not (added or deleted or changed or moved or external) else level_tint
-   row_background=QColor('#f8d7e3') if moved else QColor('#4a148c') if external else row_background
-   row_foreground=QColor('red') if deleted else QColor('green') if added else QColor('#9a6700') if changed else None
+   row_background=QColor(MOVED) if moved else QColor('#4a148c') if external else row_background
+   color=change_foreground(added,deleted,bool(changed));row_foreground=QColor(color) if color else None
    # Apply one brush to every column for a continuous full-row tint,
    # including columns whose text is empty.
    for column in range(self.tree.columnCount()):
@@ -1739,7 +1739,7 @@ class BomWindow(QMainWindow):
     font=QFont(self.tree.font()); font.setStrikeOut(bool(deleted)); font.setBold(column in changed and not deleted)
     item.setFont(column,font)
     item.setForeground(column,QBrush(row_foreground) if row_foreground else QBrush(QColor('white')) if external else QBrush())
-    if moved and not row_foreground:item.setForeground(column,QBrush(QColor('#202020')))
+    if moved and not row_foreground:item.setForeground(column,QBrush(QColor(MOVED_TEXT)))
     if not (added or deleted or changed or moved or external):item.setForeground(column,QBrush(QColor(foreground(custom))) if custom else QBrush())
     item.setBackground(column,QBrush(row_background))
    remark=data.get('remark','') if not root else ''

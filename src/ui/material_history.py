@@ -1,10 +1,15 @@
 """Nonmodal material history decisions and immutable subtree inspection."""
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt,QEvent,QTimer
+from PyQt5.QtGui import QColor,QBrush,QFont,QPalette
 from PyQt5.QtWidgets import (QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
     QDialogButtonBox, QPushButton, QTreeWidget, QTreeWidgetItem, QAbstractItemView,QScrollArea,QWidget,QFormLayout,QHBoxLayout,QComboBox,QSplitter,QGroupBox)
 from ui.interactive_windows import QDialog,QMessageBox
 from services import material_history as history
 from domain.quantity import format_quantity
+from html import escape
+from ui.bom_change_style import ADDED,DELETED,MODIFIED,MOVED,MOVED_TEXT,level_background,change_foreground
+
+HISTORY_DIFF_ROLE=Qt.UserRole+2
 
 
 class MaterialHistoryChoiceDialog(QDialog):
@@ -55,14 +60,19 @@ class MaterialHistoryChoiceDialog(QDialog):
 class MaterialHistoryDialog(QDialog):
     FIELDS=[('base_code','基础编码'),('version','物料版本号'),('name','名称'),('description','规格描述'),
             ('unit','单位'),('grade','物料等级'),('manufacturer','制造商'),('mpn','MPN'),('mp_flag','M/P'),
+            ('quantity','用量'),('position','位置'),('remark','备注'),
             ('history_version','物料历史版本'),('created_at','记录时间'),('alternates','替代料')]
 
     def __init__(self,service,mid,version,parent=None):
         super().__init__(parent);self.resize(1150,760);self.service=service;self.material_id=mid
+        self._style_timer=QTimer(self);self._style_timer.setSingleShot(True);self._style_timer.timeout.connect(self.restyle)
         layout=QVBoxLayout(self);bar=QHBoxLayout();bar.addWidget(QLabel('查看物料历史版本：'))
         self.version_combo=QComboBox();self.version_combo.setMinimumWidth(130)
         for row in history.versions(service,mid):self.version_combo.addItem(str(row['history_version']),row['history_version'])
         bar.addWidget(self.version_combo);self.root_label=QLabel();self.root_label.setTextFormat(Qt.PlainText);self.root_label.setWordWrap(True);bar.addWidget(self.root_label,1);layout.addLayout(bar)
+        self.comparison_label=QLabel();self.comparison_label.setWordWrap(True);layout.addWidget(self.comparison_label)
+        legend=QLabel(f'<span style="color:{ADDED}">新增</span>；<span style="color:{DELETED};text-decoration:line-through">删除</span>；<span style="color:{MODIFIED}"><b>修改字段加粗</b></span>；<span style="background-color:{MOVED};color:{MOVED_TEXT}">顺序调整</span>。标注与BOM编辑缓存一致；悬停查看前后值。')
+        legend.setWordWrap(True);layout.addWidget(legend)
         self.info=QWidget();form=QFormLayout(self.info);form.setLabelAlignment(Qt.AlignRight|Qt.AlignVCenter);form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.attribute_labels={};self.attribute_values={}
         for key,title in self.FIELDS:
@@ -78,6 +88,8 @@ class MaterialHistoryDialog(QDialog):
         self.references.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.references.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);reference_layout.addWidget(self.references,1)
         panels=QSplitter();panels.addWidget(info_group);panels.addWidget(self.references_group);panels.setSizes([530,570]);panels.setMinimumHeight(200)
         self.tree=QTreeWidget();self.tree.setHeaderLabels(['物料编码','物料名称','物料历史版本','数量','单位','位置','备注','替代料']);self.tree.setWordWrap(True)
+        from ui.bom_compare import DifferenceDelegate
+        self.tree.setItemDelegateForColumn(7,DifferenceDelegate(self.tree))
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         vertical=QSplitter(Qt.Vertical);vertical.addWidget(panels);vertical.addWidget(self.tree);vertical.setSizes([340,340]);layout.addWidget(vertical,1)
         self.tree.currentItemChanged.connect(self.show_info)
@@ -89,42 +101,121 @@ class MaterialHistoryDialog(QDialog):
 
     def load_version(self,version):
         if version is None:return
-        service=self.service;mid=self.material_id;cache={}
-        def read(material_id,revision):
-            key=(material_id,revision)
-            if key not in cache:cache[key]=history.read(service,material_id,revision)
-            return cache[key]
-        record=read(mid,version);attrs=record['attributes']
+        from ui.material_history_diff import compare
+        from ui.bom_compare import RICH_TEXT_ROLE
+        diff,self.previous_version=compare(self.service,self.material_id,version)
+        record=diff['record'];attrs=record['attributes']
         label=attrs['base_code']+attrs['version']+' '+attrs['name']
         self.root_label.setText(label);self.setWindowTitle(label+' 物料历史版本'+str(version)+'（只读）')
+        self.comparison_label.setText(f'历史版本 {version} 对比上一现存历史版本 {self.previous_version}；删除行仅用于对照。' if self.previous_version is not None else f'历史版本 {version} 为首个现存版本，无上一版本可比较。')
         self.tree.blockSignals(True)
         try:
             self.tree.clear()
-            def append(parent,material_id,revision,edge=None,ancestors=frozenset()):
-                key=(material_id,revision)
-                if key in ancestors:raise ValueError('物料历史数据存在循环引用')
-                snapshot=read(material_id,revision);data=snapshot['attributes'];edge=edge or {};alternatives=[]
-                for alt in edge.get('alternates',[]):
-                    a=read(alt['material_id'],alt['history_version'])['attributes'];alternatives.append(a['base_code']+a['version']+' '+a['name'])
-                item=QTreeWidgetItem(parent,[data['base_code']+data['version'],data['name'],str(revision),format_quantity(edge.get('quantity',1)),data['unit'],edge.get('position',''),edge.get('remark',''),'\n'.join(alternatives)])
-                item.setData(0,Qt.UserRole,snapshot)
-                for child in snapshot['children']:append(item,child['material_id'],child['history_version'],child,ancestors|{key})
+            def append(parent,node):
+                item=QTreeWidgetItem(parent,self.display_values(node['record'],node['edge'])+[self.alternative_text(node)])
+                item.setData(0,Qt.UserRole,node['record']);item.setData(0,HISTORY_DIFF_ROLE,{k:v for k,v in node.items() if k!='children'})
+                item.setData(7,RICH_TEXT_ROLE,self.alternative_html(node))
+                if node['previous']:
+                    old=self.display_values(node['previous'],node['old_edge'])
+                    for column in node['columns']:
+                        if column<7:item.setToolTip(column,f'上一版本：{old[column] or "（空）"}\n当前版本：{item.text(column) or "（空）"}')
+                        else:item.setToolTip(column,'上一版本：'+(self.previous_alternative_text(node) or '（空）')+'\n当前版本：'+(self.alternative_text(node) or '（空）'))
+                    if node['fields']:item.setToolTip(0,item.toolTip(0)+'\n修改属性：'+ '、'.join(title for key,title in self.FIELDS if key in node['fields']))
+                if node['deleted']:
+                    for col in range(8):item.setToolTip(col,'已从当前版本移除；显示上一版本内容供对照。')
+                if node['moved']:item.setToolTip(0,item.toolTip(0)+'\n同级排列顺序发生变化。')
+                for child in node['children']:append(item,child)
                 return item
-            root=append(self.tree,mid,version);self.tree.setCurrentItem(root);self.tree.expandToDepth(1)
+            root=append(self.tree,diff);self.tree.setCurrentItem(root);self.tree.expandToDepth(1)
         finally:self.tree.blockSignals(False)
+        self.style_items()
         self.show_info(root)
         from ui.table_layout import fit_columns
         fit_columns(self.tree)
 
+    @staticmethod
+    def display_values(record,edge):
+        a=record['attributes']
+        return [a['base_code']+a['version'],a['name'],str(record['history_version']),format_quantity(edge.get('quantity',1)),edge.get('unit',a['unit']),edge.get('position',''),edge.get('remark','')]
+
+    @staticmethod
+    def alternative_label(alt):
+        a=alt['record']['attributes']
+        return a['base_code']+a['version']+' '+a['name']+' [历史版本'+str(alt['record']['history_version'])+']'
+
+    def alternative_text(self,node):
+        return '\n'.join(self.alternative_label(a)+('（已删除）' if a['state']=='deleted' else '') for a in node['alternatives'])
+
+    def previous_alternative_text(self,node):
+        return '\n'.join(self.alternative_label(dict(record=a)) for a in node['old_alternatives'])
+
+    def alternative_html(self,node):
+        parts=[]
+        for alt in node['alternatives']:
+            text=escape(self.alternative_label(alt)).replace('\n','<br>');state=alt['state']
+            color={'added':ADDED,'deleted':DELETED,'modified':MODIFIED}.get(state)
+            if state=='deleted':text='<s>'+text+'（已删除）</s>'
+            if state=='modified':text='<b>'+text+'</b>'
+            if color:text=f'<span style="color:{color}">'+text+'</span>'
+            parts.append(text)
+        return '<br>'.join(parts)
+
+    def style_items(self):
+        from PyQt5.QtWidgets import QApplication
+        dark=bool(QApplication.instance().property('bom_dark_theme'))
+        def style(item,depth):
+            node=item.data(0,HISTORY_DIFF_ROLE);changed=bool(node['fields'] or node['columns'])
+            color=change_foreground(node['added'],node['deleted'],changed)
+            if node['moved'] and color is None:color=MOVED_TEXT
+            background=QColor(MOVED) if node['moved'] else level_background(depth,dark)
+            for column in range(self.tree.columnCount()):
+                font=QFont(self.tree.font());font.setBold(column in node['columns'] and not node['deleted']);font.setStrikeOut(node['deleted'])
+                item.setFont(column,font);item.setForeground(column,QBrush(QColor(color)) if color else QBrush());item.setBackground(column,QBrush(background))
+            for i in range(item.childCount()):style(item.child(i),depth+1)
+        if self.tree.topLevelItemCount():style(self.tree.topLevelItem(0),0)
+
+    def style_info(self,item):
+        if item is None:return
+        node=item.data(0,HISTORY_DIFF_ROLE);previous=node['previous'];before=previous['attributes'] if previous else {}
+        for key,_ in self.FIELDS:
+            changed=key in node['fields'] or {'quantity':3,'unit':4,'position':5,'remark':6,'alternates':7,'history_version':2}.get(key) in node['columns']
+            color=change_foreground(node['added'],node['deleted'],changed)
+            value=self.attribute_values[key];font=QFont(self.font());font.setBold(changed and not node['deleted']);font.setStrikeOut(node['deleted']);value.setFont(font)
+            palette=QPalette(self.palette())
+            if color:palette.setColor(QPalette.WindowText,QColor(color))
+            value.setPalette(palette);value.setToolTip('')
+            if changed:
+                if key=='alternates':old=self.previous_alternative_text(node)
+                elif key=='quantity':old=format_quantity(node['old_edge'].get(key,1))
+                elif key in ('position','remark','unit'):old=str(node['old_edge'].get(key,before.get(key,'')))
+                else:old=str(previous['history_version'] if key=='history_version' else before.get(key,''))
+                value.setToolTip('上一版本：'+(old or '（空）'))
+
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.PaletteChange,QEvent.StyleChange,QEvent.FontChange) and hasattr(self,'tree'):
+            # Application theme propagation also overwrites child palettes/fonts.
+            # Reapply once after that propagation, without rebuilding or querying.
+            self._style_timer.start(0)
+
+    def restyle(self):
+        self.style_items();self.style_info(self.tree.currentItem())
+
     def show_info(self,item,previous=None):
         if item is None:return
         record=item.data(0,Qt.UserRole);a=record['attributes']
+        node=item.data(0,HISTORY_DIFF_ROLE)
         values=dict(a,history_version=record['history_version'],created_at=record['created_at'].split('.')[0],
-                    alternates=item.text(7))
-        for key,_ in self.FIELDS:self.attribute_values[key].setText(str(values.get(key,'') or '（空）'))
+                    unit=node['edge'].get('unit',a['unit']),
+                    quantity=format_quantity(node['edge'].get('quantity',1)),position=node['edge'].get('position',''),remark=node['edge'].get('remark',''),alternates=item.text(7))
+        for key,_ in self.FIELDS:
+            if key!='alternates':self.attribute_values[key].setText(str(values.get(key,'') or '（空）'))
+        self.attribute_values['alternates'].setTextFormat(Qt.RichText)
+        self.attribute_values['alternates'].setText(self.alternative_html(node) or '（空）')
+        self.style_info(item)
         references=history.sku_references(self.service,record['material_id'],record['history_version'])
         title=a['base_code']+a['version']+' '+a['name']+' / 物料历史版本'+str(record['history_version'])
-        self.reference_label.setText(title+('\n共计'+str(len(references))+'个SKU BOM（包含旧SKU历史版本）' if references else '\n此物料历史版本未被任何SKU BOM引用'))
+        self.reference_label.setText(('已删除的对照节点；以下为其原历史版本的引用。\n' if node['deleted'] else '')+title+('\n共计'+str(len(references))+'个SKU BOM（包含旧SKU历史版本）' if references else '\n此物料历史版本未被任何SKU BOM引用'))
         self.references.setRowCount(len(references))
         for row,sku in enumerate(references):
             for col,text in enumerate((sku['base_code']+sku['version'],sku['name'],sku['mirror_version'])):

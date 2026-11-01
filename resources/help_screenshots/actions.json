@@ -898,12 +898,12 @@
     "source": "isolated-example-project"
   },
   "action_material_history_view": {
-    "window": "BC4-3200016100 Mobius 1.5 SN码印刷贴纸 物料历史版本100（只读）",
+    "window": "R100 控制组件 物料历史版本101（只读）",
     "target": [
       9,
-      380,
+      400,
       1132,
-      332
+      325
     ],
     "size": [
       1150,
@@ -911,12 +911,12 @@
     ]
   },
   "action_material_history_switch": {
-    "window": "BC4-3200016100 Mobius 1.5 SN码印刷贴纸 物料历史版本100（只读）",
+    "window": "R100 控制组件 物料历史版本101（只读）",
     "target": [
-      168,
+      123,
       9,
       134,
-      37
+      26
     ],
     "size": [
       1150,
@@ -924,12 +924,12 @@
     ]
   },
   "action_material_history_references": {
-    "window": "BC4-3200016100 Mobius 1.5 SN码印刷贴纸 物料历史版本100（只读）",
+    "window": "R100 控制组件 物料历史版本101（只读）",
     "target": [
       555,
-      48,
+      75,
       586,
-      332
+      325
     ],
     "size": [
       1150,

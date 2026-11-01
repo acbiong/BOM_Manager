@@ -92,7 +92,18 @@ def run_smoke_test(report_path):
             assert svc.for_sku(sid).material_snapshot(child)['name']==previous
             assert history_scope.material_snapshot(child)['name']=='物料历史冒烟验证'
             from ui.material_history import MaterialHistoryDialog,MaterialHistoryChoiceDialog
-            history_view=MaterialHistoryDialog(svc,child,material_history.versions(svc,child)[0]['history_version']);history_view.show();app.processEvents();history_view.close()
+            history_view=MaterialHistoryDialog(svc,child,material_history.versions(svc,child)[0]['history_version']);windows.append(history_view);history_view.show();app.processEvents()
+            from ui.bom_change_style import MODIFIED
+            from PyQt5.QtGui import QColor
+            history_item=history_view.tree.topLevelItem(0)
+            assert history_view.previous_version is not None and history_item.font(1).bold()
+            assert history_item.foreground(1).color()==QColor(MODIFIED)
+            assert history_view.attribute_values['name'].font().bold()
+            assert previous in history_view.attribute_values['name'].toolTip()
+            assert history_view.grab().save(str(Path(report_path).with_suffix('.history_diff.png')))
+            history_view.version_combo.setCurrentIndex(history_view.version_combo.findData(history_view.previous_version));app.processEvents()
+            assert not history_view.tree.topLevelItem(0).font(1).bold()
+            history_view.close();ui_checks.append('material_history_previous_diff')
             ui_checks.extend(['material_history_migration','material_history_metadata_isolation','material_history_readonly_window'])
             choice=MaterialHistoryChoiceDialog(history_scope,child,'新增替代料',impact_mid=root)
             choice.show();app.processEvents()
