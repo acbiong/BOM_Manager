@@ -179,4 +179,9 @@ GUIDES.insert(next(i for i,g in enumerate(GUIDES) if g['title'].startswith('BOM�
 GUIDES.insert(9,dict(title='SKU：编辑ECN内容',before='每个SKU BOM历史单独保存ECN。历史100默认编号为“/”，其他历史默认空；复制BOM不继承源ECN。旧变更描述首行去外层方括号转为编号，第二行起转为内容，名称默认空。首次升级前自动备份。',steps=[
  step('sku_ecn_cell','双击ECN单元格','历史版本号右边为ECN列。双击打开对应历史的ECN内容窗口；悬停ECN可查看编号、名称及全部内容。历史版本号不再显示旧变更描述，也不再按描述加粗。'),
  step('sku_ecn_form','填写并保存ECN','编号、名称为单行文本，变更内容可多行填写。保存更新对应历史，取消不修改。关闭后保持选中历史和滚动位置，未保存BOM草稿不受影响。锁定BOM可查看，解除锁定后可编辑；其他窗口已改动ECN时需重新打开。')]))
+GUIDES.append(dict(title='设置：字号与BOM导出颜色',before='在SKU窗口菜单栏“关于”左边打开设置。设置属于本机软件配置，不修改项目数据库和未保存BOM。',steps=[
+ step('settings_open','打开设置窗口','点击设置按钮。窗口为非模态，可以切换到物料库和BOM窗口查看。重复点击只激活现有窗口，不清空当前设置草稿。'),
+ step('settings_font','设置软件字体大小','在字号输入框选择8～24 pt。点击保存后，已打开窗口、表格及之后打开的窗口使用新字号；取消不应用。软件再次启动会读取config.ini中的字号。'),
+ step('settings_colors','选择五级导出底色','第1级为导出根节点（层级0），第2～5级对应层级1～4；更深节点沿用第5级。点击色块打开调色板，点击无底色取消该级填充。BOM手动行着色优先，深底色自动配白字。用于SKU、子BOM以及资料库中的BOM表，采购汇总不应用层级色。'),
+ step('settings_save','保存或恢复默认设置','点击保存或按Ctrl+S，将字号及五级颜色保存到config.ini。恢复默认仅重置当前设置窗口，仍需保存才生效；取消丢弃本次设置修改。深色主题增强了表格线、输入框边框及变更文字对比度。')]))
 GUIDE_KEYS=list(dict.fromkeys(s['key'] for g in GUIDES for s in g['steps']))

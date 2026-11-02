@@ -455,6 +455,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   self.sku_menu.addSeparator();self.sku_menu.addAction('导出SKU清单',self.export_sku_list)
   compare_action=bar.addAction('BOM对比');compare_action.triggered.connect(self.compare_boms)
   help_action=bar.addAction('帮助'); help_action.triggered.connect(self.show_help)
+  a=bar.addAction('设置'); a.triggered.connect(self.show_settings)
   a=bar.addAction('关于'); a.triggered.connect(self.show_about)
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
   self.table.horizontalHeader().setSectionsClickable(True);self.table.horizontalHeader().sectionClicked.connect(self.sort_skus)
@@ -483,6 +484,16 @@ class MainWindow(ProjectManagement,QMainWindow):
   from ui.help_dialog import HelpDialog
   if not getattr(self,'_help_dialog',None):self._help_dialog=HelpDialog(self)
   self._help_dialog.show();self._help_dialog.raise_();self._help_dialog.activateWindow()
+ def show_settings(self):
+  from ui.settings_dialog import SettingsDialog
+  from config.config_service import ConfigService
+  if not getattr(self,'_settings_dialog',None):
+   self._settings_dialog=SettingsDialog(self.svc.config_service or ConfigService(),self)
+  elif not self._settings_dialog.isVisible():
+   from config.appearance import load
+   size,colors=load(self._settings_dialog.config)
+   self._settings_dialog.font_size.setValue(size);self._settings_dialog.colors=colors;self._settings_dialog.refresh_colors()
+  self._settings_dialog.show();self._settings_dialog.raise_();self._settings_dialog.activateWindow()
  def show_about(self):
   AboutDialog(self.version,self).exec_()
  def set_theme(self,dark):

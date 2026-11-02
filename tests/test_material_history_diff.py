@@ -52,6 +52,8 @@ class MaterialHistoryDiffTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        from ui.theme import apply_theme
+        apply_theme(False)
         self.temp = tempfile.TemporaryDirectory()
         self.db, self.s, self.ids = example(self.temp.name)
         self.windows = []
@@ -155,9 +157,9 @@ class MaterialHistoryDiffTests(unittest.TestCase):
             with patch.object(history, 'read', side_effect=AssertionError('theme reread')):
                 apply_theme(True); self.app.processEvents()
                 self.assertEqual(w.tree.topLevelItem(0).background(0).color(), level_background(0, True))
-                self.assertEqual(w.tree.topLevelItem(0).child(2).foreground(0).color(), QColor(ADDED))
+                self.assertEqual(w.tree.topLevelItem(0).child(2).foreground(0).color(), QColor('#85e6a2'))
                 self.assertTrue(w.attribute_values['name'].font().bold())
-                self.assertEqual(w.attribute_values['name'].palette().color(QPalette.WindowText), QColor(MODIFIED))
+                self.assertEqual(w.attribute_values['name'].palette().color(QPalette.WindowText), QColor('#ffd477'))
                 apply_theme(False); self.app.processEvents()
                 self.assertEqual(w.tree.topLevelItem(0).background(0).color(), level_background(0, False))
                 self.assertTrue(w.attribute_values['name'].font().bold())

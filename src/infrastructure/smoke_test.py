@@ -202,6 +202,21 @@ def run_smoke_test(report_path):
             ui_checks.append('unsaved_swap_delete_and_save_selection')
             from infrastructure.ecn_smoke import exercise_ecn
             ui_checks.extend(exercise_ecn(svc,report_path))
+            from ui.settings_dialog import SettingsDialog
+            from config.config_service import ConfigService
+            from config.appearance import load as load_appearance
+            from ui.theme import apply_font_size,apply_theme
+            from openpyxl import Workbook
+            cfg=ConfigService(tmp);settings=SettingsDialog(cfg,windows[1]);windows.append(settings)
+            old_size=app.font().pointSizeF();settings.show();app.processEvents()
+            settings.font_size.setValue(12);settings.set_color(0,'#123456');settings.accept()
+            assert load_appearance(cfg)[0]==12 and app.font().pointSize()==12
+            svc.config_service=cfg;book=Workbook();svc.write_bom_sheet(book.active,root)
+            assert book.active['A2'].fill.fgColor.rgb[-6:]=='123456'
+            assert book.active['A2'].font.color.rgb[-6:]=='ffffff';book.close()
+            apply_theme(True);app.processEvents();assert 'gridline-color:#7e899c' in app.styleSheet()
+            apply_theme(False);apply_font_size(old_size)
+            ui_checks.extend(['settings_font_persistence','bom_export_level_color','dark_theme_contrast'])
             report.update(passed=True,version=get_version(),build=load_build_info(),qt_platform=app.platformName(),checks=['project_ownership','sqlite','excel','sku_window','material_window','bom_window','about_window','independent_sku_mirror','external_bom_excel','xls_reader','latest_catalog_sync_confirmation','historical_snapshot_preserved']+ui_checks)
             for window in windows:window.close()
             windows=[];db.close();db=None

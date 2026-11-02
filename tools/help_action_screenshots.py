@@ -191,6 +191,12 @@ def generate(out,main,materials,bom,svc):
     snap('material_history_switch',viewer,viewer.version_combo);snap('material_history_references',viewer,viewer.references_group);viewer.hide()
     from help_more_screenshots import generate as generate_more
     generate_more(locals())
+    bar('settings_open',main,'设置')
+    from ui.settings_dialog import SettingsDialog
+    settings=dialog(SettingsDialog(svc.config_service,main))
+    snap('settings_font',settings,settings.font_size)
+    snap('settings_colors',settings,settings.color_buttons[0].parentWidget())
+    snap('settings_save',settings,settings.buttons.button(QDialogButtonBox.Save));settings.hide()
     for w in dialogs:w.close();w.deleteLater()
     (out/'物料清单.xlsx').unlink(missing_ok=True)
     if set(manifest)!=set(GUIDE_KEYS):raise RuntimeError('教程标注资源不匹配：'+str(set(GUIDE_KEYS)^set(manifest)))

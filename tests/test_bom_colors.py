@@ -74,7 +74,7 @@ class BomColorTests(unittest.TestCase):
   self.assertEqual(parent.background(0).color().name(),'#102030');self.assertEqual(colors(self.w.svc)[(0,self.r)],'#fff3cd')
   path=Path(self.tmp.name)/'out.xlsx';self.s.export_sku(self.sid,path);book=load_workbook(path)
   try:
-   sheet=book['R'];self.assertEqual(sheet['A2'].fill.fgColor.rgb[-6:],'fff3cd');self.assertEqual(sheet['A3'].fill.fgColor.rgb[-6:],'102030');self.assertEqual(sheet['A3'].font.color.rgb[-6:],'ffffff');self.assertEqual(sheet['A4'].fill.patternType,None)
+   sheet=book['R'];self.assertEqual(sheet['A2'].fill.fgColor.rgb[-6:],'fff3cd');self.assertEqual(sheet['A3'].fill.fgColor.rgb[-6:],'102030');self.assertEqual(sheet['A3'].font.color.rgb[-6:],'ffffff');self.assertEqual(sheet['A4'].fill.fgColor.rgb[-6:],'f3f5f8')
   finally:book.close()
   self.w.set_row_color([parent],'');self.save_window();self.assertNotIn((self.r,self.p),colors(self.w.svc))
  def test_change_markers_override_custom_and_refresh_preserves_draft(self):

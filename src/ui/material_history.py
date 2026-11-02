@@ -37,7 +37,7 @@ class MaterialHistoryChoiceDialog(QDialog):
             self.diff_table.setHorizontalHeaderLabels(['变更类型','子BOM路径','变更字段','原历史版本','准备保存'])
             self.diff_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.diff_table.setWordWrap(True)
             for row,change in enumerate(preview['changes']):
-                color={'新增':ADDED,'删除':DELETED,'修改':MODIFIED}[change['kind']]
+                color=change_foreground(change['kind']=='新增',change['kind']=='删除',change['kind']=='修改')
                 for col,key in enumerate(('kind','path','field','before','after')):
                     cell=QTableWidgetItem(change[key] or '（空）');cell.setToolTip(cell.text())
                     cell.setForeground(QBrush(QColor(color)))
@@ -61,6 +61,13 @@ class MaterialHistoryChoiceDialog(QDialog):
         self.note=QLabel();self.note.setWordWrap(True);layout.addWidget(self.note)
         table.itemChanged.connect(self.update_note);self.update_note()
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if event.type()==QEvent.PaletteChange and hasattr(self,'diff_table'):
+            for row in range(self.diff_table.rowCount()):
+                kind=self.diff_table.item(row,0).text()
+                color=change_foreground(kind=='新增',kind=='删除',kind=='修改')
+                for col in range(self.diff_table.columnCount()):self.diff_table.item(row,col).setForeground(QColor(color))
     def select_all(self,checked):
         for row in range(self.table.rowCount()):
             item=self.table.item(row,0)
@@ -99,8 +106,7 @@ class MaterialHistoryDialog(QDialog):
         for row in history.versions(service,mid):self.version_combo.addItem(str(row['history_version']),row['history_version'])
         bar.addWidget(self.version_combo);self.root_label=QLabel();self.root_label.setTextFormat(Qt.PlainText);self.root_label.setWordWrap(True);bar.addWidget(self.root_label,1);layout.addLayout(bar)
         self.comparison_label=QLabel();self.comparison_label.setWordWrap(True);layout.addWidget(self.comparison_label)
-        legend=QLabel(f'<span style="color:{ADDED}">新增</span>；<span style="color:{DELETED};text-decoration:line-through">删除</span>；<span style="color:{MODIFIED}"><b>修改字段加粗</b></span>；<span style="background-color:{MOVED};color:{MOVED_TEXT}">顺序调整</span>。标注与BOM编辑缓存一致；悬停查看前后值。')
-        legend.setWordWrap(True);layout.addWidget(legend)
+        self.legend=QLabel();self.legend.setWordWrap(True);layout.addWidget(self.legend);self.update_legend()
         self.info=QWidget();form=QFormLayout(self.info);form.setLabelAlignment(Qt.AlignRight|Qt.AlignVCenter);form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.attribute_labels={};self.attribute_values={}
         for key,title in self.FIELDS:
@@ -181,7 +187,7 @@ class MaterialHistoryDialog(QDialog):
         parts=[]
         for alt in node['alternatives']:
             text=escape(self.alternative_label(alt)).replace('\n','<br>');state=alt['state']
-            color={'added':ADDED,'deleted':DELETED,'modified':MODIFIED}.get(state)
+            color=change_foreground(state=='added',state=='deleted',state=='modified')
             if state=='deleted':text='<s>'+text+'（已删除）</s>'
             if state=='modified':text='<b>'+text+'</b>'
             if color:text=f'<span style="color:{color}">'+text+'</span>'
@@ -226,8 +232,12 @@ class MaterialHistoryDialog(QDialog):
             # Reapply once after that propagation, without rebuilding or querying.
             self._style_timer.start(0)
 
+    def update_legend(self):
+        added=change_foreground(added=True);deleted=change_foreground(deleted=True);modified=change_foreground(changed=True)
+        self.legend.setText(f'<span style="color:{added}">新增</span>；<span style="color:{deleted};text-decoration:line-through">删除</span>；<span style="color:{modified}"><b>修改字段加粗</b></span>；<span style="background-color:{MOVED};color:{MOVED_TEXT}">顺序调整</span>。标注与BOM编辑缓存一致；悬停查看前后值。')
+
     def restyle(self):
-        self.style_items();self.style_info(self.tree.currentItem())
+        self.update_legend();self.style_items();self.style_info(self.tree.currentItem())
 
     def show_info(self,item,previous=None):
         if item is None:return

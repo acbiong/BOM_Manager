@@ -1064,8 +1064,12 @@ class Services:
   from copy import copy
   row_colors=colors(self)
   palette=[row_colors.get((0,root),'') if root_color is None else root_color]+[row.get('row_color','') for row in rows]
-  for index,color in enumerate(palette,2):
+  from config.appearance import load as load_appearance
+  level_colors=load_appearance(self.config_service)[1]
+  levels=[0]+[int(row['level_no']) for row in rows]
+  for index,(color,level) in enumerate(zip(palette,levels),2):
    checkpoint()
+   color=color or level_colors[min(max(0,level),4)]
    if not color:continue
    for cell in sheet[index]:
     checkpoint()

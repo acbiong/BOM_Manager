@@ -14,4 +14,8 @@ def level_background(depth,dark=False):
 
 
 def change_foreground(added=False,deleted=False,changed=False):
+    from PyQt5.QtWidgets import QApplication
+    app=QApplication.instance()
+    dark=bool(app and app.property('bom_dark_theme'))
+    if dark:return '#ff9494' if deleted else '#85e6a2' if added else '#ffd477' if changed else None
     return DELETED if deleted else ADDED if added else MODIFIED if changed else None

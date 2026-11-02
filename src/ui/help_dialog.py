@@ -15,7 +15,7 @@ class HelpDialog(QDialog):
         self.setMinimumSize(760, 540)
         layout = QVBoxLayout(self)
         intro = QLabel('BOM管理系统帮助中心  ·  随软件内置的静态图文教程，无需打开示例项目')
-        intro.setStyleSheet('font-size:16px;font-weight:bold;padding:6px 2px;')
+        intro.setStyleSheet('font-weight:bold;padding:6px 2px;')
         layout.addWidget(intro)
         tabs = QTabWidget(); layout.addWidget(tabs)
         tabs.addTab(self._text_page(self._shortcuts()), '快捷键')
@@ -29,7 +29,7 @@ class HelpDialog(QDialog):
     def _text_page(self, html):
         area = QScrollArea(); area.setWidgetResizable(True)
         browser = QTextBrowser(); browser.setOpenExternalLinks(True); browser.setHtml(html)
-        browser.setStyleSheet('QTextBrowser{font-size:14px;line-height:1.5;padding:12px;}')
+        browser.setStyleSheet('QTextBrowser{line-height:1.5;padding:12px;}')
         area.setWidget(browser); return area
 
     def _shortcuts(self):
@@ -115,7 +115,7 @@ class HelpDialog(QDialog):
         window.show();window.raise_()
 
     def _section(self,title,text,image):
-        box=QFrame();layout=QVBoxLayout(box);heading=QLabel(title);heading.setStyleSheet('font-size:16px;font-weight:bold;');layout.addWidget(heading)
+        box=QFrame();layout=QVBoxLayout(box);heading=QLabel(title);heading.setStyleSheet('font-weight:bold;');layout.addWidget(heading)
         body=QLabel(text);body.setWordWrap(True);body.setTextInteractionFlags(Qt.TextSelectableByMouse);layout.addWidget(body)
         if image:layout.addWidget(image)
         box.setFrameStyle(QFrame.StyledPanel|QFrame.Sunken);return box

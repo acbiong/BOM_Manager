@@ -137,6 +137,9 @@ def main():
  try:
   base=app_base()
   config_service=ConfigService(base); cfg=config_service.load()
+  from config.appearance import load as load_appearance
+  from ui.theme import apply_font_size
+  apply_font_size(load_appearance(config_service)[0])
   from ui.window_geometry import WindowGeometryMemory
   geometry_memory=WindowGeometryMemory(app,config_service);cfg=config_service.load()
   if getattr(sys,'frozen',False) and os.environ.get('APPIMAGE') and base!=Path(os.environ['APPIMAGE']).resolve().parent:
