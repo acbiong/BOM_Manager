@@ -444,6 +444,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if self._materials is not None and not self._materials.close():event.ignore();return
   if getattr(self,'_create_material_dialog',None):self._create_material_dialog.reject()
   if getattr(self,'_compare_dialog',None):self._compare_dialog.close()
+  if getattr(self,'_settings_dialog',None):self._settings_dialog.reject()
   self._live_project.close();WindowRefreshBus.unsubscribe(self.on_data_change); super().closeEvent(event)
  def build(self):
   bar=self.menuBar(); fm=bar.addMenu('文件'); a=fm.addAction('选择SQLite数据库'); a.triggered.connect(self.select_database); a=fm.addAction('导出资料库'); a.triggered.connect(self.export_database); pm=bar.addMenu('项目'); self.setup_projects(fm,pm); a=pm.addAction('修改项目信息'); a.triggered.connect(self.edit_project); a=bar.addAction('物料库'); a.triggered.connect(self.show_materials); self.sku_menu=bar.addMenu('SKU'); a=self.sku_menu.addAction('新建SKU'); a.setShortcut('Ctrl+N');a.setShortcutContext(Qt.WindowShortcut); a.triggered.connect(self.new_sku);
@@ -490,9 +491,7 @@ class MainWindow(ProjectManagement,QMainWindow):
   if not getattr(self,'_settings_dialog',None):
    self._settings_dialog=SettingsDialog(self.svc.config_service or ConfigService(),self)
   elif not self._settings_dialog.isVisible():
-   from config.appearance import load
-   size,colors=load(self._settings_dialog.config)
-   self._settings_dialog.font_size.setValue(size);self._settings_dialog.colors=colors;self._settings_dialog.refresh_colors()
+   self._settings_dialog.begin_session()
   self._settings_dialog.show();self._settings_dialog.raise_();self._settings_dialog.activateWindow()
  def show_about(self):
   AboutDialog(self.version,self).exec_()

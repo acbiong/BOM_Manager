@@ -24,7 +24,13 @@ with tempfile.TemporaryDirectory() as temp:
  try:
   assert QTest.qWaitForWindowExposed(dialog)
   assert dialog.windowModality()==Qt.NonModal
-  dialog.font_size.setValue(14);dialog.set_color(0,'#1b365d')
+  baseline=app.font().pointSizeF();original=svc.config_service.path.read_bytes()
+  dialog.font_size.setValue(16);app.processEvents()
+  assert bom.tree.font().pointSize()==16
+  assert svc.config_service.path.read_bytes()==original
+  QTest.mouseClick(dialog.buttons.button(QDialogButtonBox.Cancel),Qt.LeftButton)
+  assert app.font().pointSizeF()==baseline
+  main.show_settings();dialog.font_size.setValue(14);dialog.set_color(0,'#1b365d')
   before=list(db.conn.iterdump())
   QTest.mouseClick(dialog.buttons.button(QDialogButtonBox.Save),Qt.LeftButton)
   app.processEvents();assert not dialog.isVisible();assert load(svc.config_service)[0]==14
@@ -36,7 +42,7 @@ with tempfile.TemporaryDirectory() as temp:
     window.show();window.raise_();QTest.qWait(80);assert window.grab().save(str(out/(name+('_dark' if dark else '_light')+'.png')))
    dialog.reject()
   main.set_theme(False)
-  (out/'summary.json').write_text(json.dumps(dict(passed=True,checks=['nonmodal','actual_save','font_applied','config_persisted','database_unchanged','light_dark_windows'],screenshots=8),indent=2))
+  (out/'summary.json').write_text(json.dumps(dict(passed=True,checks=['nonmodal','live_font_preview','cancel_restores_font','preview_does_not_write_config','actual_save','font_applied','config_persisted','database_unchanged','light_dark_windows'],screenshots=8),indent=2))
  finally:
   dialog.close();bom.dirty=False;bom.close();main.close();db.close()
 print('APPEARANCE_NATIVE_OK')

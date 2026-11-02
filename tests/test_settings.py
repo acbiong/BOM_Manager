@@ -1,5 +1,6 @@
 import os,sys,tempfile,unittest
 from pathlib import Path
+from unittest.mock import patch
 os.environ['QT_QPA_PLATFORM']='offscreen'
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QLineEdit
@@ -31,6 +32,54 @@ class SettingsTests(unittest.TestCase):
   cfg=self.config.load();cfg['ui']['font_size']='invalid';cfg['ui']['bom_export_level_colors']='["wrong"]';self.config.save(cfg)
   self.assertEqual(load(self.config),(10,DEFAULT_EXPORT_COLORS))
   with self.assertRaises(ValueError):save(self.config,30,DEFAULT_EXPORT_COLORS)
+ def test_font_live_preview_cancel_close_escape_and_reopen(self):
+  from PyQt5.QtTest import QTest
+  apply_font_size(11);save(self.config,11,DEFAULT_EXPORT_COLORS)
+  original=self.config.path.read_bytes()
+  existing=QLineEdit();dialog=SettingsDialog(self.config)
+  try:
+   for cancel in ('cancel','close','escape'):
+    dialog.show();dialog.activateWindow();self.app.processEvents()
+    self.assertEqual(dialog.font_size.value(),11)
+    dialog.font_size.setValue(17);self.app.processEvents()
+    created=QLineEdit()
+    self.assertEqual(existing.font().pointSize(),17);self.assertEqual(created.font().pointSize(),17)
+    self.assertEqual(self.config.path.read_bytes(),original)
+    if cancel=='cancel':dialog.reject()
+    elif cancel=='close':dialog.close()
+    else:QTest.keyClick(dialog,Qt.Key_Escape)
+    self.assertEqual(self.app.font().pointSize(),11)
+    self.assertEqual(existing.font().pointSize(),11);self.assertEqual(created.font().pointSize(),11)
+    self.assertEqual(self.config.path.read_bytes(),original);created.close()
+   dialog.show();dialog.font_size.setValue(16);dialog.accept()
+   self.assertEqual(load(self.config)[0],16)
+   dialog.show();dialog.font_size.setValue(20);dialog.reject()
+   self.assertEqual(self.app.font().pointSize(),16)
+  finally:dialog.close();existing.close()
+ def test_preview_defaults_and_failed_save_can_cancel(self):
+  apply_font_size(13);save(self.config,13,DEFAULT_EXPORT_COLORS)
+  original=self.config.path.read_bytes();dialog=SettingsDialog(self.config);dialog.show()
+  try:
+   dialog.defaults();self.assertEqual(self.app.font().pointSize(),10)
+   self.assertEqual(self.config.path.read_bytes(),original)
+   with patch('ui.settings_dialog.save',side_effect=OSError('write failed')),patch('ui.settings_dialog.QMessageBox.warning') as warning:
+    dialog.accept();warning.assert_called_once()
+   self.assertTrue(dialog.isVisible());dialog.reject()
+   self.assertEqual(self.app.font().pointSize(),13);self.assertEqual(self.config.path.read_bytes(),original)
+  finally:dialog.close()
+ def test_ctrl_s_confirms_once_with_global_shortcut_handler(self):
+  from ui.save_shortcut import install_save_shortcuts
+  from PyQt5.QtTest import QTest
+  manager=install_save_shortcuts(self.app)
+  dialog=SettingsDialog(self.config);dialog.show();dialog.activateWindow();self.app.processEvents()
+  try:
+   dialog.font_size.setValue(15)
+   with patch('ui.settings_dialog.save',wraps=save) as write:
+    QTest.keyClick(dialog,Qt.Key_S,Qt.ControlModifier);self.app.processEvents();write.assert_called_once()
+   self.assertFalse(dialog.isVisible());self.assertEqual(load(self.config)[0],15)
+  finally:
+   dialog.close();manager.shutdown()
+   if hasattr(self.app,'_bom_save_shortcuts'):del self.app._bom_save_shortcuts
  def test_export_levels_custom_override_and_no_database_changes(self):
   db=Database(str(Path(self.tmp.name)/'db'));s=Services(db,self.config)
   try:

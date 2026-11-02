@@ -209,6 +209,11 @@ def run_smoke_test(report_path):
             from openpyxl import Workbook
             cfg=ConfigService(tmp);settings=SettingsDialog(cfg,windows[1]);windows.append(settings)
             old_size=app.font().pointSizeF();settings.show();app.processEvents()
+            before_config=cfg.path.read_bytes();settings.font_size.setValue(16)
+            assert app.font().pointSize()==16 and cfg.path.read_bytes()==before_config
+            settings.reject();assert app.font().pointSizeF()==old_size
+            settings.show()
+            ui_checks.append('settings_font_live_preview_cancel')
             settings.font_size.setValue(12);settings.set_color(0,'#123456');settings.accept()
             assert load_appearance(cfg)[0]==12 and app.font().pointSize()==12
             svc.config_service=cfg;book=Workbook();svc.write_bom_sheet(book.active,root)
