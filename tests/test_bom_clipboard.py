@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from PyQt5.QtWidgets import QApplication,QMenu,QMessageBox
 from ui.interactive_windows import QMessageBox
-from PyQt5.QtCore import Qt,QPoint
+from PyQt5.QtCore import Qt,QPoint,QSettings
 from database.database import Database
 from services.services import Services
 from ui.main_window import BomWindow,MaterialWindow
@@ -17,7 +17,10 @@ class ClipboardTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.db=Database(str(Path(self.tmp.name)/'db'));self.s=Services(self.db)
+  self.tmp=tempfile.TemporaryDirectory()
+  self.layout_settings=QSettings(str(Path(self.tmp.name)/'columns.ini'),QSettings.IniFormat)
+  self.layout_patch=patch('ui.bom_tree_layout.QSettings',return_value=self.layout_settings);self.layout_patch.start();self.addCleanup(self.layout_patch.stop)
+  self.db=Database(str(Path(self.tmp.name)/'db'));self.s=Services(self.db)
   self.ids={c:self.s.create_material(dict(base_code=c,version='1',name=c,unit='pcs')) for c in ['R','S','A','B','C','D']}
   self.s.save_bom(self.ids['C'],[self.rel('D')]);self.s.save_bom(self.ids['R'],[self.rel('A'),self.rel('B')]);self.s.save_bom(self.ids['S'],[self.rel('C')])
   self.w=BomWindow(self.s,self.ids['R']);self.other=BomWindow(self.s,self.ids['S']);self.app.clipboard().clear()
@@ -149,8 +152,19 @@ class ClipboardTests(unittest.TestCase):
   from PyQt5.QtTest import QTest
   self.w.show();self.w.activateWindow();self.app.processEvents();tree=self.w.tree
   a,b=tree.topLevelItem(0).child(0),tree.topLevelItem(0).child(1)
-  def click(node,mod=Qt.NoModifier):QTest.mouseClick(tree.viewport(),Qt.LeftButton,mod,tree.visualItemRect(node).center())
-  click(a);click(b,Qt.ControlModifier);self.assertEqual(len(tree.selectedItems()),2)
-  QTest.mouseClick(tree.viewport(),Qt.RightButton,Qt.NoModifier,tree.visualItemRect(a).center());self.assertEqual(len(tree.selectedItems()),2)
-  click(a);click(b,Qt.ShiftModifier);self.assertEqual(len(tree.selectedItems()),2)
-  click(self.w.root_item,Qt.ControlModifier);self.assertEqual(tree.selectedItems(),[self.w.root_item])
+  # A remembered wide column makes visualItemRect extend beyond the viewport.
+  # Real users click its visible portion, never the off-screen row midpoint.
+  def point(node):
+   visible=tree.visualItemRect(node).intersected(tree.viewport().rect())
+   self.assertFalse(visible.isEmpty())
+   self.assertIs(tree.itemAt(visible.center()),node)
+   return visible.center()
+  def click(node,mod=Qt.NoModifier):QTest.mouseClick(tree.viewport(),Qt.LeftButton,mod,point(node))
+  for width in (240,1000):
+   with self.subTest(column_width=width):
+    tree._bom_columns.manual[0]=width;tree._bom_columns.fit();self.app.processEvents()
+    self.assertEqual(tree.columnWidth(0),width)
+    click(a);click(b,Qt.ControlModifier);self.assertEqual(len(tree.selectedItems()),2)
+    QTest.mouseClick(tree.viewport(),Qt.RightButton,Qt.NoModifier,point(a));self.assertEqual(len(tree.selectedItems()),2)
+    click(a);click(b,Qt.ShiftModifier);self.assertEqual(len(tree.selectedItems()),2)
+    click(self.w.root_item,Qt.ControlModifier);self.assertEqual(tree.selectedItems(),[self.w.root_item])
