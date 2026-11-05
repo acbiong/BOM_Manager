@@ -24,7 +24,10 @@ try:
    assert QTest.qWaitForWindowExposed(dialog,3000)
    assert dialog.table.rowCount()==4 and dialog.windowModality()==Qt.NonModal
    assert '系统物料库' in dialog.table.item(0,3).text()
-   assert '待导入' in dialog.table.item(0,5).text()
+   assert '导入文件' in dialog.table.item(0,5).text()
+   assert dialog.table.horizontalHeaderItem(4).text()=='系统当前子BOM状态'
+   assert dialog.table.item(0,4).text()=='系统当前数量：2'
+   assert dialog.table.item(0,6).text()=='待导入数量：4'
    buttons=dialog.findChild(QDialogButtonBox)
    assert len(buttons.buttons())==1
    assert dialog.grab().save(str(out/'blocked_comparison.png'))

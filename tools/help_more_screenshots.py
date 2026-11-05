@@ -136,7 +136,7 @@ def generate(e):
     from ui.main_window import BomImportIssuesDialog
     from services.services import BomImportError
     parent=bom.root_item.text(0);child=target['base_code']+target['version']+' '+target['name']
-    comparison=dict(parent=parent,material=child,field='位置',left_path='系统物料库当前子BOM / '+parent,right_path='待导入子BOM / '+parent,left_line=None,right_line=34,left='（空）',right='/')
+    comparison=dict(comparison_kind='system_import',parent=parent,material=child,field='位置',left_path='系统物料库当前子BOM / '+parent,right_path='待导入子BOM / '+parent,left_line=None,right_line=34,left='（空）',right='/')
     mismatch=dialog(BomImportIssuesDialog(BomImportError(['示例：相同编码及版本号的子BOM位置不一致，禁止导入'],[comparison]),bom))
     snap('bom_import_differences',mismatch,mismatch.table);mismatch.hide()
     bom.dirty=False;bom.load()

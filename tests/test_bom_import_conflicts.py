@@ -88,7 +88,7 @@ class BomImportConflictTests(unittest.TestCase):
   self.write([('R','A',1,''),('A','B',9,''),('B','C',3,'')])
   def inspect(dialog):
    shown.append(dialog);self.assertGreater(dialog.table.rowCount(),0)
-   self.assertIn('系统物料库',dialog.table.item(0,3).text());self.assertIn('待导入',dialog.table.item(0,5).text())
+   self.assertIn('系统物料库',dialog.table.item(0,3).text());self.assertIn('导入文件',dialog.table.item(0,5).text())
    return QDialog.Rejected
   with patch.object(MaterialHeaderMappingDialog,'exec_',return_value=QDialog.Accepted),patch.object(BomImportIssuesDialog,'exec_',inspect),patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.path),'')),patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(window,'stage_import') as stage:
    window.import_bom();stage.assert_not_called()

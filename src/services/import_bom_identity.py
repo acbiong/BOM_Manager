@@ -52,7 +52,7 @@ def validate(service,root,rows,source_lines=None):
         for row in old_rows:old_by[row['material_id']].append(row)
         for row in new_rows:new_by[row['material_id']].append(row)
         def add(mid,field,left,right):
-            differences.append(dict(parent=label(parent),material=label(mid),field=field,
+            differences.append(dict(comparison_kind='system_import',parent=label(parent),material=label(mid),field=field,
                 left_path='系统物料库当前子BOM / '+label(parent),right_path='待导入子BOM / '+label(parent),
                 left_line=None,right_line=source_lines.get((parent,mid)),left=left,right=right,left_note='数据库记录'))
         for mid in sorted(old_by.keys()|new_by.keys()):

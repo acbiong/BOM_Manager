@@ -910,11 +910,28 @@ class BomImportIssuesDialog(QDialog):
    self.setWindowTitle('子BOM不一致：左右对比');self.resize(1200,600)
    tabs=QTabWidget();layout.addWidget(tabs)
    self.table=QTableWidget(len(comparisons),7)
-   self.table.setHorizontalHeaderLabels(['父项物料','子项物料','不一致项','对比来源一／Excel行号','来源一内容','对比来源二／Excel行号','来源二内容'])
+   system_import=all(c.get('comparison_kind')=='system_import' for c in comparisons)
+   parents=list(dict.fromkeys(c['parent'] for c in comparisons))
+   summary.setText(f'发现 {len(parents)} 个物料的子BOM存在差异，共 {len(comparisons)} 项。禁止导入，原有编辑和数据库保持不变。\n'+('左侧为系统已保存的子BOM，右侧为Excel待导入的子BOM。请按父项物料逐项核对。' if system_import else '同一物料在导入文件的不同分支中子BOM不一致，请按分支路径及Excel行号核对。'))
+   self.table.setHorizontalHeaderLabels(['存在差异的父项物料','差异子物料','差异说明',
+    '系统子BOM所在物料' if system_import else '文件分支一：路径／行号',
+    '系统当前子BOM状态' if system_import else '文件分支一的子BOM状态',
+    '导入物料／Excel行号' if system_import else '文件分支二：路径／行号',
+    '待导入子BOM状态' if system_import else '文件分支二的子BOM状态'])
    self.table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setWordWrap(True)
    self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
    for row,comparison in enumerate(comparisons):
     values=[comparison['parent'],comparison['material'],comparison['field'],comparison['left_path']+'\n'+(f"第{comparison['left_line']}行" if comparison['left_line'] is not None else comparison.get('left_note','无对应子项行')),comparison['left'],comparison['right_path']+'\n'+(f"第{comparison['right_line']}行" if comparison['right_line'] is not None else '无对应子项行'),comparison['right']]
+    if comparison.get('comparison_kind')=='system_import':
+     field=comparison['field'];left=comparison['left'];right=comparison['right']
+     values[3]='系统物料库：'+comparison['parent']+'\n已保存的子BOM'
+     values[5]='导入文件：'+comparison['parent']+'\n'+(f"Excel第{comparison['right_line']}行" if comparison['right_line'] is not None else '文件中没有此子物料行')
+     if field=='子物料存在性':
+      values[2]='待导入BOM新增子物料' if left=='不存在' else '待导入BOM缺少子物料'
+      values[4]='系统未包含此子物料' if left=='不存在' else '系统已包含此子物料\n'+left.removeprefix('存在；').replace('；','\n')
+      values[6]='待导入BOM未包含此子物料' if right=='不存在' else '待导入BOM包含此子物料\n'+right.removeprefix('存在；').replace('；','\n')
+     else:
+      values[2]=field+'不同';values[4]='系统当前'+field+'：'+left;values[6]='待导入'+field+'：'+right
     for column,value in enumerate(values):
      item=QTableWidgetItem(str(value));item.setToolTip(str(value));item.setTextAlignment(Qt.AlignLeft|Qt.AlignTop)
      if column in (4,6):
@@ -923,7 +940,7 @@ class BomImportIssuesDialog(QDialog):
    tabs.addTab(self.table,f'差异对比（{len(comparisons)}项）');tabs.addTab(self.details,'全部问题（文字）');fit_columns(self.table,apply=False)
    char_width=self.table.fontMetrics().horizontalAdvance('中')
    columns=self.table._proportional_columns
-   columns.widths={i:max(5*char_width,(self.width()-70)*(15,15,7,21,10,21,10)[i]//99) for i in columns.widths}
+   columns.widths={i:max(5*char_width,(self.width()-70)*(16,15,12,15,14,15,14)[i]//101) for i in columns.widths}
    columns.apply()
   else:layout.addWidget(self.details)
   buttons=QDialogButtonBox(QDialogButtonBox.Close); buttons.rejected.connect(self.reject); layout.addWidget(buttons)

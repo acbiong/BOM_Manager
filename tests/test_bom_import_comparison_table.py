@@ -42,3 +42,23 @@ class ImportComparisonTableTests(unittest.TestCase):
    self.assertEqual([b.text() for b in dialog.findChild(QDialogButtonBox).buttons()],['关闭'])
    dialog.finish('incoming');self.assertEqual(dialog.choice,'stop');self.assertEqual(dialog.result(),0)
   finally:dialog.close()
+
+ def test_system_import_states_identify_parent_and_added_missing_children(self):
+  base=dict(parent='P100 电机组件',material='C100 转子',left_path='P',right_path='P',left_line=None,right_line=12,comparison_kind='system_import')
+  comparisons=[dict(base,field='数量',left='2',right='4'),dict(base,field='子物料存在性',left='不存在',right='存在；数量=1；位置=A'),dict(base,field='子物料存在性',left='存在；数量=2',right='不存在',right_line=None)]
+  dialog=BomImportIssuesDialog(BomImportError(['不一致'],comparisons))
+  try:
+   table=dialog.table
+   self.assertEqual(table.horizontalHeaderItem(4).text(),'系统当前子BOM状态')
+   self.assertEqual(table.horizontalHeaderItem(6).text(),'待导入子BOM状态')
+   self.assertEqual(table.item(0,0).text(),'P100 电机组件')
+   self.assertEqual(table.item(0,4).text(),'系统当前数量：2')
+   self.assertEqual(table.item(0,6).text(),'待导入数量：4')
+   self.assertIn('Excel第12行',table.item(0,5).text())
+   self.assertEqual(table.item(1,2).text(),'待导入BOM新增子物料')
+   self.assertEqual(table.item(1,4).text(),'系统未包含此子物料')
+   self.assertIn('数量=1\n位置=A',table.item(1,6).text())
+   self.assertEqual(table.item(2,2).text(),'待导入BOM缺少子物料')
+   self.assertEqual(table.item(2,6).text(),'待导入BOM未包含此子物料')
+   self.assertIn('文件中没有此子物料行',table.item(2,5).text())
+  finally:dialog.close()
