@@ -910,11 +910,11 @@ class BomImportIssuesDialog(QDialog):
    self.setWindowTitle('子BOM不一致：左右对比');self.resize(1200,600)
    tabs=QTabWidget();layout.addWidget(tabs)
    self.table=QTableWidget(len(comparisons),7)
-   self.table.setHorizontalHeaderLabels(['父项物料','子项物料','不一致项','分支一：路径／Excel行号','分支一内容','分支二：路径／Excel行号','分支二内容'])
+   self.table.setHorizontalHeaderLabels(['父项物料','子项物料','不一致项','对比来源一／Excel行号','来源一内容','对比来源二／Excel行号','来源二内容'])
    self.table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setWordWrap(True)
    self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
    for row,comparison in enumerate(comparisons):
-    values=[comparison['parent'],comparison['material'],comparison['field'],comparison['left_path']+'\n'+(f"第{comparison['left_line']}行" if comparison['left_line'] is not None else '无对应子项行'),comparison['left'],comparison['right_path']+'\n'+(f"第{comparison['right_line']}行" if comparison['right_line'] is not None else '无对应子项行'),comparison['right']]
+    values=[comparison['parent'],comparison['material'],comparison['field'],comparison['left_path']+'\n'+(f"第{comparison['left_line']}行" if comparison['left_line'] is not None else comparison.get('left_note','无对应子项行')),comparison['left'],comparison['right_path']+'\n'+(f"第{comparison['right_line']}行" if comparison['right_line'] is not None else '无对应子项行'),comparison['right']]
     for column,value in enumerate(values):
      item=QTableWidgetItem(str(value));item.setToolTip(str(value));item.setTextAlignment(Qt.AlignLeft|Qt.AlignTop)
      if column in (4,6):
@@ -932,7 +932,7 @@ class BomImportConflictDialog(QDialog):
  def __init__(self,conflicts,parent=None):
   super().__init__(parent);self.setWindowTitle('导入子BOM与系统不一致');self.resize(1100,580);self.choice='stop'
   layout=QVBoxLayout(self)
-  label=QLabel('发现以下子BOM差异。请选择停止导入、保留系统子BOM，或使用新导入子BOM。继续导入仅更新编辑缓存，点击保存后才写入数据库；共享此子BOM的其他SKU也会受到保存的影响。')
+  label=QLabel('相同物料编码及版本号的子BOM不一致，禁止导入。请核对下列差异，修正文件或使用新的物料版本。')
   label.setWordWrap(True);layout.addWidget(label)
   self.table=QTableWidget(len(conflicts),5);self.table.setHorizontalHeaderLabels(['父项物料','子项物料','不一致项','系统子BOM','新导入子BOM'])
   self.table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.table.setWordWrap(True)
@@ -942,11 +942,11 @@ class BomImportConflictDialog(QDialog):
    for column,key in enumerate(('parent','material','difference','system','incoming')):self.table.setItem(row,column,QTableWidgetItem(conflict[key]))
   layout.addWidget(self.table);fit_columns(self.table)
   buttons=QDialogButtonBox()
-  for text,choice in [('停止导入','stop'),('继续导入并以系统子BOM为准','system'),('继续导入并以新导入子BOM为准','incoming')]:
+  for text,choice in [('关闭','stop')]:
    checkpoint()
    button=buttons.addButton(text,QDialogButtonBox.ActionRole);button.setAutoDefault(False);button.clicked.connect(lambda _,value=choice:self.finish(value))
   layout.addWidget(buttons)
- def finish(self,choice):self.choice=choice;self.accept() if choice!='stop' else self.reject()
+ def finish(self,choice):self.choice='stop';self.reject()
 
 def confirm_material_deletion(owner,labels,description):
  if len(labels)==1:
@@ -1986,9 +1986,7 @@ class BomWindow(QMainWindow):
    dialog=MaterialHeaderMappingDialog(p,headers,[h for h in self.svc.BOM_HEADERS if h not in headers],self,sheet_name=sheet,required=self.svc.BOM_HEADERS,config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent))
    if dialog.exec_()!=QDialog.Accepted:raise ValueError('用户取消BOM表头映射，未导入')
    target_root=(selected_item.data(0,Qt.UserRole) or {}).get('material_id') if selected_item is not None else self.root
-   def resolve_conflicts(conflicts):
-    decision=BomImportConflictDialog(conflicts,self);decision.exec_();return decision.choice
-   nodes=self.svc.import_bom(p,target_root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False,conflict_resolver=resolve_conflicts)
+   nodes=self.svc.import_bom(p,target_root,sheet_name=sheet,header_mapping=dialog.mapping(),persist=False)
    self.stage_import(nodes) if target_root==self.root else self.stage_import_subtree(selected_item,nodes)
    QMessageBox.information(self,'导入完成','BOM已导入编辑缓存，请检查后点击“保存”写入数据库。')
   except BomImportError as error:BomImportIssuesDialog(error,self).exec_()

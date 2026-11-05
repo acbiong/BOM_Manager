@@ -33,3 +33,12 @@ class ImportComparisonTableTests(unittest.TestCase):
   finally:
    for w in (dialog,regular):w.close();w.deleteLater()
    self.app.sendPostedEvents(None,QEvent.DeferredDelete)
+
+ def test_legacy_conflict_dialog_has_no_override_actions(self):
+  from ui.main_window import BomImportConflictDialog
+  from PyQt5.QtWidgets import QDialogButtonBox
+  dialog=BomImportConflictDialog([])
+  try:
+   self.assertEqual([b.text() for b in dialog.findChild(QDialogButtonBox).buttons()],['关闭'])
+   dialog.finish('incoming');self.assertEqual(dialog.choice,'stop');self.assertEqual(dialog.result(),0)
+  finally:dialog.close()

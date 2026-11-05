@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parents[1]/'src'))
 from openpyxl import Workbook
 from database.database import Database
-from services.services import Services,MaterialHeaderError
+from services.services import Services,MaterialHeaderError,BomImportError
 from ui.main_window import MaterialHeaderMappingDialog
 from PyQt5.QtWidgets import QApplication
 class BomImportTests(unittest.TestCase):
@@ -69,7 +69,8 @@ class BomImportTests(unittest.TestCase):
    with self.assertRaises(ValueError):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM')
   self.s.save_bom(self.ids['R','1'],[dict(material_id=self.ids['C','1'],quantity=1,unit='pcs')])
   self.write([['ROOT','root','R','1',None,None]])
-  self.assertEqual(self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM'),0);self.assertEqual(self.s.bom(self.ids['R','1']),[])
+  with self.assertRaises(BomImportError):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM')
+  self.assertEqual(len(self.s.bom(self.ids['R','1'])),1)
 
  def test_blank_headers_ignored_and_cannot_be_mapped(self):
   headers=['',*self.s.BOM_HEADERS,'   ',None]
@@ -89,7 +90,6 @@ class BomImportTests(unittest.TestCase):
   from PyQt5.QtCore import Qt
   from ui.main_window import BomWindow,BomTreeWidget,BomImportConflictDialog
   root=self.ids['R','1'];old=self.ids['C','1'];new=self.ids['P','2']
-  self.s.save_bom(root,[dict(material_id=old,quantity=5,unit='pcs')])
   self.write([['ROOT','ROOT','R','1',None,None],['R','1','P','2',2.3,'new']])
   before=[tuple(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items')]
   for save in (False,True):
@@ -99,9 +99,8 @@ class BomImportTests(unittest.TestCase):
      window.import_bom();warning.assert_not_called()
      self.assertTrue(window.dirty);self.assertTrue(window.save_action.isEnabled())
      self.assertEqual([tuple(r) for r in self.db.conn.execute('SELECT * FROM material_bom_items')],before)
-     self.assertEqual(window.root_item.childCount(),2)
+     self.assertEqual(window.root_item.childCount(),1)
      self.assertTrue(window.root_item.child(0).data(0,Qt.UserRole)['_added'])
-     self.assertTrue(window.root_item.child(1).data(0,Qt.UserRole)['_deleted'])
      self.assertIsInstance(window.tree,BomTreeWidget)
      window.show();self.app.processEvents();self.assertFalse(window.tree.grab().isNull())
      if save:
@@ -112,7 +111,7 @@ class BomImportTests(unittest.TestCase):
  def test_preview_rejects_shared_cycles_without_writes(self):
   self.s.save_bom(self.ids['C','1'],[dict(material_id=self.ids['R','1'],quantity=1,unit='pcs')])
   self.write([['R','1','C','1',1,'']])
-  with self.assertRaisesRegex(ValueError,'循环'):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',persist=False)
+  with self.assertRaisesRegex(ValueError,'禁止导入'):self.s.import_bom(self.path,self.ids['R','1'],sheet_name='BOM',persist=False)
   self.assertEqual(self.s.bom(self.ids['R','1']),[])
 
  def test_all_rows_and_multiple_errors_per_row_are_reported(self):
@@ -182,11 +181,11 @@ class BomImportTests(unittest.TestCase):
    window.stage_import(nodes);window.show_item_info(window.root_item.child(0));self.assertEqual(window.alt_table.item(0,0).text(),'C');self.assertEqual(self.s.bom(root),[])
    with patch.object(QMessageBox,'information'):self.assertTrue(window.save())
    relation=self.s.bom(root)[0]['id'];self.assertEqual(self.s.alternates(relation)[0]['material_id'],alt)
-   # 无映射时明确清空当前关系的替代料，保存前数据库仍保持原值。
-   nodes=self.s.import_bom(self.path,root,sheet_name='BOM',persist=False,conflict_resolver=lambda _: 'incoming');window.stage_import(nodes)
-   window.show_item_info(window.root_item.child(0));self.assertEqual(window.alt_table.rowCount(),0);self.assertEqual(len(self.s.alternates(relation)),1)
-   with patch.object(QMessageBox,'information'):self.assertTrue(window.save())
-   self.assertEqual(self.s.alternates(relation),[])
+   # Missing alternate mapping now conflicts with an already defined BOM.
+   from services.services import BomImportError
+   before=window.capture_tree()
+   with self.assertRaises(BomImportError):self.s.import_bom(self.path,root,sheet_name='BOM',persist=False,conflict_resolver=lambda _: 'incoming')
+   self.assertEqual(window.capture_tree(),before);self.assertEqual(len(self.s.alternates(relation)),1)
   finally:window.dirty=False;window.close()
  def test_alternate_errors_accumulate_and_blank_pair_allowed(self):
   from services.services import BomImportError

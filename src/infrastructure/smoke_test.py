@@ -202,6 +202,20 @@ def run_smoke_test(report_path):
             ui_checks.append('unsaved_swap_delete_and_save_selection')
             from infrastructure.ecn_smoke import exercise_ecn
             ui_checks.extend(exercise_ecn(svc,report_path))
+            # A same-identity conflicting file must never enter a fresh SKU draft.
+            from services.services import BomImportError
+            from openpyxl import Workbook
+            check=Workbook();check.active.append(svc.BOM_HEADERS)
+            check.active.append(['SECOND','1','SKU','1',1,''])
+            check.active.append(['SKU','1','子物料','1',9876,''])
+            source_path=Path(tmp)/'conflicting.xlsx';check.save(source_path);check.close()
+            before_import=list(db.conn.iterdump())
+            try:svc.for_sku(second_id).import_bom(source_path,second,persist=False,conflict_resolver=lambda _: 'incoming')
+            except BomImportError as error:
+                assert error.comparisons and '禁止导入' in str(error)
+            else:raise AssertionError('Conflicting same-code BOM import was allowed')
+            assert before_import==list(db.conn.iterdump())
+            ui_checks.append('bom_import_same_identity_conflict_blocked')
             from ui.settings_dialog import SettingsDialog
             from config.config_service import ConfigService
             from config.appearance import load as load_appearance
