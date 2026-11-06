@@ -481,7 +481,9 @@ def attribute_conflicts(service, root, items):
             material = service.material_snapshot(row['material_id'])
             label = material['base_code']+material['version']+' '+material['name']
             if row['material_id'] in edits:
-                change = service.material_detail(material, {**material, **edits[row['material_id']]})
+                # Descriptive corrections do not change a material's code revision.
+                revision_edits={k:v for k,v in edits[row['material_id']].items() if k not in ('name','description')}
+                change = service.material_detail(material, {**material, **revision_edits})
                 if change:reasons.append(change)
             if previous:
                 for key, title in [('quantity','数量'),('unit','单位'),('position','位置'),('remark','备注')]:

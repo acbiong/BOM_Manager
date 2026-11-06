@@ -177,7 +177,7 @@ def run_smoke_test(report_path):
             from ui.parent_revision import ParentRevisionDialog
             from ui.bom_snapshot import draft_snapshot
             draft=BomWindow(asvc,ar);windows.append(draft);draft.show();app.processEvents()
-            edits={ac:{**asvc.material_snapshot(ac),'name':'父级缓存升版验证'}}
+            edits={ac:{**asvc.material_snapshot(ac),'name':'父级缓存升版验证','grade':'A'}}
             before=list(db.conn.iterdump())
             with patch.object(ParentRevisionDialog,'exec_',return_value=ParentRevisionDialog.Accepted),patch.object(ParentRevisionDialog,'versions',return_value={ap:'101'}):
                 assert draft.check_history_rules(edits=edits,mode=history_selection.select(asvc,ac))

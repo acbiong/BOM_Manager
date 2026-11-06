@@ -87,7 +87,7 @@ class MaterialHistoryTests(unittest.TestCase):
   self.assertEqual(before,list(self.db.conn.execute('SELECT * FROM material_histories')))
   h.initialize(self.db);self.assertEqual(before,list(self.db.conn.execute('SELECT * FROM material_histories')))
  def test_metadata_fork_parent_code_rule_and_old_export(self):
-  attrs={**self.new.material_snapshot(self.c),'name':'new child'}
+  attrs={**self.new.material_snapshot(self.c),'name':'new child','grade':'A'}
   with self.assertRaises(ParentRevisionRequired):h.save(self.new,self.r,self.rows(),{self.c:attrs},'fork')
   mapping=h.save(self.new,self.r,self.rows(),{self.c:attrs},'fork',{self.p:'101'})
   self.assertNotEqual(mapping[self.p],self.p)
@@ -100,7 +100,7 @@ class MaterialHistoryTests(unittest.TestCase):
   wb=Workbook();self.old.write_bom_sheet(wb.active,self.r)
   self.assertEqual(wb.active.cell(4,7).value,'C');wb.close()
  def test_sync_latest_only_with_new_parent_code(self):
-  attrs={**self.new.material_snapshot(self.c),'name':'shared new'}
+  attrs={**self.new.material_snapshot(self.c),'name':'shared new','grade':'A'}
   mapping=h.save(self.new,self.r,self.rows(),{self.c:attrs},'sync',{self.p:'101'})
   self.assertEqual(self.other.material_snapshot(self.c)['name'],'shared new')
   self.assertEqual(self.other.bom(self.t)[0]['material_id'],mapping[self.p])
@@ -204,7 +204,7 @@ class MaterialHistoryTests(unittest.TestCase):
    self.assertEqual(self.db.conn.total_changes,before)
   finally:dialog.close()
  def test_parent_metadata_and_child_metadata_keep_new_code(self):
-  edits={mid:{**self.new.material_snapshot(mid),'name':'new '+str(mid)} for mid in (self.p,self.c)}
+  edits={mid:{**self.new.material_snapshot(mid),'name':'new '+str(mid),'grade':'A'} for mid in (self.p,self.c)}
   mapping=h.save(self.new,self.r,self.rows(),edits,'fork',{self.p:'101'})
   self.assertEqual(self.new.material_snapshot(mapping[self.p])['version'],'101')
   self.assertEqual(self.new.material_snapshot(mapping[self.p])['name'],'new '+str(self.p))
@@ -249,10 +249,10 @@ class MaterialHistoryTests(unittest.TestCase):
   logs=list(self.new.db.conn.execute('SELECT * FROM change_logs WHERE id>?',(before,)))
   self.assertEqual(len(logs),1);self.assertIn('新增替代料',logs[0]['detail'])
   edits={self.c:{**self.new.material_snapshot(self.c),'name':'记录详细变化'}}
-  h.save(self.new,self.r,self.rows(),edits,'sync',{self.p:'101'})
+  h.save(self.new,self.r,self.rows(),edits,'sync')
   for service in (self.s,self.new,self.other):
    logs=[dict(r) for r in service.db.conn.execute("SELECT * FROM change_logs WHERE object_type='material' AND object_id=? AND action='update'",(self.c,))]
-   self.assertEqual(len(logs),1);self.assertIn('物料名称：C → 记录详细变化',logs[0]['detail']);self.assertIn('父项：P101 P',logs[0]['detail'])
+   self.assertEqual(len(logs),1);self.assertIn('物料名称：C → 记录详细变化',logs[0]['detail']);self.assertIn('父项：P100 P',logs[0]['detail'])
  def test_viewer_switches_structure_and_exact_history_references(self):
   from ui.material_history import MaterialHistoryDialog
   rows=self.rows();rows[-1]['alternate_material_ids']=[self.a];h.save(self.new,self.r,rows,{},'fork')
@@ -281,7 +281,7 @@ class MaterialHistoryTests(unittest.TestCase):
   finally:viewer.close()
  def test_viewer_switches_metadata_and_shows_unreferenced_state(self):
   from ui.material_history import MaterialHistoryDialog
-  h.save(self.new,self.r,self.rows(),{self.c:{**self.new.material_snapshot(self.c),'name':'new child','description':'long description '*80}},'fork',{self.p:'101'})
+  h.save(self.new,self.r,self.rows(),{self.c:{**self.new.material_snapshot(self.c),'name':'new child','grade':'A','description':'long description '*80}},'fork',{self.p:'101'})
   viewer=MaterialHistoryDialog(self.s,self.c,101)
   try:
    self.assertEqual(viewer.attribute_values['name'].text(),'new child')
@@ -297,4 +297,20 @@ class MaterialHistoryTests(unittest.TestCase):
   finally:viewer.close()
 
 
-if __name__=='__main__':unittest.main()
+
+ def test_name_and_specification_edits_do_not_require_code_revision(self):
+  for mode in ('fork','sync'):
+   attrs={**self.new.material_snapshot(self.c),'name':'名称修正 '+mode,'description':'规格修正 '+mode}
+   self.assertEqual(h.collect_conflicts(self.new,self.r,self.rows(),{self.c:attrs},mode),[])
+   mapping=h.save(self.new,self.r,self.rows(),{self.c:attrs},mode)
+   self.assertFalse(mapping)
+   self.assertEqual(self.new.material_snapshot(self.c)['version'],'100')
+   self.assertEqual(self.new.material_snapshot(self.p)['version'],'100')
+   self.assertEqual(self.new.material_snapshot(self.c)['description'],'规格修正 '+mode)
+  self.assertEqual(self.other.material_snapshot(self.c)['name'],'名称修正 sync')
+  self.assertEqual(self.old.material_snapshot(self.c)['name'],'C')
+ def test_descriptive_edits_do_not_mask_other_revision_triggers(self):
+  attrs={**self.new.material_snapshot(self.c),'name':'新名称','description':'新规格','grade':'A'}
+  self.assertTrue(h.collect_conflicts(self.new,self.r,self.rows(),{self.c:attrs},'fork'))
+  attrs.pop('grade');rows=self.rows();rows[-1]['quantity']=7
+  self.assertTrue(h.collect_conflicts(self.new,self.r,rows,{self.c:attrs},'fork'))

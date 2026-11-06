@@ -19,7 +19,7 @@ class ParentRevisionDraftTests(unittest.TestCase):
   fixture.MaterialHistoryTests.tearDown(self)
  def edit(self,accepted=True):
   node=self.w.root_item.child(0).child(0)
-  data={**self.new.material_snapshot(self.c),'name':'changed child'}
+  data={**self.new.material_snapshot(self.c),'name':'changed child','grade':'A'}
   with patch.object(self.w,'choose_material_history',return_value=hs.select(self.new,self.c)),patch.object(MaterialDialog,'exec_',return_value=QDialog.Accepted),patch.object(MaterialDialog,'data',return_value=data),patch.object(ParentRevisionDialog,'exec_',return_value=QDialog.Accepted if accepted else QDialog.Rejected),patch.object(ParentRevisionDialog,'versions',return_value={self.p:'101'}):
    self.w.edit_tree_material(node)
  def assert_pending(self):

@@ -6,7 +6,7 @@ class ParentRevisionDialog(QDialog):
     def __init__(self,service,conflicts,parent=None):
         super().__init__(parent);self.setWindowTitle('BOM变更检查 — 父物料编码需要升版');self.resize(1000,500)
         self.combos={};layout=QVBoxLayout(self)
-        label=QLabel('请为以下普通父项选择或输入新的物料编码版本号。表格列出具体差异及其他主料引用方。\n启用物料历史记录后，物料属性、数量、位置、备注均检查父项编码升版；单纯新增、删除替代料、主替互换及排序不要求升版。\n确认后新版本立即显示在BOM缓存中，保存才写入数据库；SKU不受此自动升版限制。');label.setWordWrap(True);layout.addWidget(label)
+        label=QLabel('请为以下普通父项选择或输入新的物料编码版本号。表格列出具体差异及其他主料引用方。\n启用物料历史记录后，除名称和规格外的物料属性、数量、位置、备注均检查父项编码升版；单纯新增、删除替代料、主替互换及排序不要求升版。\n确认后新版本立即显示在BOM缓存中，保存才写入数据库；SKU不受此自动升版限制。');label.setWordWrap(True);layout.addWidget(label)
         table=QTableWidget(len(conflicts),5);self.table=table;table.setHorizontalHeaderLabels(['父物料','移除的子料基础编码','新增的子料基础编码','引用此父物料的其他SKU / 历史版本','父物料新版本号']);table.setEditTriggers(QAbstractItemView.NoEditTriggers);table.setWordWrap(True)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)

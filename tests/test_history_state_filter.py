@@ -99,7 +99,7 @@ class HistoryStateFilterTests(unittest.TestCase):
   self.assertFalse(hs.current(self.new,choice,self.w.history_rows(),{}))
  def test_further_edits_can_preview_but_cannot_save_stale_scope(self):
   choice=self.w.choose_material_history(self.c,'删除替代料',self.p,rows=self.proposed())
-  edits={self.c:{**self.new.material_snapshot(self.c),'name':'later edit'}}
+  edits={self.c:{**self.new.material_snapshot(self.c),'name':'later edit','grade':'A'}}
   before=list(self.db.conn.iterdump())
   self.assertTrue(h.collect_conflicts(self.new,self.r,self.proposed(),edits,choice))
   self.assertFalse(hs.current(self.new,choice,self.proposed(),edits))
