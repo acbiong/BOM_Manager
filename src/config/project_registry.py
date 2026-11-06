@@ -7,7 +7,7 @@ from config.config_service import ConfigService,read_config_file
 
 FIELDS=('project_code','project_name','product_name','product_model')
 SETTINGS=('materials','import_mappings')
-HISTORY=('last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir')
+HISTORY=('last_import_dir','last_import_file','last_bom_import_dir','last_bom_import_file','last_compare_bom_file','last_export_dir')
 
 class ProjectRegistry:
  def __init__(self,config):self.config=config

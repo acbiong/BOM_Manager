@@ -1488,3 +1488,10 @@ WSLg原生保存差异专项10项亦通过，报告test_reports/pending_history_
 差异表明确列出存在差异的父项物料、差异子物料、差异说明、系统当前子BOM状态和待导入子BOM状态；系统来源显示物料库已保存定义，Excel来源显示父项物料与行号。新增/缺少子物料分别描述两边是否包含该子物料，数量、位置等差异标明字段及具体值，不再使用“来源一/来源二”。文件内部重复分支不一致仍以文件分支路径及行号对照，不误称系统数据。保持子结构不一致禁止导入、数据库与编辑草稿不变的规则。
 
 40项导入专项测试通过，新增显示回归覆盖父项身份、系统/导入数量、增加/缺失子物料及Excel行号。实际Qt窗口已检查差异行及文字，调整长表头避免截断。同步更新受影响的帮助说明与差异表静态截图，其余截图复用；原始业务数据库不修改。全量测试与发布结果见test_reports/finish_import_readability.log。
+
+
+## 2026-11-06：deepin导入文件预选记忆
+
+原因：物料和BOM入口仅保存目录，Windows选择器可能隐式恢复文件，而Linux不能依赖平台记忆。新增last_import_file、last_bom_import_file，与原目录键并存；统一相对路径、项目快照、切换恢复规则。重新打开明确传入完整文件路径，QFileDialog设置模式后显式setDirectory/selectFile；选中后即记忆（即使后续导入校验失败），取消不改变记忆。文件失效退回原目录，目录失效退回系统桌面/软件目录；兼容仅存目录的旧配置。SMB/file URI沿用本机挂载路径解析。
+
+7项路径专项通过，包括重启、项目切换、中文路径、SMB、失效回退、取消及实际Qt选择器；tools/check_import_file_selection.py使用临时文件在deepin/xcb实际验证两个入口的selectedFiles和文件名框并保存截图至test_reports/import_file_native。界面布局无变化，帮助文字更新、截图复用。业务数据库未修改。最终全量与打包见test_reports/finish_import_file_selection.log。

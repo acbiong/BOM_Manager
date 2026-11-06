@@ -122,6 +122,12 @@ class QFileDialog(ResultWindow,QtFileDialog):
         d.setFileMode(d.Directory if folder else d.AnyFile if save else d.ExistingFile)
         d.setAcceptMode(d.AcceptSave if save else d.AcceptOpen)
         if initialFilter:d.selectNameFilter(initialFilter)
+        # Qt/Linux does not reliably retain the constructor's filename after
+        # switching file mode. Restore it explicitly after dialog setup.
+        from pathlib import Path
+        initial=Path(directory) if directory else None
+        if not folder and not save and initial is not None and initial.is_file():
+            d.setDirectory(str(initial.parent));d.selectFile(initial.name)
         ok=d.exec_()==QtDialog.Accepted
         if sip.isdeleted(d):return '',''
         paths=d.selectedFiles() if ok else [];selected=d.selectedNameFilter();d.deleteLater()

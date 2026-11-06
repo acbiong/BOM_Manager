@@ -71,12 +71,12 @@ class ConfigService:
   return (self.base/self.relative_path(value)).resolve()
  def _normalize_paths(self,c,strict=True):
   if not c.has_section('database'):return
-  for key in ('path','last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir'):
+  for key in ('path','last_import_dir','last_import_file','last_bom_import_dir','last_bom_import_file','last_compare_bom_file','last_export_dir'):
    value=c['database'].get(key,'')
    if not value:continue
    try:c['database'][key]=self.relative_path(value)
    except ValueError:
-    if key in ('last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir'):c.remove_option('database',key)
+    if key in ('last_import_dir','last_import_file','last_bom_import_dir','last_bom_import_file','last_compare_bom_file','last_export_dir'):c.remove_option('database',key)
     elif strict:raise
  def save(self,c):
   self._normalize_paths(c)
@@ -95,7 +95,7 @@ class ConfigService:
       elif key not in before.get(section,{}) or proposed[section][key]!=before[section][key]:current[section][key]=proposed[section][key]
    # Persist changed chooser paths into the active project's snapshot immediately;
    # a later project activation must not restore an obsolete directory.
-   history=('last_import_dir','last_bom_import_dir','last_compare_bom_file','last_export_dir')
+   history=('last_import_dir','last_import_file','last_bom_import_dir','last_bom_import_file','last_compare_bom_file','last_export_dir')
    changed_paths=[k for k in history if proposed.get('database',{}).get(k)!= (before or {}).get('database',{}).get(k)]
    active=current.get('projects','active',fallback='');section='project:'+active
    if changed_paths and active and current.has_section(section):

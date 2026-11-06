@@ -21,7 +21,7 @@ from ui.material_search import MaterialSearchDialog, BomSearchDialog
 from ui.table_layout import fit_columns,batch_table_update
 from ui.about_dialog import AboutDialog
 from ui.frozen_table import FrozenMaterialTable
-from ui.import_paths import bom_import_directory, remember_bom_import
+from ui.import_paths import bom_import_directory, remember_bom_import, import_selection, remember_material_import
 from ui.replacement_selection import ReplacementSelectionDialog
 from ui.bom_view_state import preserve_bom_view
 from ui.bom_undo import BomUndo,undoable
@@ -657,11 +657,10 @@ class MainWindow(ProjectManagement,QMainWindow):
  def import_materials(self):
   owner=self._materials if self._materials is not None and self._materials.isVisible() else self
   config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent); cfg=config_service.load()
-  last=config_service.resolve_path(cfg['database']['last_import_dir']) if cfg['database'].get('last_import_dir') else Path.home()/'Desktop'
-  last=str(last if last.is_dir() else Path.home()/'Desktop')
+  last=import_selection(config_service,'materials')
   p=QFileDialog.getOpenFileName(owner,'导入物料清单',last,'Excel (*.xlsx)')[0]
   if p:
-    cfg['database']['last_import_dir']=str(Path(p).parent); config_service.save(cfg)
+    p=remember_material_import(config_service,p)
     try:sheet_name=choose_material_sheet(p,owner)
     except Exception as error:show_operation_error(owner,'导入失败',error); return
     def resolver(d,old):
@@ -1991,7 +1990,7 @@ class BomWindow(QMainWindow):
   if self.is_locked():return False
   if self.dirty and QMessageBox.question(self,'BOM未保存','导入成功后将替换当前编辑缓存，是否放弃当前未保存编辑并继续？')!=QMessageBox.Yes:return
   config_service=self.svc.config_service or ConfigService(Path(self.svc.db.path).parent)
-  p=QFileDialog.getOpenFileName(self,'导入BOM',bom_import_directory(config_service),'Excel (*.xlsx)')[0]
+  p=QFileDialog.getOpenFileName(self,'导入BOM',import_selection(config_service),'Excel (*.xlsx)')[0]
   if not p:return
   try:
    p=remember_bom_import(config_service,p)

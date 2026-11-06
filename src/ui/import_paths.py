@@ -57,7 +57,7 @@ def bom_import_directory(config):
 
 def remember_bom_import(config,selected):
     path=local_import_path(selected)
-    cfg=config.load();cfg['database']['last_bom_import_dir']=str(path.parent);config.save(cfg)
+    cfg=config.load();cfg['database']['last_bom_import_dir']=str(path.parent);cfg['database']['last_bom_import_file']=str(path);config.save(cfg)
     return str(path)
 
 
@@ -76,4 +76,25 @@ def external_bom_selection(config):
 def remember_external_bom(config,selected):
     path=local_import_path(selected)
     cfg=config.load();cfg['database']['last_compare_bom_file']=str(path);config.save(cfg)
+    return str(path)
+
+
+def import_selection(config,kind='bom'):
+    """Restore the selected workbook explicitly instead of relying on OS history."""
+    file_key,dir_key=('last_bom_import_file','last_bom_import_dir') if kind=='bom' else ('last_import_file','last_import_dir')
+    settings=config.load()['database']
+    for key,is_file in ((file_key,True),(dir_key,False)):
+        if not settings.get(key):continue
+        try:
+            path=config.resolve_path(settings[key])
+            if (path.is_file() if is_file else path.is_dir()):return str(path)
+        except (OSError,ValueError):pass
+    from PyQt5.QtCore import QStandardPaths
+    desktop=Path(QStandardPaths.writableLocation(QStandardPaths.DesktopLocation) or str(Path.home()/'Desktop'))
+    return str(desktop if desktop.is_dir() else config.base)
+
+
+def remember_material_import(config,selected):
+    path=local_import_path(selected)
+    cfg=config.load();cfg['database']['last_import_dir']=str(path.parent);cfg['database']['last_import_file']=str(path);config.save(cfg)
     return str(path)

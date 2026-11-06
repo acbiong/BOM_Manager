@@ -37,6 +37,32 @@ class BomImportPathTests(unittest.TestCase):
   db=Database(str(self.base/'db'));s=Services(db,self.config);mid=s.create_material(dict(base_code='R',version='1',name='R',unit='pcs'));sid=s.create_sku(mid);main=MainWindow(s);w=main.open_bom_id(sid)
   try:
    with patch.object(QFileDialog,'getOpenFileName',return_value=(str(self.file),'')),patch.object(QMessageBox,'warning'):w.import_bom()
-   with patch.object(QFileDialog,'getOpenFileName',return_value=('','')) as chooser:w.import_bom();self.assertEqual(chooser.call_args.args[2],str(self.folder))
+   with patch.object(QFileDialog,'getOpenFileName',return_value=('','')) as chooser:w.import_bom();self.assertEqual(chooser.call_args.args[2],str(self.file))
    self.assertEqual(bom_import_directory(self.config),str(self.folder));self.assertFalse(w.dirty)
   finally:w.close();main.close();db.close()
+
+ def test_file_memory_portable_independent_and_missing_file_fallback(self):
+  from ui.import_paths import import_selection,remember_material_import
+  from config.project_registry import ProjectRegistry
+  import shutil
+  registry=ProjectRegistry(self.config);key=registry.remember(self.config.base/'one.db',{},active=True)
+  other=self.folder/'物料.xlsx';other.touch()
+  remember_bom_import(self.config,self.file);remember_material_import(self.config,other)
+  alternate=registry.remember(self.config.base/'two.db',{},settings={'database':{}})
+  registry.activate(alternate);registry.activate(key)
+  reopened=ConfigService(self.config.base)
+  self.assertEqual(import_selection(reopened),str(self.file))
+  self.assertEqual(import_selection(reopened,'materials'),str(other))
+  self.assertFalse(Path(reopened.load()['database']['last_bom_import_file']).is_absolute())
+  self.file.unlink();self.assertEqual(import_selection(reopened),str(self.folder))
+  self.assertEqual(import_selection(reopened,'materials'),str(other))
+ def test_real_qt_chooser_preselects_filename_after_setup(self):
+  from PyQt5.QtCore import QTimer
+  seen=[]
+  def inspect():
+   for dialog in self.app.topLevelWidgets():
+    if isinstance(dialog,QFileDialog) and dialog.isVisible():
+     seen.extend(dialog.selectedFiles());dialog.reject()
+  QTimer.singleShot(200,inspect)
+  result=QFileDialog.getOpenFileName(None,'导入BOM',str(self.file),'Excel (*.xlsx)')
+  self.assertEqual(result[0],'');self.assertEqual(seen,[str(self.file)])
