@@ -36,21 +36,3 @@ class AlternateIdleTests(unittest.TestCase):
     db.conn.execute('INSERT INTO alternates(bom_item_id,material_id,sort_no) VALUES(99999,?,0)',(ids['ALT'],));db.conn.commit();self.assertEqual(flag(),'Y')
    finally:window.close();db.close()
 
- def test_all_history_children_keep_material_non_idle_and_reverse_visible(self):
-  import json
-  from services import material_history as history
-  with tempfile.TemporaryDirectory() as tmp:
-   db=Database(str(Path(tmp)/'db'));s=Services(db)
-   root=s.create_material(dict(base_code='ROOT',version='100',name='ROOT',unit='pcs'))
-   child=s.create_material(dict(base_code='CHILD',version='100',name='CHILD',unit='pcs'))
-   sid=s.create_sku(root);history.initialize(db)
-   from services.snapshot_bom import migrate as migrate_snapshot
-   migrate_snapshot(db)
-   attrs=s.material_snapshot(root);edges=[dict(material_id=child,quantity=1,unit='pcs',position='',remark='',alternates=[],history_version=100)]
-   with db.transaction():
-    db.conn.execute('INSERT INTO material_histories VALUES(?,?,?,?,?,?)',(root,101,history.encode(attrs),history.encode(edges),attrs.get('created_at',''),sid))
-    db.conn.execute('INSERT INTO material_history_bindings VALUES(?,?,?)',(sid,root,101))
-   self.assertEqual(next(r['idle'] for r in s.materials() if r['id']==child),'N')
-   from services.bom_maintenance import actual_material_usage
-   self.assertTrue(any(r['focus_material_id']==child and r.get('history_version')==101 for r in actual_material_usage(s,child)))
-   db.close()

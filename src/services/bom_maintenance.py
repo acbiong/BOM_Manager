@@ -6,68 +6,50 @@ from pathlib import Path
 from services.mirrors import table_name
 
 
-def actual_material_usage(service,material_id):
-    primary=getattr(service,'primary',service);result=[];seen=set()
-    def label(mid):
-        material=primary.material_snapshot(mid)
-        return material.get('base_code','')+material.get('version','')+' '+material.get('name','')
+def sku_usage_graphs(service):
+    """Each SKU history owns its reachable graph; catalog/history caches aren't owners."""
+    primary=getattr(service,'primary',service)
     for sku in primary.skus():
         scoped=primary.for_sku(sku['id'])
+        rows=list(scoped.db.conn.execute('SELECT id,parent_material_id,child_material_id AS material_id FROM material_bom_items ORDER BY sort_no,id'))
+        alts={};graph={}
+        for row in scoped.db.conn.execute('SELECT bom_item_id,material_id FROM alternates ORDER BY sort_no,id'):
+            alts.setdefault(row[0],[]).append(row[1])
+        for row in rows:graph.setdefault(row['parent_material_id'],[]).append(row)
+        used=set();relations=set();pending=[sku['material_id']]
+        while pending:
+            mid=pending.pop()
+            if mid in used:continue
+            used.add(mid)
+            for row in graph.get(mid,[]):
+                relations.add(row['id']);pending.append(row['material_id']);pending.extend(alts.get(row['id'],()))
+        yield sku,scoped,used,[r for r in rows if r['id'] in relations],alts
+
+
+def actual_used_materials(service):
+    used=set()
+    for _,_,materials,_,_ in sku_usage_graphs(service):used.update(materials)
+    return used
+
+
+def actual_material_usage(service,material_id):
+    result=[];seen=set()
+    for sku,scoped,used,rows,alts in sku_usage_graphs(service):
+        if material_id not in used:continue
+        def label(mid):
+            material=scoped.material_snapshot(mid)
+            return material.get('base_code','')+material.get('version','')+' '+material.get('name','')
         sku_label=f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}"
         if sku['material_id']==material_id:
             result.append(dict(sku_id=sku['id'],sku=sku_label,parent='SKU根节点（无父级）'))
-        alternatives={r[0] for r in scoped.db.conn.execute('SELECT bom_item_id FROM alternates WHERE material_id=?',(material_id,))}
-        _,reachable_ids=reachable_relations(scoped.db.conn,'material_bom_items','alternates',[sku['material_id']])
-        for row in scoped.db.conn.execute('SELECT id,parent_material_id,child_material_id AS material_id FROM material_bom_items ORDER BY sort_no,id'):
-            if row['id'] not in reachable_ids:continue
-            alternate=row['id'] in alternatives
+        for row in rows:
+            alternate=material_id in alts.get(row['id'],())
             if row['material_id']!=material_id and not alternate:continue
-            key=(sku['id'],row['parent_material_id'],row['material_id'] if alternate else None)
+            key=(sku['id'],row['parent_material_id'],row['material_id'],alternate)
             if key in seen:continue
-            seen.add(key)
-            parent_label=label(row['parent_material_id'])
+            seen.add(key);parent_label=label(row['parent_material_id'])
             if alternate:parent_label+='（作为 '+label(row['material_id'])+' 的替代料）'
             result.append(dict(sku_id=sku['id'],sku=sku_label,parent=parent_label,parent_id=row['parent_material_id'],focus_material_id=row['material_id']))
-    # Historical definitions are independent of the latest mirror usage index.
-    # Include every bound SKU history and its direct/alternate children so reverse
-    # lookup and idle detection do not hide older BOM revisions.
-    try:
-        history_rows=primary.db.conn.execute('SELECT b.sku_id,b.material_id,b.history_version,h.attributes,h.children\n            FROM material_history_bindings b JOIN material_histories h\n              ON h.material_id=b.material_id AND h.history_version=b.history_version\n            ORDER BY b.sku_id,b.material_id,b.history_version').fetchall()
-        for binding in history_rows:
-            attrs=json.loads(binding['attributes']); parent_label=attrs.get('base_code','')+attrs.get('version','')+' '+attrs.get('name','')
-            sku_row=next((x for x in primary.skus() if x['id']==binding['sku_id']),None)
-            if sku_row is None:continue
-            sku_label=f"{sku_row['base_code']}{sku_row['version']} {sku_row['name']} 历史版本{sku_row['mirror_version']}"
-            for child in json.loads(binding['children'] or '[]'):
-                child_id=int(child.get('material_id'))
-                alternatives=[int(a.get('material_id')) for a in child.get('alternates',[]) if a.get('material_id') is not None]
-                targets=[(child_id,False)]+[(aid,True) for aid in alternatives]
-                for target_id,alternate in targets:
-                    if target_id!=material_id:continue
-                    key=(binding['sku_id'],binding['material_id'],target_id,binding['history_version'],alternate)
-                    if key in seen:continue
-                    seen.add(key)
-                    display_parent=parent_label+('（作为 '+label(target_id)+' 的替代料）' if alternate else '')
-                    result.append(dict(sku_id=binding['sku_id'],sku=sku_label,parent=display_parent,parent_id=binding['material_id'],focus_material_id=target_id,history_version=binding['history_version']))
-    except sqlite3.OperationalError:
-        pass
-    # Public BOM rows can remain valid for an older SKU history even when the
-    # latest mirror index has moved to another material version. Associate those
-    # rows with every SKU whose public tree reaches the parent.
-    try:
-        public_seen={}
-        for sku in primary.skus():
-            _,reachable_ids=reachable_relations(primary.db.conn,'material_bom_items','alternates',[sku['material_id']])
-            public_seen[sku['id']]=reachable_ids
-        for row in primary.db.conn.execute('SELECT id,parent_material_id,child_material_id FROM material_bom_items WHERE child_material_id=?',(material_id,)):
-            for sku in primary.skus():
-                if row['id'] not in public_seen.get(sku['id'],set()):continue
-                key=(sku['id'],row['parent_material_id'],material_id,'public',False)
-                if key in seen:continue
-                seen.add(key); parent_label=label(row['parent_material_id'])
-                result.append(dict(sku_id=sku['id'],sku=f"{sku['base_code']}{sku['version']} {sku['name']} 历史版本{sku['mirror_version']}",parent=parent_label,parent_id=row['parent_material_id'],focus_material_id=material_id))
-    except sqlite3.OperationalError:
-        pass
     return result
 
 

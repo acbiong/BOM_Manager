@@ -103,11 +103,7 @@ class Services:
   self.publish({'type':'sku_lock_changed','id':sid})
  def materials(self,query=''):
   # 自身有下阶仅决定has_bom；SKU、有效BOM主料或替代料引用均为非呆滞。
-  q=f'%{query}%'; has_history=bool(self.db.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='material_histories'").fetchone())
-  history_clause=" OR EXISTS(SELECT 1 FROM material_histories h JOIN json_each(h.children) c WHERE CAST(json_extract(c.value,'$.material_id') AS INTEGER)=m.id) OR EXISTS(SELECT 1 FROM material_histories h JOIN json_each(h.children) c JOIN json_each(COALESCE(json_extract(c.value,'$.alternates'),'[]')) a WHERE CAST(json_extract(a.value,'$.material_id') AS INTEGER)=m.id)" if has_history else ''
-  rows=self.db.conn.execute(f"""SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id WHERE u.parent_id=m.id AND u.role="main") THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id)
-       {history_clause}
-       THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version""",(q,q)).fetchall()
+  q=f'%{query}%'; rows=self.db.conn.execute('SELECT m.id,m.base_code,m.version,m.name,m.description,m.unit,m.grade,m.manufacturer,m.mpn,m.mp_flag,m.has_bom AS stored_has_bom,m.created_at,m.updated_at,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.parent_material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u JOIN skus s ON s.id=u.sku_id WHERE u.parent_id=m.id AND u.role="main") THEN "Y" ELSE "N" END AS has_bom,CASE WHEN EXISTS(SELECT 1 FROM material_bom_items b WHERE b.child_material_id=m.id) OR EXISTS(SELECT 1 FROM alternates a JOIN material_bom_items b ON b.id=a.bom_item_id WHERE a.material_id=m.id) OR EXISTS(SELECT 1 FROM mirror_material_usage u WHERE u.material_id=m.id) OR EXISTS(SELECT 1 FROM skus s WHERE s.material_id=m.id) THEN "N" ELSE "Y" END AS idle FROM materials m WHERE base_code LIKE ? OR name LIKE ? ORDER BY base_code,version',(q,q)).fetchall()
   from services.material_history import enabled as histories_enabled
   if histories_enabled(self):
    counts={r[0]:(r[1],r[2]) for r in self.db.conn.execute('SELECT h.material_id,c.history_version,COUNT(*) FROM material_histories h JOIN material_history_current c ON c.material_id=h.material_id GROUP BY h.material_id')}
@@ -118,6 +114,9 @@ class Services:
    used=latest_usage(self)
    from services.current_catalog import enabled as catalog_enabled
    if catalog_enabled(self):
+    from services.bom_maintenance import actual_used_materials
+    all_used=actual_used_materials(self)
+    rows=[dict(row,idle='N' if row['id'] in all_used else 'Y') for row in rows]
     primary=getattr(self,'primary',self)
     parents={r[0] for r in primary.db.conn.execute('SELECT DISTINCT parent_material_id FROM material_bom_items')}
     from services.current_catalog import material_structure_sources

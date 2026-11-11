@@ -79,3 +79,33 @@ class BomMaintenanceTests(unittest.TestCase):
   cleanup_orphan_boms(self.s)
   self.assertTrue(scoped.db.conn.execute('SELECT 1 FROM material_bom_items WHERE parent_material_id=? AND child_material_id=?',(self.a,self.x)).fetchone())
   self.assertEqual(self.s.material_usage(self.x)[0]['sku_id'],self.sid)
+
+ def test_reverse_and_idle_ignore_stale_public_history_and_index(self):
+  from services import material_history as history
+  history.initialize(self.db)
+  newer=self.s.create_material(dict(base_code='C',version='2',name='new child',unit='pcs'))
+  scoped=self.s.for_sku(self.sid)
+  with self.db.transaction():
+   scoped.db.conn.execute('UPDATE material_bom_items SET child_material_id=? WHERE child_material_id=?',(newer,self.c))
+   # Public catalog, immutable history and usage index deliberately remain stale.
+  refs=self.s.material_usage(newer)
+  self.assertEqual(len(refs),1);self.assertEqual(refs[0]['sku_id'],self.sid)
+  self.assertEqual(self.s.material_usage(self.c),[])
+  flags={r['id']:r['idle'] for r in self.s.materials()}
+  self.assertEqual(flags[self.c],'Y');self.assertEqual(flags[newer],'N')
+  self.assertEqual(len(self.s.material_usage(self.a)),1)
+  self.assertEqual(self.s.material_usage(self.a)[0]['focus_material_id'],newer)
+
+ def test_all_actual_sku_histories_remain_distinct_and_no_duplicate_sources(self):
+  from services import material_history as history
+  history.initialize(self.db)
+  copied=self.s.copy_sku_bom(self.sid)
+  newer=self.s.create_material(dict(base_code='C',version='2',name='new child',unit='pcs'))
+  with self.db.transaction():
+   self.s.for_sku(copied).db.conn.execute('UPDATE material_bom_items SET child_material_id=? WHERE child_material_id=?',(newer,self.c))
+  refs=self.s.material_usage(self.c);newrefs=self.s.material_usage(newer)
+  self.assertEqual([r['sku_id'] for r in refs],[self.sid])
+  self.assertEqual([r['sku_id'] for r in newrefs],[copied])
+  self.assertIn('历史版本100',refs[0]['sku']);self.assertIn('历史版本101',newrefs[0]['sku'])
+  self.assertEqual(len(self.s.material_usage(self.p)),2)
+  self.assertEqual({r['id']:r['idle'] for r in self.s.materials()}[self.c],'N')
