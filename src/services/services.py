@@ -458,18 +458,8 @@ class Services:
     if mid not in material_cache:material_cache[mid]=self.material_snapshot(mid)
     material=material_cache[mid]
     return material.get('base_code','')+material.get('version','')+' '+material.get('name','')
-   # 按父项+子物料配对位置变化，避免一处位置修改被写成删除和新增两条。
-   remaining=set(after); pairs=[]
-   for key,before in old.items():
-    checkpoint()
-    target=key if key in remaining else None
-    if target is None:
-     candidates=[candidate for candidate in remaining if candidate[:2]==key[:2] and candidate not in old]
-     old_candidates=[candidate for candidate in old if candidate[:2]==key[:2] and candidate not in after]
-     if len(candidates)==len(old_candidates)==1:target=candidates[0]
-    if target is not None:remaining.remove(target)
-    pairs.append((key,before,target,after.get(target)))
-   pairs.extend((key,None,key,after[key]) for key in after if key in remaining)
+   from services.bom_log_diff import pair_edges
+   pairs=pair_edges(old,after,self.material_snapshot,getattr(self,'_log_revision_mapping',{}))
    # A new isolated SKU has no saved tree or prior BOM change history.
    # Summarize its first population once; later clear/reimport remains detailed.
    initial_bom=(bool(getattr(self,'scope_id',0)) and not old_rows and bool(items)
@@ -486,6 +476,8 @@ class Services:
     if before is None:detail.append(f"新增物料；数量：{format_quantity(current['quantity'])}；单位：{current['unit']}；备注：{current['remark']}")
     elif current is None:detail.append('删除物料（含关系属性及替代料）')
     else:
+     if before['child_material_id']!=current['child_material_id']:
+      detail.append('物料版本更新：'+label(before['child_material_id'])+' → '+label(current['child_material_id']))
      for field,title in [('position','位置'),('quantity','数量'),('unit','单位'),('remark','备注')]:
       checkpoint()
       if before[field]!=current[field]:detail.append(f'{title}：{before[field] or "（空）"} → {current[field] or "（空）"}')
@@ -498,8 +490,9 @@ class Services:
      checkpoint()
      if mid not in following:detail.append('删除替代料：'+label(mid))
     if not detail:continue
-    description='父项：'+label(key[0])+'\n物料：'+label(key[1])+'\n物料位置：'+(key[2] or '（未填写）')+'\n'+'\n'.join(detail)
-    self.log('bom',key[0],'update',description,snapshot=self.material_snapshot(key[1]))
+    display_key=target if current is not None else key
+    description='父项：'+label(display_key[0])+'\n物料：'+label(display_key[1])+'\n物料位置：'+(key[2] or '（未填写）')+'\n'+'\n'.join(detail)
+    self.log('bom',display_key[0],'update',description,snapshot=self.material_snapshot(display_key[1]))
     log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     for affected,contained in log_roots.items():
      checkpoint()
@@ -972,6 +965,7 @@ class Services:
     change_type=first.strip();detail=remainder if separator else ''
    if row['object_type']=='bom':
     types=[]
+    if any(line.startswith('物料版本更新：') for line in detail.splitlines()):types.append('物料版本更新')
     if any(line.startswith('新增物料') for line in detail.splitlines()):types.append('新增物料')
     if any(line.startswith('删除物料') for line in detail.splitlines()):types.append('删除物料')
     if any(line.startswith(('数量：','单位：','备注：','位置：')) and ' → ' in line for line in detail.splitlines()):types.append('修改物料')

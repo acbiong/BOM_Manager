@@ -205,8 +205,12 @@ def save_with_revisions(service,root,items,versions,progress=None,required=None)
             rows.append(row)
         previous_approved=getattr(service,'_history_revision_approved',None)
         service._history_revision_approved=set(mapping.values())|set(previous_approved or ())
+        previous_log_mapping=getattr(service,'_log_revision_mapping',None)
+        service._log_revision_mapping=mapping
         try:service.save_bom(mapping.get(root,root),rows,progress=progress)
         finally:
+            if previous_log_mapping is None:del service._log_revision_mapping
+            else:service._log_revision_mapping=previous_log_mapping
             if previous_approved is None:del service._history_revision_approved
             else:service._history_revision_approved=previous_approved
     service.publish({'type':'material_changed','ids':list(mapping.values())})
