@@ -470,7 +470,17 @@ class Services:
     if target is not None:remaining.remove(target)
     pairs.append((key,before,target,after.get(target)))
    pairs.extend((key,None,key,after[key]) for key in after if key in remaining)
+   # A new isolated SKU has no saved tree or prior BOM change history.
+   # Summarize its first population once; later clear/reimport remains detailed.
+   initial_bom=(bool(getattr(self,'scope_id',0)) and not old_rows and bool(items)
+                and not self.db.conn.execute("SELECT 1 FROM change_logs WHERE object_type='bom' AND (object_id=? OR id IN (SELECT log_id FROM bom_log_roots WHERE root_id=?)) LIMIT 1",(root,root)).fetchone())
+   if initial_bom:
+    count=len(self.bom(root))  # tree occurrences, excluding root and alternatives
+    self.log('bom',root,'create',f'新创建BOM，包含{count}个物料',snapshot=self.material_snapshot(root))
+    log_id=self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+    self.db.conn.execute('INSERT OR IGNORE INTO bom_log_roots(log_id,root_id) VALUES(?,?)',(log_id,root))
    for key,before,target,current in pairs:
+    if initial_bom:continue
     checkpoint()
     detail=[]
     if before is None:detail.append(f"新增物料；数量：{format_quantity(current['quantity'])}；单位：{current['unit']}；备注：{current['remark']}")
@@ -967,7 +977,7 @@ class Services:
     if any(line.startswith(('数量：','单位：','备注：','位置：')) and ' → ' in line for line in detail.splitlines()):types.append('修改物料')
     if '新增替代料：' in detail:types.append('新增替代料')
     if '删除替代料：' in detail:types.append('删除替代料')
-    change_type='、'.join(types) or ('删除物料' if row['action']=='delete' else '修改物料')
+    change_type='新建BOM' if row['action']=='create' and detail.startswith('新创建BOM，包含') else ('、'.join(types) or ('删除物料' if row['action']=='delete' else '修改物料'))
    if row['object_type']=='material' and row['action']=='create':detail=''
    changed=seconds_timestamp(row['changed_at'])
    sheet.append([number,changed[:10],changed[11:],code,name,change_type,detail])
